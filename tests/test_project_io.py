@@ -1,0 +1,100 @@
+"""Tests for core.project_io -- pure Python (no Qt/cv2)."""
+
+import os
+import sys
+import tempfile
+
+import pytest
+
+sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
+
+from pagewright.core import project_io as pio  # noqa: E402
+from pagewright.model import Contour, Project, Style, TracedObject  # noqa: E402
+
+
+def _sample_project():
+    p = Project()
+    p.source_image_path = "/photos/IMG.png"
+    p.pixel_width, p.pixel_height, p.dpi = 3636, 3770, 300
+    p.calibration.mm_per_pixel = 0.123
+    p.calibration.display_unit = "cm"
+    p.margin_mm = 7.5
+    o1 = TracedObject(name="Polygon 1",
+                      style=Style(stroke="#ff0000", stroke_width_mm=0.8))
+    o1.contours.append(Contour(points=[(0, 0), (100, 0), (100, 100), (0, 100)],
+                               role="outer"))
+    o1.contours.append(Contour(points=[(30, 30), (70, 30), (70, 70), (30, 70)],
+                               role="hole"))
+    o2 = TracedObject(name="Polygon 2")
+    o2.contours.append(Contour(points=[(200, 200), (260, 210), (240, 300)],
+                               role="outer"))
+    p.objects = [o1, o2]
+    return p
+
+
+def test_dict_round_trip_preserves_everything():
+    p = _sample_project()
+    p2 = pio.project_from_dict(pio.project_to_dict(p))
+    assert p2.source_image_path == "/photos/IMG.png"
+    assert (p2.pixel_width, p2.pixel_height, p2.dpi) == (3636, 3770, 300)
+    assert p2.calibration.mm_per_pixel == pytest.approx(0.123)
+    assert p2.calibration.display_unit == "cm"
+    assert p2.margin_mm == pytest.approx(7.5)
+    assert [o.name for o in p2.objects] == ["Polygon 1", "Polygon 2"]
+    assert p2.objects[0].style.stroke == "#ff0000"
+    assert [c.role for c in p2.objects[0].contours] == ["outer", "hole"]
+    assert p2.objects[0].contours[0].points[2] == (100.0, 100.0)
+
+
+def test_file_round_trip_is_stable():
+    p = _sample_project()
+    fp = tempfile.mktemp(suffix=".tiproj.json")
+    pio.save_project(p, fp)
+    p3 = pio.load_project(fp)
+    assert pio.project_to_dict(p3) == pio.project_to_dict(p)
+
+
+def test_uncalibrated_round_trip():
+    p = Project()
+    d = pio.project_to_dict(p)
+    p2 = pio.project_from_dict(d)
+    assert p2.calibration.mm_per_pixel is None
+    assert p2.objects == []
+
+
+def test_tiling_round_trip():
+    p = _sample_project()
+    p.tiling = {"page": "A4", "landscape": True, "margin_mm": 8.0,
+                "overlap_mm": 15.0, "scale_percent": 75, "embed_photo": True,
+                "crop_photo": True, "filled": True}
+    p2 = pio.project_from_dict(pio.project_to_dict(p))
+    assert p2.tiling == p.tiling
+
+
+def test_missing_tiling_gets_defaults():
+    from pagewright.model import default_tiling
+    p = _sample_project()
+    d = pio.project_to_dict(p)
+    d.pop("tiling")                       # simulate an older project file
+    assert pio.project_from_dict(d).tiling == default_tiling()
+
+
+def test_partial_tiling_merges_defaults():
+    p = _sample_project()
+    d = pio.project_to_dict(p)
+    d["tiling"] = {"page": "Legal"}
+    t = pio.project_from_dict(d).tiling
+    assert t["page"] == "Legal" and t["overlap_mm"] == 10.0
+
+
+def test_unsupported_version_raises():
+    with pytest.raises(pio.ProjectIOError):
+        pio.project_from_dict({"version": 999})
+
+
+def test_bad_file_raises():
+    bad = tempfile.mktemp(suffix=".json")
+    with open(bad, "w") as fh:
+        fh.write("{not valid json")
+    with pytest.raises(pio.ProjectIOError):
+        pio.load_project(bad)
