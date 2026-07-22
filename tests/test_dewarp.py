@@ -151,7 +151,68 @@ def test_move_handle_updates_model():
 
 
 # ---------------------------------------------------------------------------
-# Detection and dewarp
+# Quad (4-point) perspective dewarp
+# ---------------------------------------------------------------------------
+
+def test_order_points_orders_tl_tr_br_bl():
+    # deliberately scrambled input
+    pts = [(560, 360), (120, 80), (90, 330), (520, 110)]
+    rect = dw.order_points(pts)
+    assert rect.tolist() == [[120, 80], [520, 110], [560, 360], [90, 330]]
+
+
+def test_order_points_requires_four():
+    with pytest.raises(ValueError):
+        dw.order_points([(0, 0), (1, 1), (2, 2)])
+
+
+def test_dewarp_quad_crop_shape_and_content():
+    img = np.zeros((400, 600, 3), np.uint8)
+    img[:, 300:] = 255
+    # axis-aligned selection: left dark, right bright, preserved after warp
+    pts = [(100, 80), (500, 80), (500, 320), (100, 320)]
+    out = dw.dewarp_quad(img, pts, 300, 200, full_image=False)
+    assert out.shape == (200, 300, 3)
+    assert out[:, 5].mean() < 60
+    assert out[:, -5].mean() > 195
+
+
+def test_dewarp_quad_axis_aligned_is_identity_like():
+    # selecting an axis-aligned rectangle and asking for its own pixel
+    # size should reproduce that crop. Use a smooth low-frequency ramp so
+    # the tiny (span -> span-1) rescale + interpolation stays small.
+    yy, xx = np.mgrid[0:400, 0:600].astype(np.float32)
+    ramp = (0.4 * xx + 0.3 * yy)
+    ramp = (ramp / ramp.max() * 255).astype(np.uint8)
+    img = np.dstack([ramp, ramp, ramp])
+    x0, y0, x1, y1 = 100, 50, 400, 250
+    pts = [(x0, y0), (x1, y0), (x1, y1), (x0, y1)]
+    out = dw.dewarp_quad(img, pts, x1 - x0, y1 - y0, full_image=False)
+    ref = img[y0:y1, x0:x1]
+    assert out.shape == ref.shape
+    assert np.abs(out.astype(int) - ref.astype(int)).mean() < 2.0
+
+
+def test_dewarp_quad_full_image_is_larger_and_unclipped():
+    img = np.full((300, 400, 3), 128, np.uint8)
+    pts = [(120, 80), (300, 100), (320, 240), (90, 220)]
+    crop = dw.dewarp_quad(img, pts, 200, 150, full_image=False)
+    full = dw.dewarp_quad(img, pts, 200, 150, full_image=True)
+    assert crop.shape == (150, 200, 3)
+    # full-image canvas contains the whole warped image, so it is bigger
+    assert full.shape[0] >= crop.shape[0] and full.shape[1] >= crop.shape[1]
+    assert full.shape[0] > 150 or full.shape[1] > 200
+
+
+def test_dewarp_quad_rejects_tiny_output():
+    img = np.zeros((100, 100, 3), np.uint8)
+    pts = [(10, 10), (90, 10), (90, 90), (10, 90)]
+    with pytest.raises(ValueError):
+        dw.dewarp_quad(img, pts, 1, 50)
+
+
+# ---------------------------------------------------------------------------
+# Detection and curved-page dewarp
 # ---------------------------------------------------------------------------
 
 def _synthetic_page(bg=20, fg=235):

@@ -464,7 +464,83 @@ def detect_page(gray, roi=None):
 
 
 # ---------------------------------------------------------------------------
-# Dewarp
+# Quad (4-point) perspective dewarp - the simple straight-corner case
+# ---------------------------------------------------------------------------
+
+def order_points(pts):
+    """Order four points as [top-left, top-right, bottom-right,
+    bottom-left]. Sort by y (top two vs bottom two), then by x within
+    each pair. Matches the original dewarp app's ordering so quad
+    selections behave identically."""
+    pts = np.asarray(pts, dtype=np.float32)
+    if pts.shape != (4, 2):
+        raise ValueError("order_points needs exactly 4 (x, y) points")
+    sorted_by_y = pts[np.argsort(pts[:, 1])]
+    top = sorted_by_y[:2]
+    top = top[np.argsort(top[:, 0])]
+    tl, tr = top
+    bottom = sorted_by_y[2:]
+    bottom = bottom[np.argsort(bottom[:, 0])]
+    bl, br = bottom
+    return np.array([tl, tr, br, bl], dtype=np.float32)
+
+
+def dewarp_quad(image, points, out_w, out_h, full_image=False,
+                interp=cv2.INTER_LINEAR):
+    """Perspective-rectify a quadrilateral selection.
+
+    points   four (x, y) corners in any order (ordered internally)
+    out_w,   the rectified size of the SELECTED quad in output pixels
+    out_h    (e.g. from real-world mm at a chosen DPI)
+    full_image
+        False -> "crop" mode: output is exactly the rectified quad,
+                 out_h x out_w.
+        True  -> "full image" mode: the same quad-to-rectangle mapping is
+                 applied to the WHOLE image; the output canvas is enlarged
+                 (and offset) so no part of the transformed image is
+                 clipped. The selected quad still measures out_w x out_h
+                 within that larger canvas.
+
+    Returns the rectified image (same channel layout as the input).
+    """
+    out_w = int(round(out_w))
+    out_h = int(round(out_h))
+    if out_w < 2 or out_h < 2:
+        raise ValueError("output size must be at least 2x2 px")
+    rect = order_points(points)
+
+    if not full_image:
+        dst = np.array([[0, 0], [out_w - 1, 0],
+                        [out_w - 1, out_h - 1], [0, out_h - 1]],
+                       dtype=np.float32)
+        M = cv2.getPerspectiveTransform(rect, dst)
+        return cv2.warpPerspective(image, M, (out_w, out_h), flags=interp)
+
+    # full-image mode: find where the whole image lands, then offset
+    img_h, img_w = image.shape[:2]
+    temp_dst = np.array([[0, 0], [out_w - 1, 0],
+                         [out_w - 1, out_h - 1], [0, out_h - 1]],
+                        dtype=np.float32)
+    m_temp = cv2.getPerspectiveTransform(rect, temp_dst)
+    corners = np.array([[0, 0], [img_w - 1, 0],
+                        [img_w - 1, img_h - 1], [0, img_h - 1]],
+                       dtype=np.float32).reshape(-1, 1, 2)
+    warped = cv2.perspectiveTransform(corners, m_temp).reshape(-1, 2)
+    min_x = int(np.floor(warped[:, 0].min()))
+    max_x = int(np.ceil(warped[:, 0].max()))
+    min_y = int(np.floor(warped[:, 1].min()))
+    max_y = int(np.ceil(warped[:, 1].max()))
+    canvas_w, canvas_h = max_x - min_x, max_y - min_y
+    ox, oy = -min_x, -min_y
+    dst = np.array([[ox, oy], [ox + out_w - 1, oy],
+                    [ox + out_w - 1, oy + out_h - 1],
+                    [ox, oy + out_h - 1]], dtype=np.float32)
+    M = cv2.getPerspectiveTransform(rect, dst)
+    return cv2.warpPerspective(image, M, (canvas_w, canvas_h), flags=interp)
+
+
+# ---------------------------------------------------------------------------
+# Curved-page dewarp (spline model)
 # ---------------------------------------------------------------------------
 
 def _h_apply(M, pts):
