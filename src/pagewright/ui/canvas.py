@@ -419,14 +419,6 @@ class Canvas(QGraphicsView):
         self.centerOn(rect.center())
         self._scale = self.transform().m11()
 
-    def center_on_rect(self, rect):
-        """Center the view on `rect` WITHOUT changing the zoom level. Pans
-        so the rect's center sits at the viewport center; near an image
-        edge it centers only as far as the scene rect allows."""
-        if self._photo_item is None:
-            return
-        self.centerOn(rect.center())
-
     # ----- mouse events ----------------------------------------------------
 
     def mouseMoveEvent(self, event):

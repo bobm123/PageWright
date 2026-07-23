@@ -295,13 +295,13 @@ class MainWindow(QMainWindow):
         self._refresh_editability()
         self._refresh_undo_actions()
         self.statusBar().showMessage(
-            "Drag a box to center it and limit tracing to that area "
+            "Drag a box to zoom to it and limit tracing to that area "
             "(click once to clear it).", 6000)
 
     def _on_roi_selected(self, rect):
-        """A trace area was dragged out: center it (keeping the current
-        zoom) and go back to panning."""
-        self.canvas.center_on_rect(rect)
+        """A trace area was dragged out: zoom so it fills the window
+        (centered) and go back to panning."""
+        self.canvas.zoom_to_rect(rect)
         self.act_mode_pan.setChecked(True)
         self._mode_pan()
         self.statusBar().showMessage(
