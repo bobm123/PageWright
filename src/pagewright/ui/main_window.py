@@ -26,6 +26,7 @@ from ..core import undo
 from ..model import Project
 from . import app_actions
 from .canvas import Canvas
+from .dewarp_stage import DewarpStage
 from .dialogs import CalibrationDialog, PreferencesDialog
 from .editing_controller import EditingController
 from .export_controller import ExportController
@@ -120,7 +121,8 @@ class MainWindow(QMainWindow):
                   self.act_export_tiles, self.act_show_bbox,
                   self.act_view_tiles,
                   self.act_save_project, self.act_new_object,
-                  self.act_mode_roi, self.act_clear_roi):
+                  self.act_mode_roi, self.act_clear_roi,
+                  self.act_dewarp):
             a.setEnabled(enabled)
 
     # ----- delegated actions -----------------------------------------------
@@ -137,6 +139,42 @@ class MainWindow(QMainWindow):
 
     def open_photo(self):
         self.projects.open_photo()
+
+    def dewarp_page(self):
+        """Tools -> Flatten Page: perspective-flatten the current photo and
+        adopt the result as the new working image.
+
+        The flattened image is written to a temp PNG and re-imported through
+        the normal photo path, so all downstream state (project, calibration,
+        objects) resets cleanly around the new pixels. NOTE: the temp file is
+        the new source reference until the user saves; a future revision
+        should offer to save the flattened image somewhere permanent (and/or
+        keep the original alongside)."""
+        if self._loaded is None:
+            return
+        dpi = self._loaded.dpi or 300
+        dlg = DewarpStage(self._loaded.data, dpi=dpi, parent=self)
+        if dlg.exec() != QDialog.Accepted:
+            return
+        result = dlg.result_image()
+        if result is None:
+            return
+        import os
+        import tempfile
+        import cv2
+        stem = "flattened"
+        if self._loaded.path:
+            stem = os.path.splitext(os.path.basename(self._loaded.path))[0]
+        tmp_dir = tempfile.mkdtemp(prefix="pagewright_dewarp_")
+        out_path = os.path.join(tmp_dir, "%s_flat.png" % stem)
+        if not cv2.imwrite(out_path, result):
+            QMessageBox.critical(self, "Flatten Page",
+                                 "Could not write the flattened image.")
+            return
+        self.projects.load_photo(out_path)
+        self.statusBar().showMessage(
+            "Flattened image is now the working image "
+            "(temporary file - use Save/Export to keep it).", 8000)
 
     def save_project_file(self):
         self.projects.save_project()

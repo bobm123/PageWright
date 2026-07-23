@@ -65,6 +65,11 @@ def build_actions(w):
     w.act_calibrate = QAction("&Calibrate Scale…", w)
     w.act_calibrate.triggered.connect(w.start_calibration)
 
+    w.act_dewarp = QAction("&Flatten Page (Dewarp)…", w)
+    w.act_dewarp.setToolTip("Perspective-flatten a photographed page; the "
+                            "result becomes the working image")
+    w.act_dewarp.triggered.connect(w.dewarp_page)
+
     # Mutually exclusive interaction modes.
     w.mode_group = QActionGroup(w)
     w.mode_group.setExclusive(True)
@@ -149,6 +154,7 @@ def build_menus(w):
         m_units.addAction(w.act_units[unit])
 
     m_tools = mb.addMenu("&Tools")
+    m_tools.addAction(w.act_dewarp)
     m_tools.addAction(w.act_calibrate)
     m_tools.addSeparator()
     m_tools.addAction(w.act_mode_pan)

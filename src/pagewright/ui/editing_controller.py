@@ -86,6 +86,14 @@ class EditingController:
         # inside a small trace area.
         region_h, region_w = image.shape[:2]
         long_edge = max(region_w, region_h)
+        # TODO(ui): expose a "Trace complexity / number of points" control.
+        # epsilon_px is the approxPolyDP tolerance that decides how many
+        # vertices the traced polygon keeps: larger -> simpler (fewer
+        # points), smaller -> more detailed (more points). It is currently
+        # auto-derived from the region size (factor 0.0012). Plan: add a
+        # toolbar/right-click slider (e.g. Coarse..Fine) or a point-count
+        # target that scales this factor, so the user can trade smoothness
+        # against fidelity per object without re-seeding.
         epsilon_px = max(1.5, long_edge * 0.0012)
         min_area_px = max(50.0, 0.0005 * region_w * region_h)
         results = cont.extract_contours(

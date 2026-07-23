@@ -335,3 +335,19 @@ Full detail and session-handoff notes for the dewarp/BookScan side of this
 plan live in `dewarp/CLAUDE.md` (see "Roadmap: unified capture-to-OCR
 studio" and the "Session Handoff" section below it) and
 `BookScan/HANDOFF.md`.
+
+---
+
+## 14. UX backlog
+
+- **Trace Poly: complexity / point-count control.** The traced polygon's
+  vertex count is set by the `approxPolyDP` tolerance `epsilon_px` in
+  `ui/editing_controller.py` (auto-derived from region size). Add a user
+  control (Coarse..Fine slider or a target point count) so the smoothness
+  vs fidelity trade-off is adjustable per object without re-seeding. See
+  the `TODO(ui)` at the `epsilon_px` line.
+- **Dewarp stage follow-ups.** The Flatten Page dialog (`ui/dewarp_stage.py`)
+  currently writes the flattened image to a temp file and adopts it as the
+  working image; offer to save it permanently (and/or keep the original).
+  Add the curved-page spline mode (the mode selector reserves a slot) using
+  `core.dewarp.PageModel` / `dewarp_page` / `refine_with_text`.
