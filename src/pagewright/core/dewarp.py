@@ -117,6 +117,23 @@ class PageModel:
         return cls({k: list(v) for k, v in d["anchors"].items()},
                    {k: PageEdge.from_dict(e) for k, e in d["edges"].items()})
 
+    def scaled(self, s: float) -> "PageModel":
+        """Deep copy scaled by factor s. Scales every stored coordinate
+        AND vector (mid handle and corner tips included - forgetting
+        those warps the curves). Used to render previews on downscaled
+        images."""
+        out = self.copy()
+        for k in out.anchors:
+            out.anchors[k] = [v * s for v in out.anchors[k]]
+        for e in out.edges.values():
+            e.mid = [v * s for v in e.mid]
+            e.handle = [v * s for v in e.handle]
+            if e.tip_a is not None:
+                e.tip_a = [v * s for v in e.tip_a]
+            if e.tip_b is not None:
+                e.tip_b = [v * s for v in e.tip_b]
+        return out
+
 
 # ---------------------------------------------------------------------------
 # Curve utilities

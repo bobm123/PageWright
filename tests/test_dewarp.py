@@ -120,6 +120,25 @@ def test_model_copy_is_deep():
     assert m.edges["top"].mid != [2.0, 2.0]
 
 
+def test_model_scaled_scales_coords_and_vectors():
+    m = dw.default_model(800, 600)
+    s = m.scaled(0.5)
+    # anchors scale
+    assert s.anchors["br"] == pytest.approx(
+        [v * 0.5 for v in m.anchors["br"]])
+    # mid, handle, and corner tips scale too
+    e, es = m.edges["top"], s.edges["top"]
+    assert es.mid == pytest.approx([v * 0.5 for v in e.mid])
+    assert es.handle == pytest.approx([v * 0.5 for v in e.handle])
+    assert es.tip_a == pytest.approx([v * 0.5 for v in e.tip_a])
+    # scaling the model scales the dense curve identically
+    top_full, _ = dw.page_edges(m)
+    top_half, _ = dw.page_edges(s)
+    assert np.max(np.abs(top_half - top_full * 0.5)) < 1e-9
+    # original untouched
+    assert m.edges["top"].mid != es.mid
+
+
 def test_edge_optional_tips_serialise_only_when_set():
     e = dw.PageEdge(mid=[1, 2], handle=[3, 4])
     assert "tip_a" not in e.to_dict() and "tip_b" not in e.to_dict()

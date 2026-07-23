@@ -4,20 +4,27 @@ A self-contained modal dialog with the studio's left-right layout:
 
     +-----------------------------+-----------------------------+
     |  source photo (left)        |  live dewarped result       |
-    |  drop / drag 4 corners      |  (right, updates live)      |
+    |  quad corners OR spline     |  (right, updates live)      |
+    |  outline, both draggable    |                             |
     +-----------------------------+-----------------------------+
-    | [Auto-detect] size controls / options        [Apply][X]  |
+    | mode / [Auto-detect] size controls / options [Apply][X]  |
     +----------------------------------------------------------+
 
-The left pane lets the user place and drag four corners of the page; the
-right pane shows ``core.dewarp.dewarp_quad`` applied live. "Auto-detect"
-seeds the four corners from the silhouette detector. On Apply the flattened
-image is returned via :meth:`result_image` (BGR ndarray) so the caller can
-make it the working image for calibration/tracing.
+Two modes:
 
-This is the QUAD (straight 4-corner perspective) stage. The curved-page
-spline path (``core.dewarp.PageModel`` / ``dewarp_page``) is the planned
-next mode; the mode selector reserves a slot for it.
+* QUAD (4 corners) - drop/drag four page corners; the right pane shows
+  ``core.dewarp.dewarp_quad`` (straight perspective transform) live.
+* CURVED PAGE (spline) - a full page outline (4 corner anchors + curved
+  top/bottom edges, each with an on-curve mid point, mirrored tangent
+  tips and per-corner tangent tips). The right pane shows
+  ``core.dewarp.dewarp_page`` (perspective + cylinder unwrap). Preview
+  renders on a downscaled copy for responsiveness (updated when a drag
+  ends); Apply renders at full quality. "Refine with text lines" bends
+  the outline so its isolines match the printed lines.
+
+"Auto-detect" seeds either mode from the silhouette detector. On Apply
+the flattened image is returned via :meth:`result_image` (BGR ndarray)
+so the caller can make it the working image for calibration/tracing.
 
 NOTE: PySide6 cannot run in the porting sandbox, so this module is
 static-checked only. Expect to test-drive and adjust it on a real desktop.
@@ -31,8 +38,8 @@ except ImportError:  # pragma: no cover - cv2 always present in the app
     cv2 = None
 
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal
-from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPen, QPixmap,
-                           QPolygonF)
+from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainterPath, QPen,
+                           QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
                                QDialogButtonBox, QDoubleSpinBox, QFormLayout,
                                QGraphicsEllipseItem, QGraphicsItem,
@@ -43,13 +50,22 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
 
 from ..core import dewarp as dw
 
-# scoped enum name, robust across PySide6 versions
-_IGNORE_XFORM = QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
+MODE_QUAD = 0
+MODE_SPLINE = 1
 
 HANDLE_R = 7          # corner handle radius, in view pixels
+TIP_R = 5             # tangent-tip handle radius, in view pixels
 HIT_R = 12            # click tolerance for grabbing a handle, view pixels
+PREVIEW_H = 700       # spline preview renders at this image height
+
 _CORNER_COLOR = QColor("#22cc66")
 _LINE_COLOR = QColor("#22cc66")
+_TOP_COLOR = QColor("#50dc50")
+_BOT_COLOR = QColor("#ffb450")
+_TIP_COLOR = QColor("#ffffff")
+
+# scoped enum name, robust across PySide6 versions
+_IGNORE_XFORM = QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
 
 
 def ndarray_to_qimage(bgr):
@@ -86,10 +102,8 @@ class _ResultView(QGraphicsView):
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self._pix_item = None
-        self.setRenderHints(self.renderHints())
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self.setBackgroundBrush(QBrush(QColor("#202020")))
-        self._placeholder = None
 
     def show_placeholder(self, text):
         self._scene.clear()
@@ -115,14 +129,21 @@ class _ResultView(QGraphicsView):
 
 
 class _SourceView(QGraphicsView):
-    """Photo pane where the user places and drags four page corners.
+    """Photo pane hosting either quad corners or a spline page outline.
 
-    Click empty space to drop a corner (up to four); click-drag a corner
-    to move it. Emits :attr:`cornersChanged` on any edit. Corner
-    coordinates are in image pixels.
+    QUAD mode: click empty space to drop a corner (up to four); drag a
+    corner to move it. Emits :attr:`cornersChanged` on any edit.
+
+    SPLINE mode: shows a ``core.dewarp.PageModel`` outline with all its
+    draggable handles (corner anchors, on-curve mids, mirrored tangent
+    tips, per-corner tangent tips). Emits :attr:`modelChanged` while
+    dragging (overlay redraw) and :attr:`modelEdited` when a drag ends
+    (preview re-render). Coordinates are image pixels throughout.
     """
 
     cornersChanged = Signal()
+    modelChanged = Signal()
+    modelEdited = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -132,9 +153,13 @@ class _SourceView(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor("#202020")))
         self.setMouseTracking(True)
         self._pix_item = None
+        self._mode = MODE_QUAD
+        # quad state
         self._corners = []       # list[QPointF] in scene/image coords
-        self._drag = None        # index being dragged, or None
-        self._overlay = []       # handle/label/polygon items
+        self._drag = None        # quad: corner index | spline: handle tuple
+        # spline state
+        self._model = None       # core.dewarp.PageModel or None
+        self._overlay = []       # all overlay items
 
     # ----- image -----------------------------------------------------------
     def set_image(self, bgr):
@@ -145,7 +170,13 @@ class _SourceView(QGraphicsView):
         self.setSceneRect(QRectF(pm.rect()))
         self.fitInView(self._pix_item, Qt.KeepAspectRatio)
 
-    # ----- corners ---------------------------------------------------------
+    # ----- mode ------------------------------------------------------------
+    def set_mode(self, mode):
+        self._mode = mode
+        self._drag = None
+        self._redraw_overlay()
+
+    # ----- quad corners ----------------------------------------------------
     def corners(self):
         return [(p.x(), p.y()) for p in self._corners]
 
@@ -159,40 +190,72 @@ class _SourceView(QGraphicsView):
         self._redraw_overlay()
         self.cornersChanged.emit()
 
+    # ----- spline model ----------------------------------------------------
+    def model(self):
+        return self._model
+
+    def set_model(self, model):
+        self._model = model
+        self._redraw_overlay()
+        self.modelChanged.emit()
+        self.modelEdited.emit()
+
     # ----- interaction -----------------------------------------------------
-    def _nearest_corner(self, view_pos):
-        """Index of the corner within HIT_R of view_pos, else None."""
+    def _nearest_quad_corner(self, view_pos):
         best, best_d = None, HIT_R
         for i, p in enumerate(self._corners):
-            vp = self.mapFromScene(p)
-            d = (vp - view_pos).manhattanLength()
+            d = (self.mapFromScene(p) - view_pos).manhattanLength()
             if d <= best_d:
                 best, best_d = i, d
+        return best
+
+    def _nearest_spline_handle(self, view_pos):
+        if self._model is None:
+            return None
+        best, best_d = None, HIT_R
+        for h in dw.handles(self._model):
+            p = dw.handle_pos(self._model, h)
+            vp = self.mapFromScene(QPointF(float(p[0]), float(p[1])))
+            d = (vp - view_pos).manhattanLength()
+            if d <= best_d:
+                best, best_d = h, d
         return best
 
     def mousePressEvent(self, event):
         if self._pix_item is None or event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
-        idx = self._nearest_corner(event.position().toPoint())
-        if idx is not None:
-            self._drag = idx
-        elif len(self._corners) < 4:
-            self._corners.append(self.mapToScene(event.position().toPoint()))
-            self._redraw_overlay()
-            self.cornersChanged.emit()
-        # else: ignore clicks on empty space once 4 corners exist
+        pos = event.position().toPoint()
+        if self._mode == MODE_QUAD:
+            idx = self._nearest_quad_corner(pos)
+            if idx is not None:
+                self._drag = idx
+            elif len(self._corners) < 4:
+                self._corners.append(self.mapToScene(pos))
+                self._redraw_overlay()
+                self.cornersChanged.emit()
+        else:
+            h = self._nearest_spline_handle(pos)
+            if h is not None:
+                self._drag = h
 
     def mouseMoveEvent(self, event):
-        if self._drag is not None:
-            self._corners[self._drag] = self.mapToScene(
-                event.position().toPoint())
+        if self._drag is None:
+            return super().mouseMoveEvent(event)
+        sp = self.mapToScene(event.position().toPoint())
+        if self._mode == MODE_QUAD:
+            self._corners[self._drag] = sp
             self._redraw_overlay()
             self.cornersChanged.emit()
         else:
-            super().mouseMoveEvent(event)
+            dw.move_handle(self._model, self._drag, (sp.x(), sp.y()))
+            self._redraw_overlay()
+            self.modelChanged.emit()
 
     def mouseReleaseEvent(self, event):
+        was = self._drag
         self._drag = None
+        if was is not None and self._mode == MODE_SPLINE:
+            self.modelEdited.emit()      # drag finished -> re-render preview
         super().mouseReleaseEvent(event)
 
     def wheelEvent(self, event):
@@ -200,13 +263,22 @@ class _SourceView(QGraphicsView):
         self.scale(factor, factor)
 
     # ----- overlay ---------------------------------------------------------
-    def _redraw_overlay(self):
+    def _clear_overlay(self):
         for it in self._overlay:
             self._scene.removeItem(it)
         self._overlay = []
+
+    def _redraw_overlay(self):
+        self._clear_overlay()
+        if self._mode == MODE_QUAD:
+            self._draw_quad_overlay()
+        elif self._model is not None:
+            self._draw_spline_overlay()
+
+    # -- quad --
+    def _draw_quad_overlay(self):
         if not self._corners:
             return
-        # ordered outline (once all four are present) as a closed polygon
         pen = QPen(_LINE_COLOR)
         pen.setCosmetic(True)
         pen.setWidth(2)
@@ -222,21 +294,10 @@ class _SourceView(QGraphicsView):
             poly_item.setBrush(QBrush(QColor(34, 204, 102, 40)))
             self._scene.addItem(poly_item)
             self._overlay.append(poly_item)
-        # handles + numbers (drawn cosmetically so they keep size on zoom)
         font = QFont()
         font.setPointSize(10)
         for i, p in enumerate(self._corners):
-            r = HANDLE_R
-            h = QGraphicsEllipseItem(QRectF(p.x() - r, p.y() - r, 2 * r, 2 * r))
-            hp = QPen(QColor("#003311"))
-            hp.setCosmetic(True)
-            h.setPen(hp)
-            h.setBrush(QBrush(_CORNER_COLOR))
-            h.setFlag(_IGNORE_XFORM, True)
-            h.setPos(p)
-            h.setRect(QRectF(-r, -r, 2 * r, 2 * r))
-            self._scene.addItem(h)
-            self._overlay.append(h)
+            self._add_round_handle(p, HANDLE_R, _CORNER_COLOR)
             label = QGraphicsSimpleTextItem(str(i + 1))
             label.setBrush(QBrush(QColor("#ffffff")))
             label.setFont(font)
@@ -244,6 +305,89 @@ class _SourceView(QGraphicsView):
             label.setPos(p)
             self._scene.addItem(label)
             self._overlay.append(label)
+
+    # -- spline --
+    def _draw_spline_overlay(self):
+        m = self._model
+        # straight side edges tl-bl, tr-br (dashed)
+        side_pen = QPen(QColor("#dddddd"))
+        side_pen.setCosmetic(True)
+        side_pen.setStyle(Qt.DashLine)
+        for a, b in (("tl", "bl"), ("tr", "br")):
+            p, q = m.anchors[a], m.anchors[b]
+            ln = self._scene.addLine(p[0], p[1], q[0], q[1], side_pen)
+            self._overlay.append(ln)
+        # curved edges as painter paths from the dense samples
+        for name, col in (("top", _TOP_COLOR), ("bottom", _BOT_COLOR)):
+            dense = dw.edge_dense(m, name, 200)
+            path = QPainterPath(QPointF(float(dense[0, 0]),
+                                        float(dense[0, 1])))
+            for x, y in dense[1:]:
+                path.lineTo(float(x), float(y))
+            pen = QPen(col)
+            pen.setCosmetic(True)
+            pen.setWidth(2)
+            item = self._scene.addPath(path, pen)
+            self._overlay.append(item)
+            # mid handle line (mid - handle .. mid + handle), dashed
+            e = m.edges[name]
+            mid = np.asarray(e.mid, float)
+            hv = np.asarray(e.handle, float)
+            t1, t2 = mid + hv, mid - hv
+            hpen = QPen(QColor("#bbbbbb"))
+            hpen.setCosmetic(True)
+            hpen.setStyle(Qt.DashLine)
+            ln = self._scene.addLine(t1[0], t1[1], t2[0], t2[1], hpen)
+            self._overlay.append(ln)
+            # corner tip lines anchor -> tip
+            for end in ("a", "b"):
+                tip = dw.handle_pos(m, ("ctip", name, end))
+                base = m.anchors[dw.EDGE_ANCHORS[name][0 if end == "a"
+                                                       else 1]]
+                cpen = QPen(col)
+                cpen.setCosmetic(True)
+                cpen.setStyle(Qt.DashLine)
+                ln = self._scene.addLine(base[0], base[1],
+                                         float(tip[0]), float(tip[1]), cpen)
+                self._overlay.append(ln)
+        # handles on top: tips first, then mids, anchors last (drawn last =
+        # on top, matching the hit-test priority in core handles())
+        for name, col in (("top", _TOP_COLOR), ("bottom", _BOT_COLOR)):
+            for sgn in (1, -1):
+                p = dw.handle_pos(m, ("tip", name, sgn))
+                self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                       TIP_R, _TIP_COLOR)
+            for end in ("a", "b"):
+                p = dw.handle_pos(m, ("ctip", name, end))
+                self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                       TIP_R, col)
+            p = dw.handle_pos(m, ("mid", name, None))
+            self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                   HANDLE_R, col)
+        for k in ("tl", "tr", "bl", "br"):
+            p = m.anchors[k]
+            self._add_square_handle(QPointF(float(p[0]), float(p[1])),
+                                    HANDLE_R)
+
+    # -- shared handle drawing --
+    def _add_round_handle(self, pos, r, color):
+        h = QGraphicsEllipseItem(QRectF(-r, -r, 2 * r, 2 * r))
+        pen = QPen(QColor("#202020"))
+        pen.setCosmetic(True)
+        h.setPen(pen)
+        h.setBrush(QBrush(color))
+        h.setFlag(_IGNORE_XFORM, True)
+        h.setPos(pos)
+        self._scene.addItem(h)
+        self._overlay.append(h)
+
+    def _add_square_handle(self, pos, r):
+        item = self._scene.addRect(QRectF(-r, -r, 2 * r, 2 * r),
+                                   QPen(QColor("#202020")),
+                                   QBrush(QColor("#ffffff")))
+        item.setFlag(_IGNORE_XFORM, True)
+        item.setPos(pos)
+        self._overlay.append(item)
 
 
 class DewarpStage(QDialog):
@@ -258,9 +402,18 @@ class DewarpStage(QDialog):
         self._result = None
         self.resize(1000, 640)
 
+        # downscaled copy for responsive spline previews
+        h = self._src.shape[0]
+        self._pv_scale = min(1.0, float(PREVIEW_H) / h)
+        if self._pv_scale < 1.0 and cv2 is not None:
+            self._pv_img = cv2.resize(self._src, None, fx=self._pv_scale,
+                                      fy=self._pv_scale,
+                                      interpolation=cv2.INTER_AREA)
+        else:
+            self._pv_img = self._src
+
         self._source = _SourceView(self)
         self._resultv = _ResultView(self)
-        self._resultv.show_placeholder("Place 4 page corners on the left")
 
         split = QSplitter(Qt.Horizontal, self)
         split.addWidget(self._source)
@@ -270,8 +423,8 @@ class DewarpStage(QDialog):
         # ----- controls -----
         self._mode = QComboBox()
         self._mode.addItem("Quad (4 corners)")
-        self._mode.addItem("Curved page (spline) - coming soon")
-        self._mode.model().item(1).setEnabled(False)
+        self._mode.addItem("Curved page (spline)")
+        self._mode.currentIndexChanged.connect(self._on_mode_changed)
 
         self._auto_size = QCheckBox("Auto (from selection)")
         self._auto_size.setChecked(True)
@@ -291,15 +444,21 @@ class DewarpStage(QDialog):
         self._dpi.setSuffix(" DPI")
         for w in (self._w_mm, self._h_mm, self._dpi):
             w.setEnabled(False)                  # auto-size on by default
-            w.valueChanged.connect(self._update_preview)
+            w.valueChanged.connect(self._request_preview)
 
         self._full = QCheckBox("Keep whole image (don't crop)")
-        self._full.toggled.connect(self._update_preview)
+        self._full.toggled.connect(self._request_preview)
 
         self._auto_btn = QPushButton("Auto-detect page")
         self._auto_btn.clicked.connect(self._auto_detect)
-        self._reset_btn = QPushButton("Reset corners")
-        self._reset_btn.clicked.connect(self._source.clear_corners)
+        self._reset_btn = QPushButton("Reset")
+        self._reset_btn.clicked.connect(self._reset_selection)
+        self._refine_btn = QPushButton("Refine with text lines")
+        self._refine_btn.setToolTip(
+            "Bend the outline so its isolines follow the printed text "
+            "lines (needs at least 5 detectable lines)")
+        self._refine_btn.clicked.connect(self._refine_text)
+        self._refine_btn.setEnabled(False)   # spline mode only
 
         self._size_label = QLabel("Output: -")
 
@@ -312,6 +471,7 @@ class DewarpStage(QDialog):
 
         controls = QVBoxLayout()
         controls.addWidget(self._auto_btn)
+        controls.addWidget(self._refine_btn)
         controls.addWidget(self._reset_btn)
         controls.addLayout(form)
         controls.addWidget(self._full)
@@ -338,31 +498,58 @@ class DewarpStage(QDialog):
         layout.addWidget(self._buttons)
 
         self._source.set_image(self._src)
-        self._source.cornersChanged.connect(self._update_preview)
+        self._source.cornersChanged.connect(self._request_preview)
+        self._source.modelEdited.connect(self._request_preview)
+        self._on_mode_changed(MODE_QUAD)
 
     # ----- result ----------------------------------------------------------
     def result_image(self):
         return self._result
 
-    # ----- helpers ---------------------------------------------------------
+    # ----- mode ------------------------------------------------------------
+    def _spline_mode(self):
+        return self._mode.currentIndex() == MODE_SPLINE
+
+    def _on_mode_changed(self, idx):
+        self._source.set_mode(idx)
+        self._refine_btn.setEnabled(idx == MODE_SPLINE)
+        # full-image mode only applies to the quad transform
+        self._full.setEnabled(idx == MODE_QUAD)
+        if idx == MODE_SPLINE and self._source.model() is None:
+            h, w = self._src.shape[:2]
+            self._source.set_model(dw.default_model(w, h))
+        else:
+            self._request_preview()
+
+    def _reset_selection(self):
+        if self._spline_mode():
+            h, w = self._src.shape[:2]
+            self._source.set_model(dw.default_model(w, h))
+        else:
+            self._source.clear_corners()
+
+    # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):
         for w in (self._w_mm, self._h_mm, self._dpi):
             w.setEnabled(not checked)
-        self._update_preview()
+        self._request_preview()
 
-    def _output_size(self, corners):
-        """(out_w, out_h) in pixels from the current sizing mode."""
-        if self._auto_size.isChecked():
-            rect = dw.order_points(corners)
-            tl, tr, br, bl = rect
-            w = 0.5 * (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl))
-            h = 0.5 * (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr))
-            return max(2, int(round(w))), max(2, int(round(h)))
+    def _explicit_size(self):
         dpi = self._dpi.value()
         w = self._w_mm.value() / 25.4 * dpi
         h = self._h_mm.value() / 25.4 * dpi
         return max(2, int(round(w))), max(2, int(round(h)))
 
+    def _quad_output_size(self, corners):
+        if not self._auto_size.isChecked():
+            return self._explicit_size()
+        rect = dw.order_points(corners)
+        tl, tr, br, bl = rect
+        w = 0.5 * (np.linalg.norm(tr - tl) + np.linalg.norm(br - bl))
+        h = 0.5 * (np.linalg.norm(bl - tl) + np.linalg.norm(br - tr))
+        return max(2, int(round(w))), max(2, int(round(h)))
+
+    # ----- actions ---------------------------------------------------------
     def _auto_detect(self):
         if cv2 is None:
             return
@@ -372,10 +559,36 @@ class DewarpStage(QDialog):
         except Exception as exc:   # RuntimeError and friends
             self._size_label.setText("Auto-detect failed: %s" % exc)
             return
-        a = model.anchors
-        self._source.set_corners([a["tl"], a["tr"], a["br"], a["bl"]])
+        if self._spline_mode():
+            self._source.set_model(model)
+        else:
+            a = model.anchors
+            self._source.set_corners([a["tl"], a["tr"], a["br"], a["bl"]])
 
-    def _update_preview(self, *_):
+    def _refine_text(self):
+        model = self._source.model()
+        if cv2 is None or model is None:
+            return
+        gray = cv2.cvtColor(self._src, cv2.COLOR_BGR2GRAY)
+        try:
+            refined, ok = dw.refine_with_text(gray, model.copy())
+        except Exception as exc:
+            self._size_label.setText("Refine failed: %s" % exc)
+            return
+        if ok:
+            self._source.set_model(refined)
+        else:
+            self._size_label.setText(
+                "No usable text lines found; outline unchanged")
+
+    # ----- preview ---------------------------------------------------------
+    def _request_preview(self, *_):
+        if self._spline_mode():
+            self._update_spline_preview()
+        else:
+            self._update_quad_preview()
+
+    def _update_quad_preview(self):
         corners = self._source.corners()
         if len(corners) != 4:
             self._resultv.show_placeholder(
@@ -384,14 +597,12 @@ class DewarpStage(QDialog):
             self._result = None
             self._size_label.setText("Output: -")
             return
-        out_w, out_h = self._output_size(corners)
+        out_w, out_h = self._quad_output_size(corners)
         try:
             flat = dw.dewarp_quad(self._src, corners, out_w, out_h,
                                   full_image=self._full.isChecked())
         except Exception as exc:
-            self._resultv.show_placeholder("Dewarp error: %s" % exc)
-            self._apply_btn.setEnabled(False)
-            self._result = None
+            self._show_error(exc)
             return
         self._result = flat
         self._resultv.set_image(flat)
@@ -399,6 +610,50 @@ class DewarpStage(QDialog):
         h, w = flat.shape[:2]
         self._size_label.setText("Output: %d x %d px" % (w, h))
 
+    def _update_spline_preview(self):
+        model = self._source.model()
+        if model is None:
+            self._resultv.show_placeholder("No page outline")
+            self._apply_btn.setEnabled(False)
+            self._result = None
+            return
+        # fast preview on the downscaled copy; Apply renders full-res
+        pv_model = model.scaled(self._pv_scale)
+        try:
+            flat = dw.dewarp_page(self._pv_img, pv_model,
+                                  interp=cv2.INTER_LINEAR)
+        except Exception as exc:
+            self._show_error(exc)
+            return
+        self._result = None            # full-res result made on Apply
+        self._resultv.set_image(flat)
+        self._apply_btn.setEnabled(True)
+        out_w, out_h = self._spline_output_size(model)
+        self._size_label.setText("Output: %d x %d px" % (out_w, out_h))
+
+    def _spline_output_size(self, model):
+        if not self._auto_size.isChecked():
+            return self._explicit_size()
+        w, h = dw.page_size_px(model)
+        return max(2, int(round(w))), max(2, int(round(h)))
+
+    def _show_error(self, exc):
+        self._resultv.show_placeholder("Dewarp error: %s" % exc)
+        self._apply_btn.setEnabled(False)
+        self._result = None
+
+    # ----- apply -----------------------------------------------------------
     def _on_apply(self):
+        if self._spline_mode():
+            model = self._source.model()
+            if model is None:
+                return
+            out_w, out_h = self._spline_output_size(model)
+            try:
+                self._result = dw.dewarp_page(self._src, model,
+                                              out_w=out_w, out_h=out_h)
+            except Exception as exc:
+                self._show_error(exc)
+                return
         if self._result is not None:
             self.accept()
