@@ -113,6 +113,8 @@ class MainWindow(QMainWindow):
         panel.setLayout(layout)
         dock.setWidget(panel)
         self.addDockWidget(Qt.RightDockWidgetArea, dock)
+        self._dock = dock                  # hidden while the dewarp stage is up
+        self._dock_was_visible = True
 
     def _build_statusbar(self):
         self._scale_label = QLabel("", self)
@@ -157,13 +159,19 @@ class MainWindow(QMainWindow):
         dpi = self._loaded.dpi or 300
         self.dewarp_stage.set_source_image(self._loaded.data, dpi=dpi)
         self._stack.setCurrentWidget(self.dewarp_stage)
-        # trace-view tools act on the hidden canvas; disable while staged
+        # trace-view tools act on the hidden canvas; disable while staged,
+        # and hide the Objects/Tiling dock (it belongs to the trace view)
         self._set_tools_enabled(False)
+        self._dock_was_visible = self._dock.isVisible()
+        self._dock.hide()
         self.statusBar().showMessage(
             "Flatten Page: place the outline on the left; the right pane "
             "previews the result. Use Flattened Image to adopt it.", 8000)
 
     def _leave_dewarp_stage(self):
+        if self._stack.currentWidget() is self.dewarp_stage:
+            if self._dock_was_visible:
+                self._dock.show()
         self._stack.setCurrentWidget(self.canvas)
         self._set_tools_enabled(self._loaded is not None)
 

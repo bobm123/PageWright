@@ -114,11 +114,29 @@ class _AutoFitView(QGraphicsView):
         self.setScene(self._scene)
         self._pix_item = None
         self._user_zoomed = False
+        self._panning = False
+        self._pan_last = None
         self.setBackgroundBrush(QBrush(QColor("#202020")))
+        # zoom toward the cursor rather than the view center
+        self.setTransformationAnchor(
+            QGraphicsView.ViewportAnchor.AnchorUnderMouse)
 
     def fit(self):
         if self._pix_item is not None:
             self.fitInView(self._pix_item, Qt.KeepAspectRatio)
+
+    def refit(self):
+        """Fit and re-arm auto-fit (forgets any manual zoom)."""
+        self._user_zoomed = False
+        self.fit()
+
+    def zoom_in(self):
+        self._user_zoomed = True
+        self.scale(1.25, 1.25)
+
+    def zoom_out(self):
+        self._user_zoomed = True
+        self.scale(0.8, 0.8)
 
     def _autofit(self):
         if not self._user_zoomed:
@@ -136,6 +154,35 @@ class _AutoFitView(QGraphicsView):
         self._user_zoomed = True
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.scale(factor, factor)
+
+    # middle-mouse drag pans in any mode (matches the trace canvas)
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MiddleButton:
+            self._panning = True
+            self._pan_last = event.position()
+            self.setCursor(Qt.ClosedHandCursor)
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._panning:
+            d = event.position() - self._pan_last
+            self._pan_last = event.position()
+            hbar, vbar = self.horizontalScrollBar(), self.verticalScrollBar()
+            hbar.setValue(int(hbar.value() - d.x()))
+            vbar.setValue(int(vbar.value() - d.y()))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.MiddleButton and self._panning:
+            self._panning = False
+            self.unsetCursor()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
     def _set_pixmap(self, pm, rearm_fit=True):
         self._scene.clear()
@@ -485,6 +532,20 @@ class DewarpStageWidget(QWidget):
 
         self._size_label = QLabel("Output: -")
 
+        # zoom controls (wheel zooms at the cursor; middle-drag pans)
+        zoom_row = QHBoxLayout()
+        for text, slot in (("+", self._source.zoom_in),
+                           ("-", self._source.zoom_out),
+                           ("Fit", self._source.refit)):
+            b = QPushButton(text)
+            b.setMaximumWidth(40 if len(text) == 1 else 56)
+            b.clicked.connect(slot)
+            zoom_row.addWidget(b)
+        fit_r = QPushButton("Fit Result")
+        fit_r.clicked.connect(self._resultv.refit)
+        zoom_row.addWidget(fit_r)
+        zoom_row.addStretch(1)
+
         form = QFormLayout()
         form.addRow("Mode:", self._mode)
         form.addRow("Output size:", self._auto_size)
@@ -496,6 +557,7 @@ class DewarpStageWidget(QWidget):
         controls.addWidget(self._auto_btn)
         controls.addWidget(self._refine_btn)
         controls.addWidget(self._reset_btn)
+        controls.addLayout(zoom_row)
         controls.addLayout(form)
         controls.addWidget(self._full)
         controls.addWidget(self._size_label)
