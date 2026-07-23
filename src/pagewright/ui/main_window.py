@@ -18,7 +18,7 @@ edit sink, the bounding-box / tile-grid overlays and the status readouts.
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import (
     QDialog, QDockWidget, QInputDialog, QLabel, QMainWindow, QMessageBox,
-    QVBoxLayout, QWidget,
+    QStackedWidget, QVBoxLayout, QWidget,
 )
 
 from ..core import calibration as calib
@@ -26,7 +26,7 @@ from ..core import undo
 from ..model import Project
 from . import app_actions
 from .canvas import Canvas
-from .dewarp_stage import DewarpStage
+from .dewarp_stage import DewarpStageWidget
 from .dialogs import CalibrationDialog, PreferencesDialog
 from .editing_controller import EditingController
 from .export_controller import ExportController
@@ -55,7 +55,14 @@ class MainWindow(QMainWindow):
         self.undo_stack.on_change(self._refresh_undo_actions)
 
         self.canvas = Canvas(self)
-        self.setCentralWidget(self.canvas)
+        self.dewarp_stage = DewarpStageWidget(self)
+        self.dewarp_stage.applied.connect(self._on_dewarp_applied)
+        self.dewarp_stage.cancelled.connect(self._leave_dewarp_stage)
+        # central stack: index 0 = trace canvas, index 1 = dewarp stage
+        self._stack = QStackedWidget(self)
+        self._stack.addWidget(self.canvas)
+        self._stack.addWidget(self.dewarp_stage)
+        self.setCentralWidget(self._stack)
         self.canvas.calibrationPicked.connect(self._on_calibration_picked)
         self.canvas.cursorMoved.connect(self._on_cursor_moved)
         self.canvas.contextMenuRequested.connect(
@@ -141,29 +148,43 @@ class MainWindow(QMainWindow):
         self.projects.open_photo()
 
     def dewarp_page(self):
-        """Tools -> Flatten Page: perspective-flatten the current photo and
-        adopt the result as the new working image.
-
-        The flattened image is written to a temp PNG and re-imported through
-        the normal photo path, so all downstream state (project, calibration,
-        objects) resets cleanly around the new pixels. NOTE: the temp file is
-        the new source reference until the user saves; a future revision
-        should offer to save the flattened image somewhere permanent (and/or
-        keep the original alongside)."""
+        """Tools -> Flatten Page: switch the central view to the dewarp
+        stage (left: photo + outline, right: live flattened preview)."""
         if self._loaded is None:
             return
-        dpi = self._loaded.dpi or 300
-        dlg = DewarpStage(self._loaded.data, dpi=dpi, parent=self)
-        if dlg.exec() != QDialog.Accepted:
+        if self._stack.currentWidget() is self.dewarp_stage:
             return
-        result = dlg.result_image()
+        dpi = self._loaded.dpi or 300
+        self.dewarp_stage.set_source_image(self._loaded.data, dpi=dpi)
+        self._stack.setCurrentWidget(self.dewarp_stage)
+        # trace-view tools act on the hidden canvas; disable while staged
+        self._set_tools_enabled(False)
+        self.statusBar().showMessage(
+            "Flatten Page: place the outline on the left; the right pane "
+            "previews the result. Use Flattened Image to adopt it.", 8000)
+
+    def _leave_dewarp_stage(self):
+        self._stack.setCurrentWidget(self.canvas)
+        self._set_tools_enabled(self._loaded is not None)
+
+    def _on_dewarp_applied(self):
+        """Adopt the flattened image as the new working image.
+
+        It is written to a temp PNG and re-imported through the normal
+        photo path, so all downstream state (project, calibration,
+        objects) resets cleanly around the new pixels. NOTE: the temp file
+        is the new source reference until the user saves; a future
+        revision should offer to save it somewhere permanent (and/or keep
+        the original alongside)."""
+        result = self.dewarp_stage.result_image()
         if result is None:
+            self._leave_dewarp_stage()
             return
         import os
         import tempfile
         import cv2
         stem = "flattened"
-        if self._loaded.path:
+        if self._loaded is not None and self._loaded.path:
             stem = os.path.splitext(os.path.basename(self._loaded.path))[0]
         tmp_dir = tempfile.mkdtemp(prefix="pagewright_dewarp_")
         out_path = os.path.join(tmp_dir, "%s_flat.png" % stem)
@@ -171,7 +192,8 @@ class MainWindow(QMainWindow):
             QMessageBox.critical(self, "Flatten Page",
                                  "Could not write the flattened image.")
             return
-        self.projects.load_photo(out_path)
+        self._leave_dewarp_stage()
+        self.projects.load_photo(out_path)   # re-enables tools
         self.statusBar().showMessage(
             "Flattened image is now the working image "
             "(temporary file - use Save/Export to keep it).", 8000)

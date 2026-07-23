@@ -1,6 +1,7 @@
 """Dewarp stage: flatten a photographed page before tracing.
 
-A self-contained modal dialog with the studio's left-right layout:
+A first-class stage widget (swapped into the main window's central
+stack, not a modal dialog) with the studio's left-right layout:
 
     +-----------------------------+-----------------------------+
     |  source photo (left)        |  live dewarped result       |
@@ -22,9 +23,13 @@ Two modes:
   ends); Apply renders at full quality. "Refine with text lines" bends
   the outline so its isolines match the printed lines.
 
-"Auto-detect" seeds either mode from the silhouette detector. On Apply
-the flattened image is returned via :meth:`result_image` (BGR ndarray)
-so the caller can make it the working image for calibration/tracing.
+"Auto-detect" seeds either mode from the silhouette detector.
+
+Usage: construct :class:`DewarpStageWidget` once, call
+:meth:`set_source_image` when entering the stage, and listen for
+:attr:`applied` (read :meth:`result_image` for the flattened BGR
+ndarray) and :attr:`cancelled`. Both panes auto-fit the image to the
+available space on show/resize until the user zooms manually.
 
 NOTE: PySide6 cannot run in the porting sandbox, so this module is
 static-checked only. Expect to test-drive and adjust it on a real desktop.
@@ -40,13 +45,13 @@ except ImportError:  # pragma: no cover - cv2 always present in the app
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainterPath, QPen,
                            QPixmap, QPolygonF)
-from PySide6.QtWidgets import (QCheckBox, QComboBox, QDialog,
-                               QDialogButtonBox, QDoubleSpinBox, QFormLayout,
-                               QGraphicsEllipseItem, QGraphicsItem,
-                               QGraphicsPolygonItem, QGraphicsScene,
-                               QGraphicsSimpleTextItem, QGraphicsView,
-                               QHBoxLayout, QLabel, QPushButton, QSpinBox,
-                               QSplitter, QVBoxLayout, QWidget)
+from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
+                               QFormLayout, QGraphicsEllipseItem,
+                               QGraphicsItem, QGraphicsPolygonItem,
+                               QGraphicsScene, QGraphicsSimpleTextItem,
+                               QGraphicsView, QHBoxLayout, QLabel,
+                               QPushButton, QSpinBox, QSplitter,
+                               QVBoxLayout, QWidget)
 
 from ..core import dewarp as dw
 
@@ -94,16 +99,59 @@ def ndarray_to_qpixmap(bgr):
     return QPixmap.fromImage(ndarray_to_qimage(bgr))
 
 
-class _ResultView(QGraphicsView):
-    """Read-only image pane with wheel zoom and fit-to-window."""
+class _AutoFitView(QGraphicsView):
+    """QGraphicsView that keeps its image fitted to the viewport.
+
+    set_image is often called before the widget has real geometry (the
+    stage may be hidden in a stacked layout), so a one-shot fitInView at
+    that moment computes against a tiny default viewport and the image
+    shows up minuscule. Instead, refit on every show/resize until the
+    user zooms manually (wheel); a new image re-arms auto-fit."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self._scene = QGraphicsScene(self)
         self.setScene(self._scene)
         self._pix_item = None
-        self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self._user_zoomed = False
         self.setBackgroundBrush(QBrush(QColor("#202020")))
+
+    def fit(self):
+        if self._pix_item is not None:
+            self.fitInView(self._pix_item, Qt.KeepAspectRatio)
+
+    def _autofit(self):
+        if not self._user_zoomed:
+            self.fit()
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._autofit()
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self._autofit()
+
+    def wheelEvent(self, event):
+        self._user_zoomed = True
+        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
+        self.scale(factor, factor)
+
+    def _set_pixmap(self, pm, rearm_fit=True):
+        self._scene.clear()
+        self._pix_item = self._scene.addPixmap(pm)
+        self.setSceneRect(QRectF(pm.rect()))
+        if rearm_fit:
+            self._user_zoomed = False
+        self.fit()
+
+
+class _ResultView(_AutoFitView):
+    """Read-only image pane with wheel zoom and fit-to-window."""
+
+    def __init__(self, parent=None):
+        super().__init__(parent)
+        self.setDragMode(QGraphicsView.ScrollHandDrag)
 
     def show_placeholder(self, text):
         self._scene.clear()
@@ -113,22 +161,13 @@ class _ResultView(QGraphicsView):
         self.setSceneRect(t.boundingRect())
 
     def set_image(self, bgr):
-        pm = ndarray_to_qpixmap(bgr)
-        self._scene.clear()
-        self._pix_item = self._scene.addPixmap(pm)
-        self.setSceneRect(QRectF(pm.rect()))
-        self.fit()
-
-    def fit(self):
-        if self._pix_item is not None:
-            self.fitInView(self._pix_item, Qt.KeepAspectRatio)
-
-    def wheelEvent(self, event):
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        self.scale(factor, factor)
+        # keep the user's zoom while they tweak the outline; a fresh
+        # source image (via _SourceView.set_image) re-arms auto-fit there
+        self._set_pixmap(ndarray_to_qpixmap(bgr),
+                         rearm_fit=not self._user_zoomed)
 
 
-class _SourceView(QGraphicsView):
+class _SourceView(_AutoFitView):
     """Photo pane hosting either quad corners or a spline page outline.
 
     QUAD mode: click empty space to drop a corner (up to four); drag a
@@ -147,12 +186,8 @@ class _SourceView(QGraphicsView):
 
     def __init__(self, parent=None):
         super().__init__(parent)
-        self._scene = QGraphicsScene(self)
-        self.setScene(self._scene)
         self.setDragMode(QGraphicsView.NoDrag)
-        self.setBackgroundBrush(QBrush(QColor("#202020")))
         self.setMouseTracking(True)
-        self._pix_item = None
         self._mode = MODE_QUAD
         # quad state
         self._corners = []       # list[QPointF] in scene/image coords
@@ -163,12 +198,8 @@ class _SourceView(QGraphicsView):
 
     # ----- image -----------------------------------------------------------
     def set_image(self, bgr):
-        pm = ndarray_to_qpixmap(bgr)
-        self._scene.clear()
         self._overlay = []
-        self._pix_item = self._scene.addPixmap(pm)
-        self.setSceneRect(QRectF(pm.rect()))
-        self.fitInView(self._pix_item, Qt.KeepAspectRatio)
+        self._set_pixmap(ndarray_to_qpixmap(bgr))
 
     # ----- mode ------------------------------------------------------------
     def set_mode(self, mode):
@@ -257,10 +288,6 @@ class _SourceView(QGraphicsView):
         if was is not None and self._mode == MODE_SPLINE:
             self.modelEdited.emit()      # drag finished -> re-render preview
         super().mouseReleaseEvent(event)
-
-    def wheelEvent(self, event):
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        self.scale(factor, factor)
 
     # ----- overlay ---------------------------------------------------------
     def _clear_overlay(self):
@@ -390,27 +417,23 @@ class _SourceView(QGraphicsView):
         self._overlay.append(item)
 
 
-class DewarpStage(QDialog):
-    """Modal dewarp/flatten stage. Construct with a BGR image; after
-    ``exec()`` returns Accepted, :meth:`result_image` gives the flattened
-    BGR ndarray (or None if nothing was produced)."""
+class DewarpStageWidget(QWidget):
+    """First-class dewarp stage for the main window's central stack.
 
-    def __init__(self, bgr_image, dpi=300, parent=None):
+    Construct once; call :meth:`set_source_image` when entering the
+    stage. Emits :attr:`applied` when the user accepts (read
+    :meth:`result_image` for the flattened BGR ndarray) and
+    :attr:`cancelled` when they back out."""
+
+    applied = Signal()
+    cancelled = Signal()
+
+    def __init__(self, parent=None):
         super().__init__(parent)
-        self.setWindowTitle("Flatten Page (Dewarp)")
-        self._src = np.ascontiguousarray(bgr_image)
+        self._src = None
+        self._pv_img = None
+        self._pv_scale = 1.0
         self._result = None
-        self.resize(1000, 640)
-
-        # downscaled copy for responsive spline previews
-        h = self._src.shape[0]
-        self._pv_scale = min(1.0, float(PREVIEW_H) / h)
-        if self._pv_scale < 1.0 and cv2 is not None:
-            self._pv_img = cv2.resize(self._src, None, fx=self._pv_scale,
-                                      fy=self._pv_scale,
-                                      interpolation=cv2.INTER_AREA)
-        else:
-            self._pv_img = self._src
 
         self._source = _SourceView(self)
         self._resultv = _ResultView(self)
@@ -440,7 +463,7 @@ class DewarpStage(QDialog):
         self._h_mm.setSuffix(" mm")
         self._dpi = QSpinBox()
         self._dpi.setRange(30, 1200)
-        self._dpi.setValue(int(dpi) if dpi else 300)
+        self._dpi.setValue(300)
         self._dpi.setSuffix(" DPI")
         for w in (self._w_mm, self._h_mm, self._dpi):
             w.setEnabled(False)                  # auto-size on by default
@@ -485,24 +508,45 @@ class DewarpStage(QDialog):
         top.addWidget(split, 1)
         top.addWidget(controls_box)
 
-        self._buttons = QDialogButtonBox(
-            QDialogButtonBox.Apply | QDialogButtonBox.Cancel)
-        self._apply_btn = self._buttons.button(QDialogButtonBox.Apply)
-        self._apply_btn.setText("Use Flattened Image")
+        self._apply_btn = QPushButton("Use Flattened Image")
         self._apply_btn.setEnabled(False)
         self._apply_btn.clicked.connect(self._on_apply)
-        self._buttons.rejected.connect(self.reject)
+        self._back_btn = QPushButton("Back to Tracing")
+        self._back_btn.clicked.connect(self.cancelled.emit)
+        buttons = QHBoxLayout()
+        buttons.addStretch(1)
+        buttons.addWidget(self._back_btn)
+        buttons.addWidget(self._apply_btn)
 
         layout = QVBoxLayout(self)
         layout.addLayout(top, 1)
-        layout.addWidget(self._buttons)
+        layout.addLayout(buttons)
 
-        self._source.set_image(self._src)
         self._source.cornersChanged.connect(self._request_preview)
         self._source.modelEdited.connect(self._request_preview)
-        self._on_mode_changed(MODE_QUAD)
 
-    # ----- result ----------------------------------------------------------
+    # ----- entry / result ---------------------------------------------------
+    def set_source_image(self, bgr_image, dpi=300):
+        """Enter the stage with a fresh source image (BGR ndarray).
+        Resets the selection, result and preview; re-arms auto-fit."""
+        self._src = np.ascontiguousarray(bgr_image)
+        self._result = None
+        if dpi:
+            self._dpi.setValue(int(dpi))
+        # downscaled copy for responsive spline previews
+        h = self._src.shape[0]
+        self._pv_scale = min(1.0, float(PREVIEW_H) / h)
+        if self._pv_scale < 1.0 and cv2 is not None:
+            self._pv_img = cv2.resize(self._src, None, fx=self._pv_scale,
+                                      fy=self._pv_scale,
+                                      interpolation=cv2.INTER_AREA)
+        else:
+            self._pv_img = self._src
+        self._source.set_image(self._src)
+        self._source.clear_corners()
+        self._source.set_model(None)
+        self._on_mode_changed(self._mode.currentIndex())
+
     def result_image(self):
         return self._result
 
@@ -515,6 +559,8 @@ class DewarpStage(QDialog):
         self._refine_btn.setEnabled(idx == MODE_SPLINE)
         # full-image mode only applies to the quad transform
         self._full.setEnabled(idx == MODE_QUAD)
+        if self._src is None:
+            return
         if idx == MODE_SPLINE and self._source.model() is None:
             h, w = self._src.shape[:2]
             self._source.set_model(dw.default_model(w, h))
@@ -522,6 +568,8 @@ class DewarpStage(QDialog):
             self._request_preview()
 
     def _reset_selection(self):
+        if self._src is None:
+            return
         if self._spline_mode():
             h, w = self._src.shape[:2]
             self._source.set_model(dw.default_model(w, h))
@@ -551,7 +599,7 @@ class DewarpStage(QDialog):
 
     # ----- actions ---------------------------------------------------------
     def _auto_detect(self):
-        if cv2 is None:
+        if cv2 is None or self._src is None:
             return
         gray = cv2.cvtColor(self._src, cv2.COLOR_BGR2GRAY)
         try:
@@ -567,7 +615,7 @@ class DewarpStage(QDialog):
 
     def _refine_text(self):
         model = self._source.model()
-        if cv2 is None or model is None:
+        if cv2 is None or model is None or self._src is None:
             return
         gray = cv2.cvtColor(self._src, cv2.COLOR_BGR2GRAY)
         try:
@@ -583,6 +631,8 @@ class DewarpStage(QDialog):
 
     # ----- preview ---------------------------------------------------------
     def _request_preview(self, *_):
+        if self._src is None:
+            return
         if self._spline_mode():
             self._update_spline_preview()
         else:
@@ -644,6 +694,8 @@ class DewarpStage(QDialog):
 
     # ----- apply -----------------------------------------------------------
     def _on_apply(self):
+        if self._src is None:
+            return
         if self._spline_mode():
             model = self._source.model()
             if model is None:
@@ -656,4 +708,4 @@ class DewarpStage(QDialog):
                 self._show_error(exc)
                 return
         if self._result is not None:
-            self.accept()
+            self.applied.emit()

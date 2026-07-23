@@ -62,6 +62,7 @@ class ProjectController:
         loaded, pixmap = self._read_image(path, "Import Photo")
         if loaded is None:
             return
+        w._leave_dewarp_stage()   # no-op when already on the trace view
 
         w.project = Project()
         w.project.set_source_image(loaded)
@@ -98,6 +99,7 @@ class ProjectController:
         loaded, pixmap = self._read_image(img_path, "Open Project")
         if loaded is None:
             return
+        w._leave_dewarp_stage()   # no-op when already on the trace view
 
         saved_w, saved_h = project.pixel_width, project.pixel_height
 
