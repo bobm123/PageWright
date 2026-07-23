@@ -406,10 +406,17 @@ class Canvas(QGraphicsView):
         self._roi_rect = None
 
     def zoom_to_rect(self, rect):
-        """Fit `rect` (scene coords) in the viewport."""
+        """Fit `rect` (scene coords) in the viewport, centered.
+
+        fitInView alone does not reliably center the target (it accounts
+        for the viewport frame and can leave the rect off to one side), so
+        follow it with an explicit centerOn. centerOn still clamps to the
+        scene rect, so a selection hard against an image edge centers only
+        as far as the image allows - which is the expected limit."""
         if self._photo_item is None:
             return
         self.fitInView(rect, Qt.KeepAspectRatio)
+        self.centerOn(rect.center())
         self._scale = self.transform().m11()
 
     # ----- mouse events ----------------------------------------------------
