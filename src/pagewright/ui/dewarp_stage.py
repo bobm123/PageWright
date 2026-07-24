@@ -1042,10 +1042,16 @@ class DewarpStageWidget(QWidget):
             self._apply_btn.setEnabled(False)
             self._result = None
             return
-        # fast preview on the downscaled copy; Apply renders full-res
+        # render into the CHOSEN output aspect (so the right pane reflects
+        # the Width/Height / calibration), just at a capped resolution for
+        # responsiveness; Apply renders full-res at the same aspect.
+        out_w, out_h = self._spline_output_size(model)
+        pv_h = max(2, min(int(out_h), PREVIEW_H))
+        pv_w = max(2, int(round(pv_h * out_w / max(1, out_h))))
         pv_model = model.scaled(self._pv_scale)
         try:
             flat = dw.dewarp_page(self._pv_img, pv_model,
+                                  out_w=pv_w, out_h=pv_h,
                                   interp=cv2.INTER_LINEAR)
         except Exception as exc:
             self._show_error(exc)
@@ -1054,7 +1060,6 @@ class DewarpStageWidget(QWidget):
         self._pv_shape = flat.shape[:2]  # for result-pane calibration
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
-        out_w, out_h = self._spline_output_size(model)
         self._size_label.setText("Output: %d x %d px" % (out_w, out_h))
 
     def _spline_output_size(self, model):
