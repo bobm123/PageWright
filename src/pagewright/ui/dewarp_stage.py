@@ -49,9 +49,9 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
                                QFormLayout, QGraphicsEllipseItem,
                                QGraphicsItem, QGraphicsPolygonItem,
                                QGraphicsScene, QGraphicsSimpleTextItem,
-                               QGraphicsView, QHBoxLayout, QLabel, QMenu,
-                               QPushButton, QSpinBox, QSplitter,
-                               QVBoxLayout, QWidget)
+                               QGraphicsView, QHBoxLayout, QInputDialog,
+                               QLabel, QMenu, QPushButton, QSpinBox,
+                               QSplitter, QVBoxLayout, QWidget)
 
 from ..core import dewarp as dw
 
@@ -106,7 +106,14 @@ class _AutoFitView(QGraphicsView):
     stage may be hidden in a stacked layout), so a one-shot fitInView at
     that moment computes against a tiny default viewport and the image
     shows up minuscule. Instead, refit on every show/resize until the
-    user zooms manually (wheel); a new image re-arms auto-fit."""
+    user zooms manually (wheel); a new image re-arms auto-fit.
+
+    Also hosts the shared two-point CALIBRATION gesture: after
+    begin_calibration(p1) a rubber line follows the cursor; the next
+    left-click sets the endpoint and emits calibrationPicked(p1, p2)
+    (scene coords). Right-click or Escape cancels."""
+
+    calibrationPicked = Signal(object, object)   # QPointF, QPointF
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -116,10 +123,51 @@ class _AutoFitView(QGraphicsView):
         self._user_zoomed = False
         self._panning = False
         self._pan_last = None
+        self._calib_p1 = None
+        self._calib_line = None
+        self._saved_drag_mode = None
         self.setBackgroundBrush(QBrush(QColor("#202020")))
         # zoom toward the cursor rather than the view center
         self.setTransformationAnchor(
             QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+
+    # ----- calibration gesture ---------------------------------------------
+    def calibrating(self):
+        return self._calib_p1 is not None
+
+    def begin_calibration(self, scene_p1):
+        self._calib_p1 = QPointF(scene_p1)
+        pen = QPen(QColor("#ff5555"))
+        pen.setCosmetic(True)
+        pen.setWidth(2)
+        self._calib_line = self._scene.addLine(
+            scene_p1.x(), scene_p1.y(), scene_p1.x(), scene_p1.y(), pen)
+        self._calib_line.setZValue(50)
+        # hand-drag (result pane) would swallow the endpoint click
+        self._saved_drag_mode = self.dragMode()
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+
+    def cancel_calibration(self):
+        if self._calib_line is not None:
+            self._scene.removeItem(self._calib_line)
+        self._end_calibration()
+
+    def _end_calibration(self):
+        self._calib_p1 = None
+        self._calib_line = None
+        if self._saved_drag_mode is not None:
+            self.setDragMode(self._saved_drag_mode)
+            self._saved_drag_mode = None
+        self.unsetCursor()
+
+    def keyPressEvent(self, event):
+        if self.calibrating() and event.key() == Qt.Key_Escape:
+            self.cancel_calibration()
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     def fit(self):
         if self._pix_item is not None:
@@ -162,6 +210,18 @@ class _AutoFitView(QGraphicsView):
 
     # middle-mouse drag pans in any mode (matches the trace canvas)
     def mousePressEvent(self, event):
+        if self.calibrating():
+            if event.button() == Qt.LeftButton:
+                p2 = self.mapToScene(event.position().toPoint())
+                p1 = QPointF(self._calib_p1)
+                if self._calib_line is not None:
+                    self._scene.removeItem(self._calib_line)
+                self._end_calibration()
+                self.calibrationPicked.emit(p1, p2)
+            else:
+                self.cancel_calibration()
+            event.accept()
+            return
         if event.button() == Qt.MiddleButton:
             self._start_pan(event.position())
             event.accept()
@@ -169,6 +229,12 @@ class _AutoFitView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
+        if self.calibrating() and self._calib_line is not None:
+            p2 = self.mapToScene(event.position().toPoint())
+            self._calib_line.setLine(self._calib_p1.x(), self._calib_p1.y(),
+                                     p2.x(), p2.y())
+            event.accept()
+            return
         if self._panning:
             d = event.position() - self._pan_last
             self._pan_last = event.position()
@@ -189,6 +255,9 @@ class _AutoFitView(QGraphicsView):
         super().mouseReleaseEvent(event)
 
     def _set_pixmap(self, pm, rearm_fit=True):
+        if self.calibrating():          # scene.clear() destroys the line
+            self._calib_line = None
+            self.cancel_calibration()
         self._scene.clear()
         self._pix_item = self._scene.addPixmap(pm)
         # Margin around the image serves two purposes: the view can pan
@@ -205,13 +274,30 @@ class _AutoFitView(QGraphicsView):
 
 
 class _ResultView(_AutoFitView):
-    """Read-only image pane with wheel zoom and fit-to-window."""
+    """Image pane with wheel zoom, hand-drag pan and fit-to-window.
+    Right-click starts the two-point calibration measurement."""
 
     def __init__(self, parent=None):
         super().__init__(parent)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
+        self.setMouseTracking(True)
+
+    def mousePressEvent(self, event):
+        if (event.button() == Qt.RightButton and not self.calibrating()
+                and self._pix_item is not None):
+            menu = QMenu(self)
+            act = menu.addAction("Calibrate scale from here...")
+            if menu.exec(event.globalPosition().toPoint()) is act:
+                self.begin_calibration(
+                    self.mapToScene(event.position().toPoint()))
+            event.accept()
+            return
+        super().mousePressEvent(event)
 
     def show_placeholder(self, text):
+        if self.calibrating():
+            self._calib_line = None
+            self.cancel_calibration()
         self._scene.clear()
         self._pix_item = None
         t = self._scene.addText(text)
@@ -363,7 +449,7 @@ class _SourceView(_AutoFitView):
         return labels[int(np.argmin(d))]
 
     def mousePressEvent(self, event):
-        if self._pix_item is None:
+        if self._pix_item is None or self.calibrating():
             return super().mousePressEvent(event)
         pos = event.position().toPoint()
         if event.button() == Qt.RightButton:
@@ -401,25 +487,26 @@ class _SourceView(_AutoFitView):
         Spline mode: a corner anchor (or its tip) toggles between normal
         corner and spline handle; the mid handle / its tips get the
         break-into-V / re-smooth menu.
+        Anywhere else (either mode): offer the two-point calibration
+        measurement starting at the clicked position.
         """
         if self._mode == MODE_QUAD:
-            if len(self._corners) != 4:
-                return False
-            idx = self._nearest_quad_corner(pos)
-            if idx is not None:
-                self.promoteRequested.emit(
-                    "corner:%s" % self._corner_label(idx), None)
-                return True
-            hit = self._edge_line_hit(pos)
-            if hit is not None:
-                self.promoteRequested.emit(hit[0], hit[1])
-                return True
-            return False
+            if len(self._corners) == 4:
+                idx = self._nearest_quad_corner(pos)
+                if idx is not None:
+                    self.promoteRequested.emit(
+                        "corner:%s" % self._corner_label(idx), None)
+                    return True
+                hit = self._edge_line_hit(pos)
+                if hit is not None:
+                    self.promoteRequested.emit(hit[0], hit[1])
+                    return True
+            return self._calibrate_menu(pos, event)
         if self._model is None:
             return False
         h = self._nearest_spline_handle(pos)
         if h is None:
-            return False
+            return self._calibrate_menu(pos, event)
         kind, key, sgn = h
         if kind == "anchor":
             dw.toggle_corner_tip(self._model, key)
@@ -447,6 +534,13 @@ class _SourceView(_AutoFitView):
                 self._notify_model_edit()
             return True
         return False
+
+    def _calibrate_menu(self, pos, event):
+        menu = QMenu(self)
+        act = menu.addAction("Calibrate scale from here...")
+        if menu.exec(event.globalPosition().toPoint()) is act:
+            self.begin_calibration(self.mapToScene(pos))
+        return True
 
     def _notify_model_edit(self):
         self._redraw_overlay()
@@ -654,9 +748,15 @@ class DewarpStageWidget(QWidget):
         self._dpi.setRange(30, 1200)
         self._dpi.setValue(300)
         self._dpi.setSuffix(" DPI")
-        for w in (self._w_mm, self._h_mm, self._dpi):
+        self._lock_aspect = QCheckBox("Lock aspect ratio")
+        self._lock_aspect.toggled.connect(self._on_lock_toggled)
+        self._aspect = None                      # H/W ratio while locked
+        self._syncing_size = False
+        self._w_mm.valueChanged.connect(self._on_width_changed)
+        self._h_mm.valueChanged.connect(self._on_height_changed)
+        self._dpi.valueChanged.connect(self._request_preview)
+        for w in (self._w_mm, self._h_mm, self._dpi, self._lock_aspect):
             w.setEnabled(False)                  # auto-size on by default
-            w.valueChanged.connect(self._request_preview)
 
         self._full = QCheckBox("Keep whole image (don't crop)")
         self._full.toggled.connect(self._request_preview)
@@ -693,6 +793,7 @@ class DewarpStageWidget(QWidget):
         form.addRow("Output size:", self._auto_size)
         form.addRow("Width:", self._w_mm)
         form.addRow("Height:", self._h_mm)
+        form.addRow("", self._lock_aspect)
         form.addRow("Resolution:", self._dpi)
 
         controls = QVBoxLayout()
@@ -729,6 +830,10 @@ class DewarpStageWidget(QWidget):
         self._source.cornersChanged.connect(self._request_preview)
         self._source.modelEdited.connect(self._request_preview)
         self._source.promoteRequested.connect(self._promote_to_spline)
+        self._source.calibrationPicked.connect(
+            lambda p1, p2: self._on_calibrated("source", p1, p2))
+        self._resultv.calibrationPicked.connect(
+            lambda p1, p2: self._on_calibrated("result", p1, p2))
 
     # ----- entry / result ---------------------------------------------------
     def set_source_image(self, bgr_image, dpi=300):
@@ -816,9 +921,41 @@ class DewarpStageWidget(QWidget):
 
     # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):
-        for w in (self._w_mm, self._h_mm, self._dpi):
+        for w in (self._w_mm, self._h_mm, self._dpi, self._lock_aspect):
             w.setEnabled(not checked)
         self._request_preview()
+
+    def _on_lock_toggled(self, checked):
+        # remember the ratio in force at the moment of locking
+        self._aspect = (self._h_mm.value() / max(0.01, self._w_mm.value())
+                        if checked else None)
+
+    def _on_width_changed(self, value):
+        if self._syncing_size:
+            return
+        if self._lock_aspect.isChecked() and self._aspect:
+            self._syncing_size = True
+            self._h_mm.setValue(value * self._aspect)
+            self._syncing_size = False
+        self._request_preview()
+
+    def _on_height_changed(self, value):
+        if self._syncing_size:
+            return
+        if self._lock_aspect.isChecked() and self._aspect:
+            self._syncing_size = True
+            self._w_mm.setValue(value / self._aspect)
+            self._syncing_size = False
+        self._request_preview()
+
+    def _set_size_spinners(self, w_mm, h_mm):
+        """Set both spinners without lock coupling or double previews."""
+        self._syncing_size = True
+        self._w_mm.setValue(w_mm)
+        self._h_mm.setValue(h_mm)
+        self._syncing_size = False
+        if self._lock_aspect.isChecked():
+            self._aspect = h_mm / max(0.01, w_mm)
 
     def _explicit_size(self):
         dpi = self._dpi.value()
@@ -914,6 +1051,7 @@ class DewarpStageWidget(QWidget):
             self._show_error(exc)
             return
         self._result = None            # full-res result made on Apply
+        self._pv_shape = flat.shape[:2]  # for result-pane calibration
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
         out_w, out_h = self._spline_output_size(model)
@@ -929,6 +1067,90 @@ class DewarpStageWidget(QWidget):
         self._resultv.show_placeholder("Dewarp error: %s" % exc)
         self._apply_btn.setEnabled(False)
         self._result = None
+
+    # ----- calibration -----------------------------------------------------
+    def _measured_output_px(self, which, p1, p2):
+        """Length (px) and direction of the measured segment mapped into
+        OUTPUT pixel space, or None when no transform is set up yet."""
+        if self._spline_mode():
+            model = self._source.model()
+            if model is None:
+                return None
+            out_w, out_h = self._spline_output_size(model)
+            if which == "result":
+                # preview renders downscaled; scale per-axis to output px
+                pv_h, pv_w = getattr(self, "_pv_shape", (None, None))
+                if not pv_h:
+                    return None
+                dx = (p2.x() - p1.x()) * out_w / pv_w
+                dy = (p2.y() - p1.y()) * out_h / pv_h
+                return (dx * dx + dy * dy) ** 0.5, dx, dy
+            # source pane: approximate with the anchor-quad homography
+            # (perspective stage only; close for gently curved pages)
+            a = model.anchors
+            rect = np.float32([a["tl"], a["tr"], a["br"], a["bl"]])
+        else:
+            corners = self._source.corners()
+            if len(corners) != 4:
+                return None
+            out_w, out_h = self._quad_output_size(corners)
+            if which == "result":
+                dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
+                return (dx * dx + dy * dy) ** 0.5, dx, dy
+            rect = dw.order_points(corners)
+        dst = np.float32([[0, 0], [out_w - 1, 0],
+                          [out_w - 1, out_h - 1], [0, out_h - 1]])
+        M = cv2.getPerspectiveTransform(np.float32(rect), dst)
+        pts = np.float32([[p1.x(), p1.y()], [p2.x(), p2.y()]])
+        q = cv2.perspectiveTransform(pts.reshape(-1, 1, 2), M).reshape(-1, 2)
+        dx, dy = float(q[1, 0] - q[0, 0]), float(q[1, 1] - q[0, 1])
+        return (dx * dx + dy * dy) ** 0.5, dx, dy
+
+    def _on_calibrated(self, which, p1, p2):
+        """Two calibration points picked: ask the real length and rescale
+        the output so the measured feature comes out that size.
+
+        With 'Lock aspect ratio' on, both dimensions scale together;
+        otherwise only the measured segment's dominant axis (horizontal ->
+        Width, vertical -> Height) is adjusted - that is how a known
+        length fixes a wrong aspect ratio."""
+        if self._src is None:
+            return
+        m = self._measured_output_px(which, p1, p2)
+        if m is None or m[0] < 2.0:
+            self._size_label.setText(
+                "Calibration needs a placed outline and a longer line")
+            return
+        d_px, dx, dy = m
+        real_mm, ok = QInputDialog.getDouble(
+            self, "Calibrate Scale",
+            "Real-world length of the measured line (mm):",
+            100.0, 0.01, 10000.0, 2)
+        if not ok:
+            return
+        dpi = self._dpi.value()
+        # current output size in mm (from the active sizing mode)
+        if self._spline_mode():
+            out_w, out_h = self._spline_output_size(self._source.model())
+        else:
+            out_w, out_h = self._quad_output_size(self._source.corners())
+        w_mm = out_w / dpi * 25.4
+        h_mm = out_h / dpi * 25.4
+        factor = real_mm / (d_px / dpi * 25.4)
+        if self._lock_aspect.isChecked() or abs(dx) == abs(dy):
+            w_mm, h_mm = w_mm * factor, h_mm * factor
+        elif abs(dx) > abs(dy):
+            w_mm *= factor
+        else:
+            h_mm *= factor
+        # switch to explicit sizing with the calibrated dimensions
+        was_auto = self._auto_size.isChecked()
+        if was_auto:
+            self._auto_size.setChecked(False)   # enables spinners, previews
+        self._set_size_spinners(w_mm, h_mm)
+        self._request_preview()
+        self._size_label.setText(
+            "Calibrated: %.1f x %.1f mm @ %d DPI" % (w_mm, h_mm, dpi))
 
     # ----- apply -----------------------------------------------------------
     def _on_apply(self):
