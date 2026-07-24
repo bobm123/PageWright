@@ -49,7 +49,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
                                QFormLayout, QGraphicsEllipseItem,
                                QGraphicsItem, QGraphicsPolygonItem,
                                QGraphicsScene, QGraphicsSimpleTextItem,
-                               QGraphicsView, QHBoxLayout, QLabel,
+                               QGraphicsView, QHBoxLayout, QLabel, QMenu,
                                QPushButton, QSpinBox, QSplitter,
                                QVBoxLayout, QWidget)
 
@@ -218,7 +218,11 @@ class _SourceView(_AutoFitView):
     """Photo pane hosting either quad corners or a spline page outline.
 
     QUAD mode: click empty space to drop a corner (up to four); drag a
-    corner to move it. Emits :attr:`cornersChanged` on any edit.
+    corner to move it. Emits :attr:`cornersChanged` on any edit. Once all
+    four corners are placed, the quad can be PROMOTED to a spline outline:
+    right-click a corner for a "convert to curved page" menu, or left-click
+    ON the top or bottom edge line to promote AND pull the new on-curve
+    mid point to the clicked spot (:attr:`promoteRequested`).
 
     SPLINE mode: shows a ``core.dewarp.PageModel`` outline with all its
     draggable handles (corner anchors, on-curve mids, mirrored tangent
@@ -230,6 +234,9 @@ class _SourceView(_AutoFitView):
     cornersChanged = Signal()
     modelChanged = Signal()
     modelEdited = Signal()
+    # edge name ("top"/"bottom") + scene QPointF for an edge-line click,
+    # or ("", None) for a corner right-click promotion
+    promoteRequested = Signal(str, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -287,6 +294,31 @@ class _SourceView(_AutoFitView):
                 best, best_d = i, d
         return best
 
+    def _edge_line_hit(self, view_pos):
+        """If view_pos lies on the quad's top or bottom edge line (and not
+        on a corner), return (edge_name, scene_point); else None."""
+        if len(self._corners) != 4:
+            return None
+        rect = dw.order_points(self.corners())    # tl, tr, br, bl
+        tl, tr, br, bl = [self.mapFromScene(QPointF(float(x), float(y)))
+                          for x, y in rect]
+        px, py = view_pos.x(), view_pos.y()
+
+        def seg_dist(a, b):
+            ax, ay, bx, by = a.x(), a.y(), b.x(), b.y()
+            vx, vy = bx - ax, by - ay
+            L2 = vx * vx + vy * vy
+            if L2 <= 0:
+                return ((px - ax) ** 2 + (py - ay) ** 2) ** 0.5
+            t = max(0.0, min(1.0, ((px - ax) * vx + (py - ay) * vy) / L2))
+            cx, cy = ax + t * vx, ay + t * vy
+            return ((px - cx) ** 2 + (py - cy) ** 2) ** 0.5
+
+        for name, (a, b) in (("top", (tl, tr)), ("bottom", (bl, br))):
+            if seg_dist(a, b) <= HIT_R:
+                return name, self.mapToScene(view_pos)
+        return None
+
     def _nearest_spline_handle(self, view_pos):
         if self._model is None:
             return None
@@ -300,9 +332,23 @@ class _SourceView(_AutoFitView):
         return best
 
     def mousePressEvent(self, event):
-        if self._pix_item is None or event.button() != Qt.LeftButton:
+        if self._pix_item is None:
             return super().mousePressEvent(event)
         pos = event.position().toPoint()
+        # right-click on a completed quad's corner: offer spline promotion
+        if (event.button() == Qt.RightButton and self._mode == MODE_QUAD
+                and len(self._corners) == 4
+                and self._nearest_quad_corner(pos) is not None):
+            menu = QMenu(self)
+            act = menu.addAction(
+                "Curve this page (corners become spline handles)")
+            chosen = menu.exec(event.globalPosition().toPoint())
+            if chosen is act:
+                self.promoteRequested.emit("", None)
+            event.accept()
+            return
+        if event.button() != Qt.LeftButton:
+            return super().mousePressEvent(event)
         if self._mode == MODE_QUAD:
             idx = self._nearest_quad_corner(pos)
             if idx is not None:
@@ -311,6 +357,12 @@ class _SourceView(_AutoFitView):
                 self._corners.append(self.mapToScene(pos))
                 self._redraw_overlay()
                 self.cornersChanged.emit()
+            else:
+                # all corners placed: a click ON the top/bottom edge line
+                # promotes to spline with the mid point at the click
+                hit = self._edge_line_hit(pos)
+                if hit is not None:
+                    self.promoteRequested.emit(hit[0], hit[1])
         else:
             h = self._nearest_spline_handle(pos)
             if h is not None:
@@ -586,6 +638,7 @@ class DewarpStageWidget(QWidget):
 
         self._source.cornersChanged.connect(self._request_preview)
         self._source.modelEdited.connect(self._request_preview)
+        self._source.promoteRequested.connect(self._promote_to_spline)
 
     # ----- entry / result ---------------------------------------------------
     def set_source_image(self, bgr_image, dpi=300):
@@ -637,6 +690,28 @@ class DewarpStageWidget(QWidget):
             self._source.set_model(dw.default_model(w, h))
         else:
             self._source.clear_corners()
+
+    def _promote_to_spline(self, edge, scene_pos):
+        """Convert the placed quad into a spline outline and switch modes.
+
+        The spline is seeded STRAIGHT from the quad corners, so the result
+        is initially identical to the quad transform; if `edge` names the
+        top or bottom edge, that edge's on-curve mid point is pulled to the
+        clicked position, bending the curve through it immediately."""
+        corners = self._source.corners()
+        if len(corners) != 4 or self._src is None:
+            return
+        rect = dw.order_points(corners)           # tl, tr, br, bl
+        tl, tr, br, bl = [np.asarray(p, np.float64) for p in rect]
+        n = dw.N_PTS
+        top = np.linspace(tl, tr, n)
+        bot = np.linspace(bl, br, n)
+        model = dw.model_from_traces(top, bot)
+        if edge:
+            dw.move_handle(model, ("mid", edge, None),
+                           (scene_pos.x(), scene_pos.y()))
+        self._source.set_model(model)
+        self._mode.setCurrentIndex(MODE_SPLINE)   # triggers spline preview
 
     # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):

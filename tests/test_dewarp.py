@@ -120,6 +120,25 @@ def test_model_copy_is_deep():
     assert m.edges["top"].mid != [2.0, 2.0]
 
 
+def test_model_from_straight_traces_stays_straight():
+    # seeding a spline from straight lines (the quad -> spline promotion)
+    # must reproduce the straight edges: dewarping with it is then
+    # equivalent to the plain quad transform until the user bends it
+    tl, tr = np.array([100.0, 80.0]), np.array([500.0, 110.0])
+    bl, br = np.array([90.0, 330.0]), np.array([520.0, 360.0])
+    top = np.linspace(tl, tr, dw.N_PTS)
+    bot = np.linspace(bl, br, dw.N_PTS)
+    m = dw.model_from_traces(top, bot)
+    dense_top, dense_bot = dw.page_edges(m, 400)
+    for dense, a, b in ((dense_top, tl, tr), (dense_bot, bl, br)):
+        # max distance of the dense curve from the straight segment
+        v = b - a
+        L2 = float(v @ v)
+        t = np.clip(((dense - a) @ v) / L2, 0.0, 1.0)
+        proj = a + t[:, None] * v
+        assert np.max(np.linalg.norm(dense - proj, axis=1)) < 0.5
+
+
 def test_model_scaled_scales_coords_and_vectors():
     m = dw.default_model(800, 600)
     s = m.scaled(0.5)
