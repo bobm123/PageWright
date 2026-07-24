@@ -226,9 +226,12 @@ class _SourceView(_AutoFitView):
 
     SPLINE mode: shows a ``core.dewarp.PageModel`` outline with all its
     draggable handles (corner anchors, on-curve mids, mirrored tangent
-    tips, per-corner tangent tips). Emits :attr:`modelChanged` while
-    dragging (overlay redraw) and :attr:`modelEdited` when a drag ends
-    (preview re-render). Coordinates are image pixels throughout.
+    tips, per-corner tangent tips). Right-click a mid handle (or its
+    tips) to BREAK the tangent into a V fold - the two tips then move
+    independently, modeling the steep gutter curve at a book's center -
+    or to re-smooth it. Emits :attr:`modelChanged` while dragging
+    (overlay redraw) and :attr:`modelEdited` when a drag ends (preview
+    re-render). Coordinates are image pixels throughout.
     """
 
     cornersChanged = Signal()
@@ -347,6 +350,30 @@ class _SourceView(_AutoFitView):
                 self.promoteRequested.emit("", None)
             event.accept()
             return
+        # right-click on a spline mid handle (or its tangent tips): break
+        # the tangent into a V fold (steep gutter curves) or re-smooth it
+        if (event.button() == Qt.RightButton and self._mode == MODE_SPLINE
+                and self._model is not None):
+            h = self._nearest_spline_handle(pos)
+            if h is not None and h[0] in ("mid", "tip"):
+                edge_name = h[1]
+                e = self._model.edges[edge_name]
+                menu = QMenu(self)
+                if e.broken:
+                    act = menu.addAction("Make smooth (mirror tangents)")
+                else:
+                    act = menu.addAction("Break tangents (V fold)")
+                chosen = menu.exec(event.globalPosition().toPoint())
+                if chosen is act:
+                    if e.broken:
+                        dw.smooth_mid_tangent(self._model, edge_name)
+                    else:
+                        dw.break_mid_tangent(self._model, edge_name)
+                    self._redraw_overlay()
+                    self.modelChanged.emit()
+                    self.modelEdited.emit()
+                event.accept()
+                return
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
         if self._mode == MODE_QUAD:
@@ -455,16 +482,18 @@ class _SourceView(_AutoFitView):
             pen.setWidth(2)
             item = self._scene.addPath(path, pen)
             self._overlay.append(item)
-            # mid handle line (mid - handle .. mid + handle), dashed
+            # mid tangent lines mid->each tip, dashed. Drawn per side (via
+            # handle_pos) so a broken tangent shows its true V shape.
             e = m.edges[name]
             mid = np.asarray(e.mid, float)
-            hv = np.asarray(e.handle, float)
-            t1, t2 = mid + hv, mid - hv
             hpen = QPen(QColor("#bbbbbb"))
             hpen.setCosmetic(True)
             hpen.setStyle(Qt.DashLine)
-            ln = self._scene.addLine(t1[0], t1[1], t2[0], t2[1], hpen)
-            self._overlay.append(ln)
+            for sgn in (1, -1):
+                tp = dw.handle_pos(m, ("tip", name, sgn))
+                ln = self._scene.addLine(mid[0], mid[1],
+                                         float(tp[0]), float(tp[1]), hpen)
+                self._overlay.append(ln)
             # corner tip lines anchor -> tip
             for end in ("a", "b"):
                 tip = dw.handle_pos(m, ("ctip", name, end))

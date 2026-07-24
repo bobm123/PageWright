@@ -120,6 +120,75 @@ def test_model_copy_is_deep():
     assert m.edges["top"].mid != [2.0, 2.0]
 
 
+def test_broken_mid_tangent_forms_v():
+    # a broken mid tangent lets the curve fold into a V at mid (the book
+    # gutter). Handles pointing down-left and up-right make a sharp kink.
+    a, b, mid = [0.0, 0.0], [100.0, 0.0], [50.0, 30.0]
+    m = dw.model_from_traces([[0, 0], [50, 0], [100, 0]],
+                             [[0, 100], [50, 100], [100, 100]])
+    e = m.edges["top"]
+    e.mid = list(mid)
+    e.handle = [-10.0, -10.0]        # incoming tip at mid - h = (60, 40)?
+    dw.break_mid_tangent(m, "top")
+    e.handle_out = [10.0, -10.0]     # outgoing rises: sharp V at mid
+    e.tip_a = None
+    e.tip_b = None
+    dense = dw.edge_dense(m, "top", 1001)
+    i = np.argmin(np.abs(dense[:, 0] - 50.0))
+    # curve passes through mid (continuity)
+    assert dense[i] == pytest.approx(mid, abs=1.0)
+    # slope flips sign across mid: dy/dx < 0 before, > 0 after? incoming
+    # tangent 3*h = (-30,-30) points down-left along curve direction ->
+    # curve descends INTO mid from the left going down... measure kink:
+    before = dense[i] - dense[i - 20]
+    after = dense[i + 20] - dense[i]
+    ang_before = np.arctan2(before[1], before[0])
+    ang_after = np.arctan2(after[1], after[0])
+    assert abs(ang_after - ang_before) > 0.5   # pronounced direction change
+
+
+def test_broken_equal_handles_identical_to_smooth():
+    m = dw.default_model(800, 600)
+    smooth = dw.edge_dense(m, "top", 500).copy()
+    dw.break_mid_tangent(m, "top")      # handle_out seeded = handle
+    broken = dw.edge_dense(m, "top", 500)
+    assert np.max(np.abs(broken - smooth)) < 1e-12
+    dw.smooth_mid_tangent(m, "top")
+    assert m.edges["top"].handle_out is None
+
+
+def test_broken_tips_move_independently():
+    m = dw.default_model(800, 600)
+    dw.break_mid_tangent(m, "top")
+    e = m.edges["top"]
+    mid = np.array(e.mid)
+    dw.move_handle(m, ("tip", "top", +1), mid + [40.0, -25.0])
+    assert e.handle_out == pytest.approx([40.0, -25.0])
+    old_out = list(e.handle_out)
+    dw.move_handle(m, ("tip", "top", -1), mid + [-10.0, 30.0])
+    assert e.handle == pytest.approx([10.0, -30.0])   # sgn * (pos - mid)
+    assert e.handle_out == pytest.approx(old_out)     # unaffected
+    # handle_pos reflects the independent sides
+    assert dw.handle_pos(m, ("tip", "top", +1)) == pytest.approx(
+        mid + [40.0, -25.0])
+    assert dw.handle_pos(m, ("tip", "top", -1)) == pytest.approx(
+        mid - [10.0, -30.0])
+
+
+def test_broken_edge_roundtrips_and_scales():
+    m = dw.default_model(800, 600)
+    dw.break_mid_tangent(m, "top")
+    m.edges["top"].handle_out = [12.0, -8.0]
+    d = m.to_dict()
+    assert d["edges"]["top"]["handle_out"] == [12.0, -8.0]
+    m2 = dw.PageModel.from_dict(json.loads(json.dumps(d)))
+    assert m2.edges["top"].handle_out == [12.0, -8.0]
+    s = m2.scaled(0.5)
+    assert s.edges["top"].handle_out == pytest.approx([6.0, -4.0])
+    # smooth edge omits the key entirely (older files stay loadable)
+    assert "handle_out" not in d["edges"]["bottom"]
+
+
 def test_model_from_straight_traces_stays_straight():
     # seeding a spline from straight lines (the quad -> spline promotion)
     # must reproduce the straight edges: dewarping with it is then

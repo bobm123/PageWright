@@ -56,23 +56,36 @@ EDGE_ANCHORS = {"top": ("tl", "tr"), "bottom": ("bl", "br")}
 class PageEdge:
     """One curved page edge (top or bottom).
 
-    mid     on-curve control point [x, y] (full-image pixels)
-    handle  mirrored tangent handle; the curve tangent at mid is set by
-            this vector, drawn as mid +/- handle
-    tip_a   optional tangent handle at the START corner, stored pointing
-            INTO the curve from that anchor (intuitive to drag); None
-            means "use the chord tangent"
-    tip_b   optional tangent handle at the END corner, same convention
+    mid         on-curve control point [x, y] (full-image pixels)
+    handle      tangent handle at mid; when handle_out is None the tangent
+                is MIRRORED (smooth), drawn as mid +/- handle
+    handle_out  optional independent OUTGOING tangent handle at mid.
+                When set, the incoming side (toward the start anchor)
+                uses `handle` and the outgoing side uses `handle_out`,
+                allowing a sharp V at mid - e.g. the gutter fold at the
+                center of an open book. None = smooth (mirrored).
+    tip_a       optional tangent handle at the START corner, stored
+                pointing INTO the curve from that anchor (intuitive to
+                drag); None means "use the chord tangent"
+    tip_b       optional tangent handle at the END corner, same convention
     """
     mid: List[float]
     handle: List[float]
     tip_a: Optional[List[float]] = None
     tip_b: Optional[List[float]] = None
+    handle_out: Optional[List[float]] = None
+
+    @property
+    def broken(self) -> bool:
+        """True when the mid tangent is broken (independent sides)."""
+        return self.handle_out is not None
 
     def copy(self) -> "PageEdge":
         return PageEdge(list(self.mid), list(self.handle),
                         None if self.tip_a is None else list(self.tip_a),
-                        None if self.tip_b is None else list(self.tip_b))
+                        None if self.tip_b is None else list(self.tip_b),
+                        None if self.handle_out is None
+                        else list(self.handle_out))
 
     def to_dict(self) -> dict:
         d = {"mid": list(self.mid), "handle": list(self.handle)}
@@ -80,14 +93,18 @@ class PageEdge:
             d["tip_a"] = list(self.tip_a)
         if self.tip_b is not None:
             d["tip_b"] = list(self.tip_b)
+        if self.handle_out is not None:
+            d["handle_out"] = list(self.handle_out)
         return d
 
     @classmethod
     def from_dict(cls, d: dict) -> "PageEdge":
         ta, tb = d.get("tip_a"), d.get("tip_b")
+        ho = d.get("handle_out")
         return cls(list(d["mid"]), list(d["handle"]),
                    None if ta is None else list(ta),
-                   None if tb is None else list(tb))
+                   None if tb is None else list(tb),
+                   None if ho is None else list(ho))
 
 
 @dataclass
@@ -132,6 +149,8 @@ class PageModel:
                 e.tip_a = [v * s for v in e.tip_a]
             if e.tip_b is not None:
                 e.tip_b = [v * s for v in e.tip_b]
+            if e.handle_out is not None:
+                e.handle_out = [v * s for v in e.handle_out]
         return out
 
 
@@ -148,23 +167,30 @@ def _hermite_seg(p0, p1, t0, t1, n):
     return h00 * p0 + h10 * t0 + h01 * p1 + h11 * t1
 
 
-def spline_edge_dense(a, m, h, b, ta=None, tb=None, n=DENSE):
+def spline_edge_dense(a, m, h, b, ta=None, tb=None, n=DENSE, h_out=None):
     """Edge curve from corner a to corner b through on-curve control
     point m with tangent handle h (drawn as m +/- h). Two C1-joined
     Hermite segments. ta/tb are optional endpoint TANGENTS (curve
     direction, left-to-right); they default to the chords. The corner
     handles let the curve dive steeply where a page turns into the
-    gutter - a chord tangent cannot follow that."""
+    gutter - a chord tangent cannot follow that.
+
+    h_out, when given, is an independent OUTGOING tangent handle at m:
+    the a->m segment ends with tangent 3h and the m->b segment starts
+    with tangent 3*h_out, breaking C1 at m into a sharp V (the gutter
+    fold at the center of an open book). h_out=None keeps the mirrored
+    (smooth) behavior, numerically identical to before."""
     a = np.asarray(a, np.float64)
     m = np.asarray(m, np.float64)
     b = np.asarray(b, np.float64)
     h = np.asarray(h, np.float64)
     ta = (m - a) if ta is None else np.asarray(ta, np.float64)
     tb = (b - m) if tb is None else np.asarray(tb, np.float64)
-    tm = h * 3.0
+    tm_in = h * 3.0
+    tm_out = tm_in if h_out is None else np.asarray(h_out, np.float64) * 3.0
     n1 = n // 2
-    s1 = _hermite_seg(a, m, ta, tm, n1)
-    s2 = _hermite_seg(m, b, tm, tb, n - n1 + 1)[1:]
+    s1 = _hermite_seg(a, m, ta, tm_in, n1)
+    s2 = _hermite_seg(m, b, tm_out, tb, n - n1 + 1)[1:]
     return np.vstack([s1, s2])
 
 
@@ -264,7 +290,7 @@ def edge_dense(model, name, n=DENSE):
         tb = -3.0 * np.asarray(e.tip_b, np.float64)
     return spline_edge_dense(model.anchors[a_name], e.mid,
                              e.handle, model.anchors[b_name],
-                             ta=ta, tb=tb, n=n)
+                             ta=ta, tb=tb, n=n, h_out=e.handle_out)
 
 
 def page_edges(model, n=DENSE):
@@ -350,8 +376,12 @@ def handle_pos(model, h):
             # default: a third of the chord toward the mid point
             return base + (np.array(e.mid) - base) / 3.0
         return base + np.array(tip, np.float64)
-    return (np.array(e.mid, np.float64)
-            + sgn * np.array(e.handle, np.float64))
+    # mid tangent tips: +1 = outgoing side, -1 = incoming side. When the
+    # tangent is broken, the outgoing tip follows handle_out.
+    mid = np.array(e.mid, np.float64)
+    if sgn > 0 and e.handle_out is not None:
+        return mid + np.array(e.handle_out, np.float64)
+    return mid + sgn * np.array(e.handle, np.float64)
 
 
 def move_handle(model, h, pos):
@@ -369,8 +399,28 @@ def move_handle(model, h, pos):
         else:
             model.edges[key].tip_b = vec
     else:
-        m = np.array(model.edges[key].mid, np.float64)
-        model.edges[key].handle = (sgn * (np.array(pos) - m)).tolist()
+        e = model.edges[key]
+        m = np.array(e.mid, np.float64)
+        if sgn > 0 and e.handle_out is not None:
+            e.handle_out = (np.array(pos) - m).tolist()
+        else:
+            e.handle = (sgn * (np.array(pos) - m)).tolist()
+
+
+def break_mid_tangent(model, edge_name):
+    """Make the mid tangent of `edge_name` independent per side (a V
+    fold). Seeds handle_out = handle, so the curve is unchanged until a
+    tip is dragged. No-op if already broken."""
+    e = model.edges[edge_name]
+    if e.handle_out is None:
+        e.handle_out = list(e.handle)
+
+
+def smooth_mid_tangent(model, edge_name):
+    """Re-mirror the mid tangent of `edge_name` (removes the V fold).
+    Keeps the incoming handle; the outgoing tip snaps back to its
+    mirror. No-op if already smooth."""
+    model.edges[edge_name].handle_out = None
 
 
 # ---------------------------------------------------------------------------
