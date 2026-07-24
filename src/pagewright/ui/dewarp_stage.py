@@ -108,10 +108,11 @@ class _AutoFitView(QGraphicsView):
     shows up minuscule. Instead, refit on every show/resize until the
     user zooms manually (wheel); a new image re-arms auto-fit.
 
-    Also hosts the shared two-point CALIBRATION gesture: after
-    begin_calibration(p1) a rubber line follows the cursor; the next
-    left-click sets the endpoint and emits calibrationPicked(p1, p2)
-    (scene coords). Right-click or Escape cancels."""
+    Also hosts the shared two-point CALIBRATION gesture: arm_calibration()
+    puts the pane in measuring mode; the user's first left-click sets the
+    start point, a rubber line then follows the cursor, and the second
+    left-click sets the end point and emits calibrationPicked(p1, p2)
+    (scene coords). Right-click or Escape cancels at any stage."""
 
     calibrationPicked = Signal(object, object)   # QPointF, QPointF
 
@@ -123,7 +124,8 @@ class _AutoFitView(QGraphicsView):
         self._user_zoomed = False
         self._panning = False
         self._pan_last = None
-        self._calib_p1 = None
+        self._calib_armed = False     # waiting for the first click
+        self._calib_p1 = None         # set once the first point is placed
         self._calib_line = None
         self._saved_drag_mode = None
         self.setBackgroundBrush(QBrush(QColor("#202020")))
@@ -133,9 +135,21 @@ class _AutoFitView(QGraphicsView):
 
     # ----- calibration gesture ---------------------------------------------
     def calibrating(self):
-        return self._calib_p1 is not None
+        return self._calib_armed or self._calib_p1 is not None
 
-    def begin_calibration(self, scene_p1):
+    def arm_calibration(self):
+        """Enter measuring mode; the next two left-clicks are the two
+        calibration points."""
+        self._calib_armed = True
+        self._calib_p1 = None
+        # hand-drag (result pane) would swallow the point clicks
+        self._saved_drag_mode = self.dragMode()
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.setMouseTracking(True)
+        self.setCursor(Qt.CrossCursor)
+
+    def _place_first_calib_point(self, scene_p1):
+        self._calib_armed = False
         self._calib_p1 = QPointF(scene_p1)
         pen = QPen(QColor("#ff5555"))
         pen.setCosmetic(True)
@@ -143,11 +157,6 @@ class _AutoFitView(QGraphicsView):
         self._calib_line = self._scene.addLine(
             scene_p1.x(), scene_p1.y(), scene_p1.x(), scene_p1.y(), pen)
         self._calib_line.setZValue(50)
-        # hand-drag (result pane) would swallow the endpoint click
-        self._saved_drag_mode = self.dragMode()
-        self.setDragMode(QGraphicsView.NoDrag)
-        self.setMouseTracking(True)
-        self.setCursor(Qt.CrossCursor)
 
     def cancel_calibration(self):
         if self._calib_line is not None:
@@ -155,6 +164,7 @@ class _AutoFitView(QGraphicsView):
         self._end_calibration()
 
     def _end_calibration(self):
+        self._calib_armed = False
         self._calib_p1 = None
         self._calib_line = None
         if self._saved_drag_mode is not None:
@@ -212,12 +222,15 @@ class _AutoFitView(QGraphicsView):
     def mousePressEvent(self, event):
         if self.calibrating():
             if event.button() == Qt.LeftButton:
-                p2 = self.mapToScene(event.position().toPoint())
-                p1 = QPointF(self._calib_p1)
-                if self._calib_line is not None:
-                    self._scene.removeItem(self._calib_line)
-                self._end_calibration()
-                self.calibrationPicked.emit(p1, p2)
+                sp = self.mapToScene(event.position().toPoint())
+                if self._calib_armed:
+                    self._place_first_calib_point(sp)       # first click
+                else:
+                    p1 = QPointF(self._calib_p1)            # second click
+                    if self._calib_line is not None:
+                        self._scene.removeItem(self._calib_line)
+                    self._end_calibration()
+                    self.calibrationPicked.emit(p1, sp)
             else:
                 self.cancel_calibration()
             event.accept()
@@ -229,7 +242,7 @@ class _AutoFitView(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event):
-        if self.calibrating() and self._calib_line is not None:
+        if self._calib_p1 is not None and self._calib_line is not None:
             p2 = self.mapToScene(event.position().toPoint())
             self._calib_line.setLine(self._calib_p1.x(), self._calib_p1.y(),
                                      p2.x(), p2.y())
@@ -286,10 +299,9 @@ class _ResultView(_AutoFitView):
         if (event.button() == Qt.RightButton and not self.calibrating()
                 and self._pix_item is not None):
             menu = QMenu(self)
-            act = menu.addAction("Calibrate scale from here...")
+            act = menu.addAction("Calibrate...")
             if menu.exec(event.globalPosition().toPoint()) is act:
-                self.begin_calibration(
-                    self.mapToScene(event.position().toPoint()))
+                self.arm_calibration()
             event.accept()
             return
         super().mousePressEvent(event)
@@ -537,9 +549,9 @@ class _SourceView(_AutoFitView):
 
     def _calibrate_menu(self, pos, event):
         menu = QMenu(self)
-        act = menu.addAction("Calibrate scale from here...")
+        act = menu.addAction("Calibrate...")
         if menu.exec(event.globalPosition().toPoint()) is act:
-            self.begin_calibration(self.mapToScene(pos))
+            self.arm_calibration()
         return True
 
     def _notify_model_edit(self):
@@ -1115,10 +1127,9 @@ class DewarpStageWidget(QWidget):
         """Two calibration points picked: ask the real length and rescale
         the output so the measured feature comes out that size.
 
-        With 'Lock aspect ratio' on, both dimensions scale together;
-        otherwise only the measured segment's dominant axis (horizontal ->
-        Width, vertical -> Height) is adjusted - that is how a known
-        length fixes a wrong aspect ratio."""
+        Calibration PRESERVES the current aspect ratio - both dimensions
+        scale by the same factor. (Fix a wrong aspect with the Width /
+        Height spinners; use calibration to set the true overall size.)"""
         if self._src is None:
             return
         m = self._measured_output_px(which, p1, p2)
@@ -1126,7 +1137,7 @@ class DewarpStageWidget(QWidget):
             self._size_label.setText(
                 "Calibration needs a placed outline and a longer line")
             return
-        d_px, dx, dy = m
+        d_px = m[0]
         real_mm, ok = QInputDialog.getDouble(
             self, "Calibrate Scale",
             "Real-world length of the measured line (mm):",
@@ -1142,15 +1153,9 @@ class DewarpStageWidget(QWidget):
         w_mm = out_w / dpi * 25.4
         h_mm = out_h / dpi * 25.4
         factor = real_mm / (d_px / dpi * 25.4)
-        if self._lock_aspect.isChecked() or abs(dx) == abs(dy):
-            w_mm, h_mm = w_mm * factor, h_mm * factor
-        elif abs(dx) > abs(dy):
-            w_mm *= factor
-        else:
-            h_mm *= factor
+        w_mm, h_mm = w_mm * factor, h_mm * factor   # preserve aspect
         # switch to explicit sizing with the calibrated dimensions
-        was_auto = self._auto_size.isChecked()
-        if was_auto:
+        if self._auto_size.isChecked():
             self._auto_size.setChecked(False)   # enables spinners, previews
         self._set_size_spinners(w_mm, h_mm)
         self._request_preview()
