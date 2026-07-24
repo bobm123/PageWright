@@ -767,8 +767,10 @@ class DewarpStageWidget(QWidget):
         self._w_mm.valueChanged.connect(self._on_width_changed)
         self._h_mm.valueChanged.connect(self._on_height_changed)
         self._dpi.valueChanged.connect(self._request_preview)
-        for w in (self._w_mm, self._h_mm, self._dpi, self._lock_aspect):
-            w.setEnabled(False)                  # auto-size on by default
+        # spinners stay live even while Auto is on: they DISPLAY the
+        # auto-derived size, and editing one overrides it (see
+        # _on_width/height_changed), so the aspect can be adjusted
+        # straight away without calibrating first.
 
         self._full = QCheckBox("Keep whole image (don't crop)")
         self._full.toggled.connect(self._request_preview)
@@ -933,8 +935,8 @@ class DewarpStageWidget(QWidget):
 
     # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):
-        for w in (self._w_mm, self._h_mm, self._dpi, self._lock_aspect):
-            w.setEnabled(not checked)
+        # re-checking Auto recomputes from the selection (and re-syncs the
+        # spinner display); unchecking keeps the shown values as explicit
         self._request_preview()
 
     def _on_lock_toggled(self, checked):
@@ -942,9 +944,17 @@ class DewarpStageWidget(QWidget):
         self._aspect = (self._h_mm.value() / max(0.01, self._w_mm.value())
                         if checked else None)
 
+    def _override_auto(self):
+        """A manual spinner edit turns Auto off so the typed size sticks."""
+        if self._auto_size.isChecked():
+            self._syncing_size = True
+            self._auto_size.setChecked(False)
+            self._syncing_size = False
+
     def _on_width_changed(self, value):
         if self._syncing_size:
             return
+        self._override_auto()
         if self._lock_aspect.isChecked() and self._aspect:
             self._syncing_size = True
             self._h_mm.setValue(value * self._aspect)
@@ -954,11 +964,20 @@ class DewarpStageWidget(QWidget):
     def _on_height_changed(self, value):
         if self._syncing_size:
             return
+        self._override_auto()
         if self._lock_aspect.isChecked() and self._aspect:
             self._syncing_size = True
             self._w_mm.setValue(value / self._aspect)
             self._syncing_size = False
         self._request_preview()
+
+    def _sync_size_display(self, out_w, out_h):
+        """While Auto is on, show the auto-derived size in the spinners
+        (so they always reflect the real output and are ready to edit)."""
+        if not self._auto_size.isChecked():
+            return
+        dpi = self._dpi.value()
+        self._set_size_spinners(out_w / dpi * 25.4, out_h / dpi * 25.4)
 
     def _set_size_spinners(self, w_mm, h_mm):
         """Set both spinners without lock coupling or double previews."""
@@ -1045,6 +1064,7 @@ class DewarpStageWidget(QWidget):
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
         h, w = flat.shape[:2]
+        self._sync_size_display(w, h)
         self._size_label.setText("Output: %d x %d px" % (w, h))
 
     def _update_spline_preview(self):
@@ -1072,6 +1092,7 @@ class DewarpStageWidget(QWidget):
         self._pv_shape = flat.shape[:2]  # for result-pane calibration
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
+        self._sync_size_display(out_w, out_h)
         self._size_label.setText("Output: %d x %d px" % (out_w, out_h))
 
     def _spline_output_size(self, model):
