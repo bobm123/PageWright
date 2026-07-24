@@ -45,7 +45,7 @@ class ProjectController:
 
     def open_photo(self):
         path, _ = QFileDialog.getOpenFileName(
-            self._w, "Import Photo", "", IMAGE_FILTER)
+            self._w, "Load Image", "", IMAGE_FILTER)
         if path:
             self.load_photo(path)
 
@@ -64,7 +64,7 @@ class ProjectController:
         dewarp stage (flatten first, then trace). Pass False when the
         photo IS a dewarp result being adopted."""
         w = self._w
-        loaded, pixmap = self._read_image(path, "Import Photo")
+        loaded, pixmap = self._read_image(path, "Load Image")
         if loaded is None:
             return
         w._leave_dewarp_stage()   # no-op when already on the trace view

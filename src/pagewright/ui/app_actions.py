@@ -21,7 +21,7 @@ def build_actions(w):
     w.act_save_project.setShortcut(QKeySequence.Save)        # Ctrl+S
     w.act_save_project.triggered.connect(w.save_project_file)
 
-    w.act_open = QAction("Import &Photo…", w)
+    w.act_open = QAction("&Load Image…", w)
     w.act_open.setShortcut("Ctrl+Shift+O")
     w.act_open.triggered.connect(w.open_photo)
 
