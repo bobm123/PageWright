@@ -237,8 +237,10 @@ class _SourceView(_AutoFitView):
     cornersChanged = Signal()
     modelChanged = Signal()
     modelEdited = Signal()
-    # edge name ("top"/"bottom") + scene QPointF for an edge-line click,
-    # or ("", None) for a corner right-click promotion
+    # promotion out of quad mode:
+    #   ("top"/"bottom", scene QPointF)  edge-line right-click: mid at click
+    #   ("corner:tl" etc., None)         corner right-click: activate that
+    #                                    corner's tangent handle
     promoteRequested = Signal(str, object)
 
     def __init__(self, parent=None):
@@ -327,6 +329,12 @@ class _SourceView(_AutoFitView):
             return None
         best, best_d = None, HIT_R
         for h in dw.handles(self._model):
+            if h[0] == "ctip":
+                # inactive corner tips are not shown; don't hit-test them
+                edge_name, end = h[1], h[2]
+                e = self._model.edges[edge_name]
+                if (e.tip_a if end == "a" else e.tip_b) is None:
+                    continue
             p = dw.handle_pos(self._model, h)
             vp = self.mapFromScene(QPointF(float(p[0]), float(p[1])))
             d = (vp - view_pos).manhattanLength()
@@ -334,46 +342,24 @@ class _SourceView(_AutoFitView):
                 best, best_d = h, d
         return best
 
+    def _corner_label(self, idx):
+        """Ordered label (tl/tr/bl/br) of self._corners[idx]."""
+        rect = dw.order_points(self.corners())
+        p = self._corners[idx]
+        labels = ("tl", "tr", "br", "bl")
+        d = [(rect[i][0] - p.x()) ** 2 + (rect[i][1] - p.y()) ** 2
+             for i in range(4)]
+        return labels[int(np.argmin(d))]
+
     def mousePressEvent(self, event):
         if self._pix_item is None:
             return super().mousePressEvent(event)
         pos = event.position().toPoint()
-        # right-click on a completed quad's corner: offer spline promotion
-        if (event.button() == Qt.RightButton and self._mode == MODE_QUAD
-                and len(self._corners) == 4
-                and self._nearest_quad_corner(pos) is not None):
-            menu = QMenu(self)
-            act = menu.addAction(
-                "Curve this page (corners become spline handles)")
-            chosen = menu.exec(event.globalPosition().toPoint())
-            if chosen is act:
-                self.promoteRequested.emit("", None)
-            event.accept()
-            return
-        # right-click on a spline mid handle (or its tangent tips): break
-        # the tangent into a V fold (steep gutter curves) or re-smooth it
-        if (event.button() == Qt.RightButton and self._mode == MODE_SPLINE
-                and self._model is not None):
-            h = self._nearest_spline_handle(pos)
-            if h is not None and h[0] in ("mid", "tip"):
-                edge_name = h[1]
-                e = self._model.edges[edge_name]
-                menu = QMenu(self)
-                if e.broken:
-                    act = menu.addAction("Make smooth (mirror tangents)")
-                else:
-                    act = menu.addAction("Break tangents (V fold)")
-                chosen = menu.exec(event.globalPosition().toPoint())
-                if chosen is act:
-                    if e.broken:
-                        dw.smooth_mid_tangent(self._model, edge_name)
-                    else:
-                        dw.break_mid_tangent(self._model, edge_name)
-                    self._redraw_overlay()
-                    self.modelChanged.emit()
-                    self.modelEdited.emit()
+        if event.button() == Qt.RightButton:
+            if self._right_click(pos, event):
                 event.accept()
                 return
+            return super().mousePressEvent(event)
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
         if self._mode == MODE_QUAD:
@@ -384,16 +370,71 @@ class _SourceView(_AutoFitView):
                 self._corners.append(self.mapToScene(pos))
                 self._redraw_overlay()
                 self.cornersChanged.emit()
-            else:
-                # all corners placed: a click ON the top/bottom edge line
-                # promotes to spline with the mid point at the click
-                hit = self._edge_line_hit(pos)
-                if hit is not None:
-                    self.promoteRequested.emit(hit[0], hit[1])
         else:
             h = self._nearest_spline_handle(pos)
             if h is not None:
                 self._drag = h
+
+    def _right_click(self, pos, event):
+        """Right-click dispatch. Returns True when handled.
+
+        Quad mode (4 corners placed): a corner promotes to book (spline)
+        mode with THAT corner's tangent handle active; the top/bottom
+        edge line promotes with the mid point added at the click.
+        Spline mode: a corner anchor (or its tip) toggles between normal
+        corner and spline handle; the mid handle / its tips get the
+        break-into-V / re-smooth menu.
+        """
+        if self._mode == MODE_QUAD:
+            if len(self._corners) != 4:
+                return False
+            idx = self._nearest_quad_corner(pos)
+            if idx is not None:
+                self.promoteRequested.emit(
+                    "corner:%s" % self._corner_label(idx), None)
+                return True
+            hit = self._edge_line_hit(pos)
+            if hit is not None:
+                self.promoteRequested.emit(hit[0], hit[1])
+                return True
+            return False
+        if self._model is None:
+            return False
+        h = self._nearest_spline_handle(pos)
+        if h is None:
+            return False
+        kind, key, sgn = h
+        if kind == "anchor":
+            dw.toggle_corner_tip(self._model, key)
+            self._notify_model_edit()
+            return True
+        if kind == "ctip":
+            # right-click an active corner handle: back to a normal corner
+            corner = dw.EDGE_ANCHORS[key][0 if sgn == "a" else 1]
+            dw.toggle_corner_tip(self._model, corner)
+            self._notify_model_edit()
+            return True
+        if kind in ("mid", "tip"):
+            e = self._model.edges[key]
+            menu = QMenu(self)
+            if e.broken:
+                act = menu.addAction("Make smooth (mirror tangents)")
+            else:
+                act = menu.addAction("Break tangents (V fold)")
+            chosen = menu.exec(event.globalPosition().toPoint())
+            if chosen is act:
+                if e.broken:
+                    dw.smooth_mid_tangent(self._model, key)
+                else:
+                    dw.break_mid_tangent(self._model, key)
+                self._notify_model_edit()
+            return True
+        return False
+
+    def _notify_model_edit(self):
+        self._redraw_overlay()
+        self.modelChanged.emit()
+        self.modelEdited.emit()
 
     def mouseMoveEvent(self, event):
         if self._drag is None:
@@ -494,8 +535,11 @@ class _SourceView(_AutoFitView):
                 ln = self._scene.addLine(mid[0], mid[1],
                                          float(tp[0]), float(tp[1]), hpen)
                 self._overlay.append(ln)
-            # corner tip lines anchor -> tip
+            # corner tip lines anchor -> tip (active corners only; a
+            # normal corner keeps its chord tangent and shows no handle)
             for end in ("a", "b"):
+                if (e.tip_a if end == "a" else e.tip_b) is None:
+                    continue
                 tip = dw.handle_pos(m, ("ctip", name, end))
                 base = m.anchors[dw.EDGE_ANCHORS[name][0 if end == "a"
                                                        else 1]]
@@ -720,13 +764,19 @@ class DewarpStageWidget(QWidget):
         else:
             self._source.clear_corners()
 
-    def _promote_to_spline(self, edge, scene_pos):
-        """Convert the placed quad into a spline outline and switch modes.
+    def _promote_to_spline(self, what, scene_pos):
+        """Convert the placed quad into a book (spline) outline.
 
-        The spline is seeded STRAIGHT from the quad corners, so the result
-        is initially identical to the quad transform; if `edge` names the
-        top or bottom edge, that edge's on-curve mid point is pulled to the
-        clicked position, bending the curve through it immediately."""
+        The spline is seeded STRAIGHT from the quad corners with all
+        corners left "normal" (chord tangents, no visible handles), so
+        the result is initially identical to the quad transform. `what`
+        selects the first curve affordance:
+
+        - "corner:<tl|tr|bl|br>": that corner's tangent handle is
+          activated (right-click toggles it later)
+        - "top"/"bottom": that edge's on-curve mid point is pulled to the
+          clicked position, bending the curve through it immediately
+        """
         corners = self._source.corners()
         if len(corners) != 4 or self._src is None:
             return
@@ -736,8 +786,13 @@ class DewarpStageWidget(QWidget):
         top = np.linspace(tl, tr, n)
         bot = np.linspace(bl, br, n)
         model = dw.model_from_traces(top, bot)
-        if edge:
-            dw.move_handle(model, ("mid", edge, None),
+        for e in model.edges.values():            # start as normal corners
+            e.tip_a = None
+            e.tip_b = None
+        if what.startswith("corner:"):
+            dw.toggle_corner_tip(model, what.split(":", 1)[1])
+        elif what:
+            dw.move_handle(model, ("mid", what, None),
                            (scene_pos.x(), scene_pos.y()))
         self._source.set_model(model)
         self._mode.setCurrentIndex(MODE_SPLINE)   # triggers spline preview

@@ -45,6 +45,9 @@ import numpy as np
 DENSE = 2000          # samples for arc-length tables
 N_PTS = 7             # control points per traced edge
 EDGE_ANCHORS = {"top": ("tl", "tr"), "bottom": ("bl", "br")}
+# corner anchor -> (curved edge it terminates, which end)
+CORNER_EDGE_END = {"tl": ("top", "a"), "tr": ("top", "b"),
+                   "bl": ("bottom", "a"), "br": ("bottom", "b")}
 
 
 # ---------------------------------------------------------------------------
@@ -421,6 +424,39 @@ def smooth_mid_tangent(model, edge_name):
     Keeps the incoming handle; the outgoing tip snaps back to its
     mirror. No-op if already smooth."""
     model.edges[edge_name].handle_out = None
+
+
+def corner_tip_active(model, corner_name):
+    """True when `corner_name` (tl/tr/bl/br) has an explicit tangent
+    handle on its curved edge (a "spline corner")."""
+    edge_name, end = CORNER_EDGE_END[corner_name]
+    e = model.edges[edge_name]
+    return (e.tip_a if end == "a" else e.tip_b) is not None
+
+
+def toggle_corner_tip(model, corner_name):
+    """Toggle `corner_name` between a normal corner (chord tangent, no
+    visible handle) and a spline corner (explicit tangent handle).
+
+    Activating seeds the tip at a third of the chord toward the edge's
+    mid point - exactly the default tangent - so the curve does not move
+    until the handle is dragged. Returns True if the tip is now active.
+    """
+    edge_name, end = CORNER_EDGE_END[corner_name]
+    e = model.edges[edge_name]
+    if corner_tip_active(model, corner_name):
+        if end == "a":
+            e.tip_a = None
+        else:
+            e.tip_b = None
+        return False
+    base = np.asarray(model.anchors[corner_name], np.float64)
+    seed = ((np.asarray(e.mid, np.float64) - base) / 3.0).tolist()
+    if end == "a":
+        e.tip_a = seed
+    else:
+        e.tip_b = seed
+    return True
 
 
 # ---------------------------------------------------------------------------

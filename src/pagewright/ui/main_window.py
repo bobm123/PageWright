@@ -201,7 +201,8 @@ class MainWindow(QMainWindow):
                                  "Could not write the flattened image.")
             return
         self._leave_dewarp_stage()
-        self.projects.load_photo(out_path)   # re-enables tools
+        # start_dewarp=False: this photo IS the dewarp result
+        self.projects.load_photo(out_path, start_dewarp=False)
         self.statusBar().showMessage(
             "Flattened image is now the working image "
             "(temporary file - use Save/Export to keep it).", 8000)

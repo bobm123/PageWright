@@ -120,6 +120,33 @@ def test_model_copy_is_deep():
     assert m.edges["top"].mid != [2.0, 2.0]
 
 
+def test_toggle_corner_tip_on_is_curve_neutral():
+    # activating a corner handle seeds it at the default (chord/3), so
+    # the curve must not move until the handle is dragged
+    m = dw.default_model(800, 600)
+    for name in ("top", "bottom"):
+        m.edges[name].tip_a = None
+        m.edges[name].tip_b = None
+    before = dw.edge_dense(m, "top", 500).copy()
+    assert dw.toggle_corner_tip(m, "tl") is True
+    assert dw.corner_tip_active(m, "tl")
+    after = dw.edge_dense(m, "top", 500)
+    assert np.max(np.abs(after - before)) < 1e-9
+
+
+def test_toggle_corner_tip_off_and_mapping():
+    m = dw.default_model(800, 600)
+    # default_model sets all tips; toggling turns each OFF
+    for corner, (edge, end) in dw.CORNER_EDGE_END.items():
+        assert dw.corner_tip_active(m, corner)
+        assert dw.toggle_corner_tip(m, corner) is False
+        e = m.edges[edge]
+        assert (e.tip_a if end == "a" else e.tip_b) is None
+    # and back on
+    assert dw.toggle_corner_tip(m, "br") is True
+    assert m.edges["bottom"].tip_b is not None
+
+
 def test_broken_mid_tangent_forms_v():
     # a broken mid tangent lets the curve fold into a V at mid (the book
     # gutter). Handles pointing down-left and up-right make a sharp kink.

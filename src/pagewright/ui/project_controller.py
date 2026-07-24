@@ -57,7 +57,12 @@ class ProjectController:
 
     # ----- workers ---------------------------------------------------------
 
-    def load_photo(self, path):
+    def load_photo(self, path, start_dewarp=True):
+        """Load a photo as the working image.
+
+        start_dewarp: freshly imported photos go straight into the
+        dewarp stage (flatten first, then trace). Pass False when the
+        photo IS a dewarp result being adopted."""
         w = self._w
         loaded, pixmap = self._read_image(path, "Import Photo")
         if loaded is None:
@@ -81,6 +86,8 @@ class ProjectController:
         w.set_unit(w.project.calibration.display_unit)
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
         w._refresh_scale_readout()
+        if start_dewarp:
+            w.dewarp_page()   # dewarp-first workflow: flatten, then trace
 
     def load_project(self, path):
         w = self._w
