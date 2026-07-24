@@ -155,12 +155,15 @@ class _AutoFitView(QGraphicsView):
         factor = 1.25 if event.angleDelta().y() > 0 else 0.8
         self.scale(factor, factor)
 
+    def _start_pan(self, view_pos):
+        self._panning = True
+        self._pan_last = view_pos
+        self.setCursor(Qt.ClosedHandCursor)
+
     # middle-mouse drag pans in any mode (matches the trace canvas)
     def mousePressEvent(self, event):
         if event.button() == Qt.MiddleButton:
-            self._panning = True
-            self._pan_last = event.position()
-            self.setCursor(Qt.ClosedHandCursor)
+            self._start_pan(event.position())
             event.accept()
             return
         super().mousePressEvent(event)
@@ -177,7 +180,8 @@ class _AutoFitView(QGraphicsView):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event):
-        if event.button() == Qt.MiddleButton and self._panning:
+        if self._panning and event.button() in (Qt.MiddleButton,
+                                                Qt.LeftButton):
             self._panning = False
             self.unsetCursor()
             event.accept()
@@ -187,7 +191,14 @@ class _AutoFitView(QGraphicsView):
     def _set_pixmap(self, pm, rearm_fit=True):
         self._scene.clear()
         self._pix_item = self._scene.addPixmap(pm)
-        self.setSceneRect(QRectF(pm.rect()))
+        # Margin around the image serves two purposes: the view can pan
+        # PAST the image edges (corners near an edge can be brought to a
+        # comfortable spot), and cursor-centered wheel zoom stays stable
+        # when the image is smaller than the viewport (Qt force-centers
+        # content that fits inside the scene rect otherwise).
+        r = QRectF(pm.rect())
+        m = 0.25 * max(r.width(), r.height())
+        self.setSceneRect(r.adjusted(-m, -m, m, m))
         if rearm_fit:
             self._user_zoomed = False
         self.fit()
@@ -370,10 +381,16 @@ class _SourceView(_AutoFitView):
                 self._corners.append(self.mapToScene(pos))
                 self._redraw_overlay()
                 self.cornersChanged.emit()
+            else:
+                # all corners placed: left-drag on empty space pans
+                self._start_pan(event.position())
         else:
             h = self._nearest_spline_handle(pos)
             if h is not None:
                 self._drag = h
+            else:
+                # not on a handle: left-drag pans
+                self._start_pan(event.position())
 
     def _right_click(self, pos, event):
         """Right-click dispatch. Returns True when handled.
