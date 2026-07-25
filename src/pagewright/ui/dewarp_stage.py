@@ -62,6 +62,11 @@ HANDLE_R = 7          # corner handle radius, in view pixels
 TIP_R = 5             # tangent-tip handle radius, in view pixels
 HIT_R = 12            # click tolerance for grabbing a handle, view pixels
 PREVIEW_H = 700       # spline preview renders at this image height
+PREVIEW_MAX = 1400    # cap the longest side of the live dewarp preview
+                      # raster (full-res is rendered only on Apply)
+DISPLAY_MAX = 2200    # cap the on-screen pixmap's longest side; big photos
+                      # are shown via a downscaled proxy (full-image scene
+                      # coords preserved) so repaints stay fast
 
 _CORNER_COLOR = QColor("#22cc66")
 _LINE_COLOR = QColor("#22cc66")
@@ -272,14 +277,26 @@ class _AutoFitView(QGraphicsView):
             self._calib_line = None
             self.cancel_calibration()
         self._scene.clear()
-        self._pix_item = self._scene.addPixmap(pm)
+        full_w, full_h = pm.width(), pm.height()
+        # Big photos are shown through a downscaled proxy so QGraphicsView
+        # doesn't smooth-scale tens of megapixels on every repaint. The
+        # proxy item is scaled back up so SCENE COORDINATES stay in
+        # full-image pixels - corner/handle/calibration math is unchanged.
+        if max(full_w, full_h) > DISPLAY_MAX:
+            disp = pm.scaled(DISPLAY_MAX, DISPLAY_MAX, Qt.KeepAspectRatio,
+                             Qt.SmoothTransformation)
+        else:
+            disp = pm
+        self._pix_item = self._scene.addPixmap(disp)
+        if disp.width() and disp.width() != full_w:
+            self._pix_item.setScale(full_w / disp.width())
         # Margin around the image serves two purposes: the view can pan
         # PAST the image edges (corners near an edge can be brought to a
         # comfortable spot), and cursor-centered wheel zoom stays stable
         # when the image is smaller than the viewport (Qt force-centers
         # content that fits inside the scene rect otherwise).
-        r = QRectF(pm.rect())
-        m = 0.25 * max(r.width(), r.height())
+        r = QRectF(0, 0, full_w, full_h)
+        m = 0.25 * max(full_w, full_h)
         self.setSceneRect(r.adjusted(-m, -m, m, m))
         if rearm_fit:
             self._user_zoomed = False
@@ -855,6 +872,8 @@ class DewarpStageWidget(QWidget):
         Resets the selection, result and preview; re-arms auto-fit."""
         self._src = np.ascontiguousarray(bgr_image)
         self._result = None
+        self._result_pv_scale = None
+        self._pv_shape = None
         if dpi:
             self._dpi.setValue(int(dpi))
         # downscaled copy for responsive spline previews
@@ -1054,18 +1073,28 @@ class DewarpStageWidget(QWidget):
             self._size_label.setText("Output: -")
             return
         out_w, out_h = self._quad_output_size(corners)
+        # warpPerspective cost scales with the OUTPUT raster, so render the
+        # live preview at a capped size (fast even for huge sources); the
+        # full-res warp happens only on Apply.
+        scale = min(1.0, PREVIEW_MAX / max(out_w, out_h))
+        qw = max(2, int(round(out_w * scale)))
+        qh = max(2, int(round(out_h * scale)))
         try:
-            flat = dw.dewarp_quad(self._src, corners, out_w, out_h,
+            flat = dw.dewarp_quad(self._src, corners, qw, qh,
                                   full_image=self._full.isChecked())
         except Exception as exc:
             self._show_error(exc)
             return
-        self._result = flat
+        self._result = None            # full-res result made on Apply
+        self._result_pv_scale = scale
+        self._pv_shape = flat.shape[:2]
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
-        h, w = flat.shape[:2]
-        self._sync_size_display(w, h)
-        self._size_label.setText("Output: %d x %d px" % (w, h))
+        # full-res result dimensions (canvas size in full-image mode)
+        res_w = int(round(flat.shape[1] / scale))
+        res_h = int(round(flat.shape[0] / scale))
+        self._sync_size_display(out_w, out_h)
+        self._size_label.setText("Output: %d x %d px" % (res_w, res_h))
 
     def _update_spline_preview(self):
         model = self._source.model()
@@ -1089,7 +1118,8 @@ class DewarpStageWidget(QWidget):
             self._show_error(exc)
             return
         self._result = None            # full-res result made on Apply
-        self._pv_shape = flat.shape[:2]  # for result-pane calibration
+        self._result_pv_scale = pv_h / max(1, out_h)  # result-pane calib
+        self._pv_shape = flat.shape[:2]
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
         self._sync_size_display(out_w, out_h)
@@ -1110,21 +1140,23 @@ class DewarpStageWidget(QWidget):
     def _measured_output_px(self, which, p1, p2):
         """Length (px) and direction of the measured segment mapped into
         OUTPUT pixel space, or None when no transform is set up yet."""
+        if which == "result":
+            # the result pane shows a downscaled preview raster; one
+            # uniform factor maps its pixels back to full output pixels
+            s = getattr(self, "_result_pv_scale", None)
+            if not s:
+                return None
+            dx = (p2.x() - p1.x()) / s
+            dy = (p2.y() - p1.y()) / s
+            return (dx * dx + dy * dy) ** 0.5, dx, dy
+        # source pane: map through the quad homography to output px
         if self._spline_mode():
             model = self._source.model()
             if model is None:
                 return None
             out_w, out_h = self._spline_output_size(model)
-            if which == "result":
-                # preview renders downscaled; scale per-axis to output px
-                pv_h, pv_w = getattr(self, "_pv_shape", (None, None))
-                if not pv_h:
-                    return None
-                dx = (p2.x() - p1.x()) * out_w / pv_w
-                dy = (p2.y() - p1.y()) * out_h / pv_h
-                return (dx * dx + dy * dy) ** 0.5, dx, dy
-            # source pane: approximate with the anchor-quad homography
-            # (perspective stage only; close for gently curved pages)
+            # approximate with the anchor-quad homography (perspective
+            # stage only; close for gently curved pages)
             a = model.anchors
             rect = np.float32([a["tl"], a["tr"], a["br"], a["bl"]])
         else:
@@ -1132,9 +1164,6 @@ class DewarpStageWidget(QWidget):
             if len(corners) != 4:
                 return None
             out_w, out_h = self._quad_output_size(corners)
-            if which == "result":
-                dx, dy = p2.x() - p1.x(), p2.y() - p1.y()
-                return (dx * dx + dy * dy) ** 0.5, dx, dy
             rect = dw.order_points(corners)
         dst = np.float32([[0, 0], [out_w - 1, 0],
                           [out_w - 1, out_h - 1], [0, out_h - 1]])
@@ -1185,6 +1214,7 @@ class DewarpStageWidget(QWidget):
 
     # ----- apply -----------------------------------------------------------
     def _on_apply(self):
+        # previews render at a capped resolution; Apply renders full-res
         if self._src is None:
             return
         if self._spline_mode():
@@ -1195,6 +1225,18 @@ class DewarpStageWidget(QWidget):
             try:
                 self._result = dw.dewarp_page(self._src, model,
                                               out_w=out_w, out_h=out_h)
+            except Exception as exc:
+                self._show_error(exc)
+                return
+        else:
+            corners = self._source.corners()
+            if len(corners) != 4:
+                return
+            out_w, out_h = self._quad_output_size(corners)
+            try:
+                self._result = dw.dewarp_quad(
+                    self._src, corners, out_w, out_h,
+                    full_image=self._full.isChecked())
             except Exception as exc:
                 self._show_error(exc)
                 return
