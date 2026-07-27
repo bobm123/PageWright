@@ -272,24 +272,32 @@ class _AutoFitView(QGraphicsView):
             return
         super().mouseReleaseEvent(event)
 
-    def _set_pixmap(self, pm, rearm_fit=True):
+    def _set_display_image(self, bgr, rearm_fit=True):
+        """Show `bgr` (a BGR ndarray). Big photos are DOWNSCALED IN NUMPY
+        first (cv2.resize, ~0.05s) and only the small result is converted
+        to a pixmap - so we never build or smooth-scale a full-resolution
+        QImage/QPixmap just to display it (that full-res conversion was
+        what froze the stage right after a large photo loaded). The proxy
+        item is scaled back up so SCENE COORDINATES stay in full-image
+        pixels: all corner/handle/calibration math is unchanged."""
         if self.calibrating():          # scene.clear() destroys the line
             self._calib_line = None
             self.cancel_calibration()
         self._scene.clear()
-        full_w, full_h = pm.width(), pm.height()
-        # Big photos are shown through a downscaled proxy so QGraphicsView
-        # doesn't smooth-scale tens of megapixels on every repaint. The
-        # proxy item is scaled back up so SCENE COORDINATES stay in
-        # full-image pixels - corner/handle/calibration math is unchanged.
-        if max(full_w, full_h) > DISPLAY_MAX:
-            disp = pm.scaled(DISPLAY_MAX, DISPLAY_MAX, Qt.KeepAspectRatio,
-                             Qt.SmoothTransformation)
+        full_h, full_w = bgr.shape[:2]
+        longest = max(full_w, full_h)
+        if cv2 is not None and longest > DISPLAY_MAX:
+            f = DISPLAY_MAX / float(longest)
+            disp = cv2.resize(bgr,
+                              (max(1, int(round(full_w * f))),
+                               max(1, int(round(full_h * f)))),
+                              interpolation=cv2.INTER_AREA)
         else:
-            disp = pm
-        self._pix_item = self._scene.addPixmap(disp)
-        if disp.width() and disp.width() != full_w:
-            self._pix_item.setScale(full_w / disp.width())
+            disp = bgr
+        pm = ndarray_to_qpixmap(disp)
+        self._pix_item = self._scene.addPixmap(pm)
+        if pm.width() and pm.width() != full_w:
+            self._pix_item.setScale(full_w / pm.width())
         # Margin around the image serves two purposes: the view can pan
         # PAST the image edges (corners near an edge can be brought to a
         # comfortable spot), and cursor-centered wheel zoom stays stable
@@ -336,8 +344,7 @@ class _ResultView(_AutoFitView):
     def set_image(self, bgr):
         # keep the user's zoom while they tweak the outline; a fresh
         # source image (via _SourceView.set_image) re-arms auto-fit there
-        self._set_pixmap(ndarray_to_qpixmap(bgr),
-                         rearm_fit=not self._user_zoomed)
+        self._set_display_image(bgr, rearm_fit=not self._user_zoomed)
 
 
 class _SourceView(_AutoFitView):
@@ -384,7 +391,7 @@ class _SourceView(_AutoFitView):
     # ----- image -----------------------------------------------------------
     def set_image(self, bgr):
         self._overlay = []
-        self._set_pixmap(ndarray_to_qpixmap(bgr))
+        self._set_display_image(bgr)
 
     # ----- mode ------------------------------------------------------------
     def set_mode(self, mode):
