@@ -153,10 +153,18 @@ class _AutoFitView(QGraphicsView):
         self._calib_p1 = None         # set once the first point is placed
         self._calib_line = None
         self._saved_drag_mode = None
+        self._fitting = False         # re-entrancy guard for _autofit
         self.setBackgroundBrush(QBrush(QColor("#202020")))
         # zoom toward the cursor rather than the view center
         self.setTransformationAnchor(
             QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        # Scrollbars OFF: fitInView() in resizeEvent() would otherwise
+        # toggle a scrollbar, which resizes the viewport, which fires
+        # resizeEvent again - for a PERFECTLY SQUARE image the fit lands
+        # exactly on the toggle boundary and oscillates forever (100% CPU,
+        # "Not Responding"). Panning still works via the scroll offset.
+        self.setHorizontalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
+        self.setVerticalScrollBarPolicy(Qt.ScrollBarAlwaysOff)
 
     # ----- calibration gesture ---------------------------------------------
     def calibrating(self):
@@ -222,8 +230,13 @@ class _AutoFitView(QGraphicsView):
         self.scale(0.8, 0.8)
 
     def _autofit(self):
-        if not self._user_zoomed:
+        if self._fitting or self._user_zoomed:
+            return
+        self._fitting = True
+        try:
             self.fit()
+        finally:
+            self._fitting = False
 
     def showEvent(self, event):
         super().showEvent(event)
