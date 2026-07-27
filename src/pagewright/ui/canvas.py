@@ -104,8 +104,15 @@ class Canvas(QGraphicsView):
 
     # ----- photo -----------------------------------------------------------
 
-    def set_photo(self, pixmap):
-        """Replace the displayed photo and reset all overlays and the view."""
+    def set_photo(self, pixmap, image_wh=None):
+        """Replace the displayed photo and reset all overlays and the view.
+
+        `pixmap` may be a downscaled display proxy; pass `image_wh` =
+        (full_w, full_h) so the item is scaled back up and the scene rect
+        is set in FULL-image pixels. All overlays (seeds, contours,
+        calibration, ROI) live in image-pixel coordinates, so keeping the
+        scene in full-image pixels leaves them unchanged while Qt only
+        ever paints the small proxy (no 18 MP smooth-scale per repaint)."""
         self._scene.clear()
         self._calib_points = []
         self._calib_markers = []
@@ -121,7 +128,13 @@ class Canvas(QGraphicsView):
         self._roi_origin = None
         self._photo_item = self._scene.addPixmap(pixmap)
         self._photo_item.setZValue(0)
-        self._scene.setSceneRect(self._photo_item.boundingRect())
+        if image_wh is not None:
+            full_w, full_h = image_wh
+            if pixmap.width() and pixmap.width() != full_w:
+                self._photo_item.setScale(full_w / pixmap.width())
+            self._scene.setSceneRect(0, 0, full_w, full_h)
+        else:
+            self._scene.setSceneRect(self._photo_item.boundingRect())
         self.fit_to_view()
         self.seedsChanged.emit()
 

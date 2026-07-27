@@ -16,7 +16,7 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 from ..core import image_io
 from ..core import project_io
 from ..model import Project
-from .dewarp_stage import ndarray_to_qpixmap
+from .dewarp_stage import display_downscale, ndarray_to_qpixmap
 
 IMAGE_FILTER = (
     "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp);;All files (*)")
@@ -77,7 +77,8 @@ class ProjectController:
         w._polygon_counter = 0
         w.undo_stack.clear()
 
-        w.canvas.set_photo(pixmap)
+        w.canvas.set_photo(pixmap,
+                           (loaded.pixel_width, loaded.pixel_height))
         w.objects_panel.set_margin(w.project.margin_mm)
         w.act_mode_pan.setChecked(True)
         w._mode_pan()
@@ -115,7 +116,8 @@ class ProjectController:
         w._loaded = loaded
         w.undo_stack.clear()
 
-        w.canvas.set_photo(pixmap)
+        w.canvas.set_photo(pixmap,
+                           (loaded.pixel_width, loaded.pixel_height))
         w._load_layers_from_project()
         w._polygon_counter = w._max_polygon_number()
 
@@ -176,7 +178,9 @@ class ProjectController:
         except IOError as exc:
             QMessageBox.critical(w, title, str(exc))
             return None, None
-        pixmap = ndarray_to_qpixmap(loaded.data)
+        # display proxy: never hand Qt the full-res (possibly 18 MP) image
+        disp, _, _ = display_downscale(loaded.data)
+        pixmap = ndarray_to_qpixmap(disp)
         if pixmap.isNull():
             QMessageBox.critical(w, title, "Qt could not display this image.")
             return None, None

@@ -104,6 +104,26 @@ def ndarray_to_qpixmap(bgr):
     return QPixmap.fromImage(ndarray_to_qimage(bgr))
 
 
+def display_downscale(bgr, max_side=DISPLAY_MAX):
+    """Downscale a BGR image for ON-SCREEN display only.
+
+    Returns (display_bgr, full_w, full_h). Big photos are shrunk so Qt
+    never has to build or (smooth-)scale a tens-of-megapixels pixmap - the
+    caller keeps the full-res array for the actual image math and scales
+    the display item back up to full_w x full_h so scene coordinates stay
+    in full-image pixels."""
+    full_h, full_w = bgr.shape[:2]
+    longest = max(full_w, full_h)
+    if cv2 is not None and longest > max_side:
+        f = max_side / float(longest)
+        small = cv2.resize(bgr,
+                           (max(1, int(round(full_w * f))),
+                            max(1, int(round(full_h * f)))),
+                           interpolation=cv2.INTER_AREA)
+        return small, full_w, full_h
+    return bgr, full_w, full_h
+
+
 class _AutoFitView(QGraphicsView):
     """QGraphicsView that keeps its image fitted to the viewport.
 
