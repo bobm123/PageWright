@@ -11,12 +11,12 @@ thin coordinator.
 
 import os
 
-from PySide6.QtGui import QPixmap
 from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from ..core import image_io
 from ..core import project_io
 from ..model import Project
+from .dewarp_stage import ndarray_to_qpixmap
 
 IMAGE_FILTER = (
     "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp);;All files (*)")
@@ -162,14 +162,21 @@ class ProjectController:
     # ----- helpers ---------------------------------------------------------
 
     def _read_image(self, path, title):
-        """Load `path` for both OpenCV and Qt; returns (LoadedImage, QPixmap)."""
+        """Load `path` and return (LoadedImage, QPixmap).
+
+        The display pixmap is built from the ALREADY-DECODED OpenCV array
+        rather than decoding the file a second time via QPixmap(path).
+        For large images (esp. PNG, whose decode is slow - ~2s for an
+        18 MP file) that halves load time, and it keeps the displayed
+        pixels identical to the ones the dewarp/trace math uses (no EXIF
+        orientation mismatch between the two decoders)."""
         w = self._w
         try:
             loaded = image_io.load_image(path)
         except IOError as exc:
             QMessageBox.critical(w, title, str(exc))
             return None, None
-        pixmap = QPixmap(path)
+        pixmap = ndarray_to_qpixmap(loaded.data)
         if pixmap.isNull():
             QMessageBox.critical(w, title, "Qt could not display this image.")
             return None, None
