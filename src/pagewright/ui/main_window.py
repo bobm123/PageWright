@@ -41,7 +41,7 @@ class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.setWindowTitle("PageWright")
-        self.resize(1200, 820)
+        self.resize(1440, 860)
 
         self.project = Project()
         self._loaded = None            # image_io.LoadedImage (BGR array source)

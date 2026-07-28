@@ -951,13 +951,20 @@ class DewarpStageWidget(QWidget):
             self._request_preview()
 
     def _set_spline_model(self, model):
-        """Install a spline outline, defaulting the center (gutter)
-        control point of each edge to a CORNER (broken tangent) so pulling
-        it into the book gutter creases rather than curves smoothly.
-        Right-click a mid handle -> Make smooth to undo per edge. (A
-        dedicated one-page smooth mode is on the backlog, section 14.)"""
+        """Install a spline outline with book-friendly defaults:
+
+        - the center (gutter) control point of each edge is a CORNER
+          (broken tangent), so pulling it into the gutter creases rather
+          than curves smoothly (right-click -> Make smooth per edge)
+        - all four corner tangent handles are ACTIVE and adjustable out
+          of the box, seeded at the curve-neutral chord/3 position
+          (right-click a corner to hide/deactivate its handle)
+        """
         dw.break_mid_tangent(model, "top")
         dw.break_mid_tangent(model, "bottom")
+        for c in ("tl", "tr", "bl", "br"):
+            if not dw.corner_tip_active(model, c):
+                dw.toggle_corner_tip(model, c)
         self._source.set_model(model)
 
     def _reset_selection(self):
