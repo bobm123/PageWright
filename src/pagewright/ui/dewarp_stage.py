@@ -35,6 +35,8 @@ NOTE: PySide6 cannot run in the porting sandbox, so this module is
 static-checked only. Expect to test-drive and adjust it on a real desktop.
 """
 
+import json
+
 import numpy as np
 
 try:
@@ -46,12 +48,13 @@ from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 from PySide6.QtGui import (QBrush, QColor, QFont, QImage, QPainterPath, QPen,
                            QPixmap, QPolygonF)
 from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
-                               QFormLayout, QGraphicsEllipseItem,
-                               QGraphicsItem, QGraphicsPolygonItem,
-                               QGraphicsScene, QGraphicsSimpleTextItem,
-                               QGraphicsView, QHBoxLayout, QInputDialog,
-                               QLabel, QMenu, QPushButton, QSpinBox,
-                               QSplitter, QVBoxLayout, QWidget)
+                               QFileDialog, QFormLayout,
+                               QGraphicsEllipseItem, QGraphicsItem,
+                               QGraphicsPolygonItem, QGraphicsScene,
+                               QGraphicsSimpleTextItem, QGraphicsView,
+                               QHBoxLayout, QInputDialog, QLabel, QMenu,
+                               QPushButton, QSpinBox, QSplitter,
+                               QVBoxLayout, QWidget)
 
 from ..core import dewarp as dw
 
@@ -346,7 +349,9 @@ class _AutoFitView(QGraphicsView):
 
 class _ResultView(_AutoFitView):
     """Image pane with wheel zoom, hand-drag pan and fit-to-window.
-    Right-click starts the two-point calibration measurement."""
+    Right-click asks the stage to show the result context menu."""
+
+    menuRequested = Signal(object)   # QPoint (global)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -356,10 +361,7 @@ class _ResultView(_AutoFitView):
     def mousePressEvent(self, event):
         if (event.button() == Qt.RightButton and not self.calibrating()
                 and self._pix_item is not None):
-            menu = QMenu(self)
-            act = menu.addAction("Calibrate...")
-            if menu.exec(event.globalPosition().toPoint()) is act:
-                self.arm_calibration()
+            self.menuRequested.emit(event.globalPosition().toPoint())
             event.accept()
             return
         super().mousePressEvent(event)
@@ -404,10 +406,13 @@ class _SourceView(_AutoFitView):
     modelChanged = Signal()
     modelEdited = Signal()
     # promotion out of quad mode:
-    #   ("top"/"bottom", scene QPointF)  edge-line right-click: mid at click
-    #   ("corner:tl" etc., None)         corner right-click: activate that
-    #                                    corner's tangent handle
+    #   ("top"/"bottom", scene QPointF)  edge-line: mid added at the click
+    #   ("corner:tl" etc., None)         corner: activate that corner's
+    #                                    tangent handle
     promoteRequested = Signal(str, object)
+    # right-click: dict(global=QPoint, scene=QPointF, hit=tuple|None);
+    # the stage builds the context menu from it
+    menuRequested = Signal(object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -522,10 +527,28 @@ class _SourceView(_AutoFitView):
             return super().mousePressEvent(event)
         pos = event.position().toPoint()
         if event.button() == Qt.RightButton:
-            if self._right_click(pos, event):
-                event.accept()
-                return
-            return super().mousePressEvent(event)
+            # left-click is for selections/dragging only; right-click
+            # always opens a context menu (built by the stage from the
+            # hit information gathered here)
+            info = {"global": event.globalPosition().toPoint(),
+                    "scene": self.mapToScene(pos), "hit": None}
+            if self._mode == MODE_QUAD:
+                if len(self._corners) == 4:
+                    idx = self._nearest_quad_corner(pos)
+                    if idx is not None:
+                        info["hit"] = ("quad_corner", self._corner_label(idx))
+                    else:
+                        hit = self._edge_line_hit(pos)
+                        if hit is not None:
+                            info["hit"] = ("quad_edge", hit[0])
+                            info["scene"] = hit[1]
+            elif self._model is not None:
+                h = self._nearest_spline_handle(pos)
+                if h is not None:
+                    info["hit"] = ("spline", h)
+            self.menuRequested.emit(info)
+            event.accept()
+            return
         if event.button() != Qt.LeftButton:
             return super().mousePressEvent(event)
         if self._mode == MODE_QUAD:
@@ -547,71 +570,9 @@ class _SourceView(_AutoFitView):
                 # not on a handle: left-drag pans
                 self._start_pan(event.position())
 
-    def _right_click(self, pos, event):
-        """Right-click dispatch. Returns True when handled.
-
-        Quad mode (4 corners placed): a corner promotes to book (spline)
-        mode with THAT corner's tangent handle active; the top/bottom
-        edge line promotes with the mid point added at the click.
-        Spline mode: a corner anchor (or its tip) toggles between normal
-        corner and spline handle; the mid handle / its tips get the
-        break-into-V / re-smooth menu.
-        Anywhere else (either mode): offer the two-point calibration
-        measurement starting at the clicked position.
-        """
-        if self._mode == MODE_QUAD:
-            if len(self._corners) == 4:
-                idx = self._nearest_quad_corner(pos)
-                if idx is not None:
-                    self.promoteRequested.emit(
-                        "corner:%s" % self._corner_label(idx), None)
-                    return True
-                hit = self._edge_line_hit(pos)
-                if hit is not None:
-                    self.promoteRequested.emit(hit[0], hit[1])
-                    return True
-            return self._calibrate_menu(pos, event)
-        if self._model is None:
-            return False
-        h = self._nearest_spline_handle(pos)
-        if h is None:
-            return self._calibrate_menu(pos, event)
-        kind, key, sgn = h
-        if kind == "anchor":
-            dw.toggle_corner_tip(self._model, key)
-            self._notify_model_edit()
-            return True
-        if kind == "ctip":
-            # right-click an active corner handle: back to a normal corner
-            corner = dw.EDGE_ANCHORS[key][0 if sgn == "a" else 1]
-            dw.toggle_corner_tip(self._model, corner)
-            self._notify_model_edit()
-            return True
-        if kind in ("mid", "tip"):
-            e = self._model.edges[key]
-            menu = QMenu(self)
-            if e.broken:
-                act = menu.addAction("Make smooth (mirror tangents)")
-            else:
-                act = menu.addAction("Break tangents (V fold)")
-            chosen = menu.exec(event.globalPosition().toPoint())
-            if chosen is act:
-                if e.broken:
-                    dw.smooth_mid_tangent(self._model, key)
-                else:
-                    dw.break_mid_tangent(self._model, key)
-                self._notify_model_edit()
-            return True
-        return False
-
-    def _calibrate_menu(self, pos, event):
-        menu = QMenu(self)
-        act = menu.addAction("Calibrate...")
-        if menu.exec(event.globalPosition().toPoint()) is act:
-            self.arm_calibration()
-        return True
-
-    def _notify_model_edit(self):
+    def notify_model_edit(self):
+        """Redraw the outline and announce a model change (used by the
+        stage after mutating the model from a context-menu action)."""
         self._redraw_overlay()
         self.modelChanged.emit()
         self.modelEdited.emit()
@@ -905,6 +866,8 @@ class DewarpStageWidget(QWidget):
             lambda p1, p2: self._on_calibrated("source", p1, p2))
         self._resultv.calibrationPicked.connect(
             lambda p1, p2: self._on_calibrated("result", p1, p2))
+        self._source.menuRequested.connect(self._show_source_menu)
+        self._resultv.menuRequested.connect(self._show_result_menu)
 
     # ----- entry / result ---------------------------------------------------
     def set_source_image(self, bgr_image, dpi=300):
@@ -1268,6 +1231,158 @@ class DewarpStageWidget(QWidget):
         self._request_preview()
         self._size_label.setText(
             "Calibrated: %.1f x %.1f mm @ %d DPI" % (w_mm, h_mm, dpi))
+
+    # ----- context menus ----------------------------------------------------
+    def _show_source_menu(self, info):
+        """Right-click menu on the source pane: hit-specific actions first,
+        then the common actions (mode, detection, rotate/flip, calibrate,
+        zoom, outline save/load) ported from dewarp.py / book_dewarp.py."""
+        menu = QMenu(self)
+        hit = info.get("hit")
+        if hit is not None:
+            kind = hit[0]
+            if kind == "quad_corner":
+                corner = hit[1]
+                menu.addAction(
+                    "Curve this page (book mode, handle at %s)"
+                    % corner.upper(),
+                    lambda: self._promote_to_spline("corner:" + corner,
+                                                    None))
+            elif kind == "quad_edge":
+                edge, sp = hit[1], info["scene"]
+                menu.addAction(
+                    "Add spline point here (curve the %s edge)" % edge,
+                    lambda: self._promote_to_spline(edge, sp))
+            elif kind == "spline":
+                h = hit[1]
+                hk, key, sgn = h
+                model = self._source.model()
+                if hk in ("anchor", "ctip") and model is not None:
+                    corner = (key if hk == "anchor"
+                              else dw.EDGE_ANCHORS[key][0 if sgn == "a"
+                                                        else 1])
+                    label = ("Hide corner handle (%s)"
+                             if dw.corner_tip_active(model, corner)
+                             else "Show corner handle (%s)")
+                    menu.addAction(label % corner.upper(),
+                                   lambda: self._toggle_corner(corner))
+                elif hk in ("mid", "tip") and model is not None:
+                    e = model.edges[key]
+                    if e.broken:
+                        menu.addAction("Make smooth (mirror tangents)",
+                                       lambda: self._toggle_fold(key))
+                    else:
+                        menu.addAction("Break tangents (V fold)",
+                                       lambda: self._toggle_fold(key))
+            menu.addSeparator()
+        # mode selection (radio style), as in dewarp.py's context menu
+        for idx, name in ((MODE_QUAD, "Quad Mode"),
+                          (MODE_SPLINE, "Book Page Mode")):
+            act = menu.addAction(name)
+            act.setCheckable(True)
+            act.setChecked(self._mode.currentIndex() == idx)
+            act.triggered.connect(
+                lambda _=False, i=idx: self._mode.setCurrentIndex(i))
+        menu.addSeparator()
+        menu.addAction("Auto-detect Page", self._auto_detect)
+        ref = menu.addAction("Refine with Text Lines", self._refine_text)
+        ref.setEnabled(self._spline_mode())
+        menu.addAction("Reset Outline", self._reset_selection)
+        menu.addSeparator()
+        menu.addAction("Rotate 90 deg CW", lambda: self._rotate_source(True))
+        menu.addAction("Rotate 90 deg CCW",
+                       lambda: self._rotate_source(False))
+        menu.addAction("Flip Horizontal", lambda: self._flip_source(True))
+        menu.addAction("Flip Vertical", lambda: self._flip_source(False))
+        menu.addSeparator()
+        menu.addAction("Calibrate...", self._source.arm_calibration)
+        menu.addSeparator()
+        menu.addAction("Zoom In", self._source.zoom_in)
+        menu.addAction("Zoom Out", self._source.zoom_out)
+        menu.addAction("Fit to Window", self._source.refit)
+        menu.addSeparator()
+        sv = menu.addAction("Save Outline...", self._save_outline)
+        sv.setEnabled(self._spline_mode()
+                      and self._source.model() is not None)
+        menu.addAction("Load Outline...", self._load_outline)
+        menu.exec(info["global"])
+
+    def _show_result_menu(self, global_pos):
+        menu = QMenu(self)
+        menu.addAction("Calibrate...", self._resultv.arm_calibration)
+        menu.addSeparator()
+        menu.addAction("Fit to Window", self._resultv.refit)
+        menu.exec(global_pos)
+
+    # ----- context-menu actions --------------------------------------------
+    def _toggle_corner(self, corner):
+        model = self._source.model()
+        if model is None:
+            return
+        dw.toggle_corner_tip(model, corner)
+        self._source.notify_model_edit()
+
+    def _toggle_fold(self, edge_name):
+        model = self._source.model()
+        if model is None:
+            return
+        if model.edges[edge_name].broken:
+            dw.smooth_mid_tangent(model, edge_name)
+        else:
+            dw.break_mid_tangent(model, edge_name)
+        self._source.notify_model_edit()
+
+    def _rotate_source(self, clockwise):
+        """Rotate the working copy 90 degrees (from dewarp.py's context
+        menu). Resets the outline - re-place or Auto-detect after."""
+        if self._src is None or cv2 is None:
+            return
+        code = (cv2.ROTATE_90_CLOCKWISE if clockwise
+                else cv2.ROTATE_90_COUNTERCLOCKWISE)
+        self.set_source_image(cv2.rotate(self._src, code),
+                              dpi=self._dpi.value())
+
+    def _flip_source(self, horizontal):
+        """Mirror the working copy (from dewarp.py's context menu)."""
+        if self._src is None or cv2 is None:
+            return
+        self.set_source_image(cv2.flip(self._src, 1 if horizontal else 0),
+                              dpi=self._dpi.value())
+
+    def _save_outline(self):
+        """Save the spline outline as JSON (book_dewarp.py's Save
+        Outline, in the single-page PageModel format)."""
+        model = self._source.model()
+        if model is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Outline", "outline.json", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path, "w") as fh:
+                json.dump(model.to_dict(), fh, indent=2)
+        except OSError as exc:
+            self._size_label.setText("Save failed: %s" % exc)
+            return
+        self._size_label.setText("Outline saved")
+
+    def _load_outline(self):
+        """Load a previously saved outline (book_dewarp.py's Load
+        Outline) and switch to book mode with it."""
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Load Outline", "", "JSON (*.json)")
+        if not path:
+            return
+        try:
+            with open(path) as fh:
+                model = dw.PageModel.from_dict(json.load(fh))
+        except Exception as exc:
+            self._size_label.setText("Load failed: %s" % exc)
+            return
+        # keep the file's smooth/broken state exactly as saved
+        self._source.set_model(model)
+        self._mode.setCurrentIndex(MODE_SPLINE)
 
     # ----- apply -----------------------------------------------------------
     def _on_apply(self):
