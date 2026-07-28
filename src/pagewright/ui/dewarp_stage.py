@@ -11,17 +11,22 @@ stack, not a modal dialog) with the studio's left-right layout:
     | mode / [Auto-detect] size controls / options [Apply][X]  |
     +----------------------------------------------------------+
 
-Two modes:
+Three modes:
 
 * QUAD (4 corners) - drop/drag four page corners; the right pane shows
   ``core.dewarp.dewarp_quad`` (straight perspective transform) live.
-* CURVED PAGE (spline) - a full page outline (4 corner anchors + curved
-  top/bottom edges, each with an on-curve mid point, mirrored tangent
-  tips and per-corner tangent tips). The right pane shows
-  ``core.dewarp.dewarp_page`` (perspective + cylinder unwrap). Preview
-  renders on a downscaled copy for responsiveness (updated when a drag
-  ends); Apply renders at full quality. "Refine with text lines" bends
-  the outline so its isolines match the printed lines.
+* BOOK - ONE PAGE - a curved-page spline outline (4 corner anchors +
+  curved top/bottom edges with on-curve mid points and tangent handles);
+  center control points default to SMOOTH. The right pane shows
+  ``core.dewarp.dewarp_page`` (perspective + cylinder unwrap).
+* BOOK - TWO PAGE - the same outline for an open spread: the center
+  (gutter) control points default to broken-tangent CORNERS (V fold) so
+  the crease models correctly. Output is currently the whole flattened
+  spread; separate per-page output (spine anchors) is on the backlog.
+
+Preview renders on a downscaled copy for responsiveness (updated when a
+drag ends); Apply renders at full quality. "Refine with text lines"
+bends the outline so its isolines match the printed lines.
 
 "Auto-detect" seeds either mode from the silhouette detector.
 
@@ -58,8 +63,14 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
 
 from ..core import dewarp as dw
 
+# _SourceView interaction modes
 MODE_QUAD = 0
 MODE_SPLINE = 1
+
+# stage mode-selector indices (both book modes use the spline view)
+IDX_QUAD = 0
+IDX_ONE_PAGE = 1     # single curved page: smooth center control points
+IDX_TWO_PAGE = 2     # open book spread: corner (V fold) at the gutter
 
 HANDLE_R = 7          # corner handle radius, in view pixels
 TIP_R = 5             # tangent-tip handle radius, in view pixels
@@ -758,8 +769,9 @@ class DewarpStageWidget(QWidget):
 
         # ----- controls -----
         self._mode = QComboBox()
-        self._mode.addItem("Quad (4 corners)")
-        self._mode.addItem("Curved page (spline)")
+        self._mode.addItem("Quad (4 corners)")           # IDX_QUAD
+        self._mode.addItem("Book - One Page (curved)")   # IDX_ONE_PAGE
+        self._mode.addItem("Book - Two Page (spread)")   # IDX_TWO_PAGE
         self._mode.currentIndexChanged.connect(self._on_mode_changed)
 
         self._auto_size = QCheckBox("Auto (from selection)")
@@ -898,33 +910,51 @@ class DewarpStageWidget(QWidget):
 
     # ----- mode ------------------------------------------------------------
     def _spline_mode(self):
-        return self._mode.currentIndex() == MODE_SPLINE
+        return self._mode.currentIndex() != IDX_QUAD
+
+    def _two_page(self):
+        return self._mode.currentIndex() == IDX_TWO_PAGE
 
     def _on_mode_changed(self, idx):
-        self._source.set_mode(idx)
-        self._refine_btn.setEnabled(idx == MODE_SPLINE)
+        self._source.set_mode(MODE_QUAD if idx == IDX_QUAD
+                              else MODE_SPLINE)
+        self._refine_btn.setEnabled(idx != IDX_QUAD)
         # full-image mode only applies to the quad transform
-        self._full.setEnabled(idx == MODE_QUAD)
+        self._full.setEnabled(idx == IDX_QUAD)
         if self._src is None:
             return
-        if idx == MODE_SPLINE and self._source.model() is None:
-            h, w = self._src.shape[:2]
-            self._set_spline_model(dw.default_model(w, h))
+        if idx != IDX_QUAD:
+            model = self._source.model()
+            if model is None:
+                h, w = self._src.shape[:2]
+                self._set_spline_model(dw.default_model(w, h))
+            else:
+                # keep the outline; re-apply this book mode's gutter
+                # default (one page: smooth center, two page: V fold)
+                self._apply_mid_defaults(model)
+                self._source.notify_model_edit()
         else:
             self._request_preview()
+
+    def _apply_mid_defaults(self, model):
+        for name in ("top", "bottom"):
+            if self._two_page():
+                dw.break_mid_tangent(model, name)
+            else:
+                dw.smooth_mid_tangent(model, name)
 
     def _set_spline_model(self, model):
         """Install a spline outline with book-friendly defaults:
 
-        - the center (gutter) control point of each edge is a CORNER
-          (broken tangent), so pulling it into the gutter creases rather
-          than curves smoothly (right-click -> Make smooth per edge)
+        - center (gutter) control points follow the mode: ONE PAGE keeps
+          them smooth; TWO PAGE breaks them into corners (V fold) so
+          pulling the center into the gutter creases. Right-click a mid
+          handle to override per edge.
         - all four corner tangent handles are ACTIVE and adjustable out
           of the box, seeded at the curve-neutral chord/3 position
           (right-click a corner to hide/deactivate its handle)
         """
-        dw.break_mid_tangent(model, "top")
-        dw.break_mid_tangent(model, "bottom")
+        self._apply_mid_defaults(model)
         for c in ("tl", "tr", "bl", "br"):
             if not dw.corner_tip_active(model, c):
                 dw.toggle_corner_tip(model, c)
@@ -948,9 +978,10 @@ class DewarpStageWidget(QWidget):
         selects the first curve affordance:
 
         - "corner:<tl|tr|bl|br>": that corner's tangent handle is
-          activated (right-click toggles it later)
+          activated -> ONE-PAGE book mode (curving an outer corner)
         - "top"/"bottom": that edge's on-curve mid point is pulled to the
-          clicked position, bending the curve through it immediately
+          clicked position -> TWO-PAGE book mode (a center point added on
+          an edge is the gutter of a spread, creased by default)
         """
         corners = self._source.corners()
         if len(corners) != 4 or self._src is None:
@@ -964,13 +995,17 @@ class DewarpStageWidget(QWidget):
         for e in model.edges.values():            # start as normal corners
             e.tip_a = None
             e.tip_b = None
+        target = IDX_ONE_PAGE
         if what.startswith("corner:"):
             dw.toggle_corner_tip(model, what.split(":", 1)[1])
         elif what:
             dw.move_handle(model, ("mid", what, None),
                            (scene_pos.x(), scene_pos.y()))
-        self._set_spline_model(model)
-        self._mode.setCurrentIndex(MODE_SPLINE)   # triggers spline preview
+            target = IDX_TWO_PAGE
+        self._source.set_model(model)
+        # switching the combo applies the mode's gutter defaults to the
+        # existing model (see _on_mode_changed) and re-renders the preview
+        self._mode.setCurrentIndex(target)
 
     # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):
@@ -1276,8 +1311,9 @@ class DewarpStageWidget(QWidget):
                                        lambda: self._toggle_fold(key))
             menu.addSeparator()
         # mode selection (radio style), as in dewarp.py's context menu
-        for idx, name in ((MODE_QUAD, "Quad Mode"),
-                          (MODE_SPLINE, "Book Page Mode")):
+        for idx, name in ((IDX_QUAD, "Quad Mode"),
+                          (IDX_ONE_PAGE, "Book - One Page"),
+                          (IDX_TWO_PAGE, "Book - Two Page")):
             act = menu.addAction(name)
             act.setCheckable(True)
             act.setChecked(self._mode.currentIndex() == idx)
@@ -1380,9 +1416,15 @@ class DewarpStageWidget(QWidget):
         except Exception as exc:
             self._size_label.setText("Load failed: %s" % exc)
             return
-        # keep the file's smooth/broken state exactly as saved
+        # keep the file's smooth/broken state exactly as saved; pick the
+        # matching book mode (broken gutter => two-page spread)
+        broken = any(model.edges[n].broken for n in ("top", "bottom"))
+        target = IDX_TWO_PAGE if broken else IDX_ONE_PAGE
         self._source.set_model(model)
-        self._mode.setCurrentIndex(MODE_SPLINE)
+        if self._mode.currentIndex() == target:
+            self._request_preview()
+        else:
+            self._mode.setCurrentIndex(target)
 
     # ----- apply -----------------------------------------------------------
     def _on_apply(self):
