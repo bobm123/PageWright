@@ -417,3 +417,113 @@ def test_refine_with_text_flags_when_lines_present():
     m2, refined = dw.refine_with_text(page, m)
     assert refined is True
     assert isinstance(m2, dw.PageModel)
+
+
+# ---------------------------------------------------------------------------
+# Two-page spread model
+# ---------------------------------------------------------------------------
+
+def test_default_spread_structure():
+    m = dw.default_spread_model(1000, 800)
+    assert isinstance(m, dw.SpreadModel)
+    assert set(m.anchors) == {"tl", "tr", "bl", "br",
+                              "spine_top", "spine_bot"}
+    assert set(m.edges) == set(dw.SPREAD_EDGES)
+    for e in m.edges.values():
+        assert e.spine_handle is not None   # ensure_spine_handles ran
+
+
+def test_spread_edges_meet_at_spine():
+    m = dw.default_spread_model(1000, 800)
+    lt = dw.spread_edge_dense(m, "left_top", 300)
+    rt = dw.spread_edge_dense(m, "right_top", 300)
+    assert lt[-1] == pytest.approx(m.anchors["spine_top"], abs=1e-6)
+    assert rt[0] == pytest.approx(m.anchors["spine_top"], abs=1e-6)
+
+
+def test_spread_roundtrip_and_scaled():
+    m = dw.default_spread_model(800, 600)
+    d = m.to_dict()
+    m2 = dw.SpreadModel.from_dict(json.loads(json.dumps(d)))
+    assert m2.to_dict() == d
+    s = m2.scaled(0.5)
+    assert s.anchors["spine_top"] == pytest.approx(
+        [v * 0.5 for v in m2.anchors["spine_top"]])
+    assert s.edges["left_top"].spine_handle == pytest.approx(
+        [v * 0.5 for v in m2.edges["left_top"].spine_handle])
+    # scaled model's curves are exactly scaled curves
+    a = dw.spread_edge_dense(m2, "right_bottom", 200) * 0.5
+    b = dw.spread_edge_dense(s, "right_bottom", 200)
+    assert np.max(np.abs(a - b)) < 1e-9
+
+
+def test_quad_to_spread_matches_quad_until_edited():
+    # straight-seeded spread edges must stay straight (like the quad)
+    pts = [(100.0, 80.0), (500.0, 110.0), (520.0, 360.0), (90.0, 330.0)]
+    m = dw.quad_to_spread(pts, gutter_t=0.5)
+    rect = dw.order_points(pts)
+    tl, tr = np.asarray(rect[0], float), np.asarray(rect[1], float)
+    dense = np.vstack([dw.spread_edge_dense(m, "left_top", 200),
+                       dw.spread_edge_dense(m, "right_top", 200)])
+    v = tr - tl
+    t = np.clip(((dense - tl) @ v) / float(v @ v), 0.0, 1.0)
+    proj = tl + t[:, None] * v
+    assert np.max(np.linalg.norm(dense - proj, axis=1)) < 0.75
+
+
+def test_page_to_spread_spine_at_gutter():
+    # a page model whose mid sits off-center: the spread's spine lands
+    # at that mid (the gutter), not at the arc midpoint
+    top = [[i * 10.0, 0.0] for i in range(11)]
+    bot = [[i * 10.0, 120.0] for i in range(11)]
+    pm = dw.model_from_traces(top, bot)
+    pm.edges["top"].mid = [40.0, 5.0]
+    pm.edges["bottom"].mid = [42.0, 118.0]
+    sm = dw.page_to_spread(pm)
+    assert isinstance(sm, dw.SpreadModel)
+    assert sm.anchors["spine_top"][0] == pytest.approx(40.0, abs=2.0)
+    assert sm.anchors["spine_bot"][0] == pytest.approx(42.0, abs=2.0)
+
+
+def test_spread_to_page_roundtrip_outline():
+    sm = dw.default_spread_model(900, 700)
+    pm = dw.spread_to_page(sm)
+    assert isinstance(pm, dw.PageModel)
+    # outer corners preserved
+    for k in ("tl", "tr", "bl", "br"):
+        assert pm.anchors[k] == pytest.approx(sm.anchors[k], abs=1.5)
+
+
+def test_dewarp_spread_two_independent_pages():
+    img = np.zeros((400, 800, 3), np.uint8)
+    img[:, :400] = 40           # left half dark
+    img[:, 400:] = 220          # right half bright
+    m = dw.quad_to_spread([(100, 50), (700, 50), (700, 350), (100, 350)],
+                          gutter_t=0.5)
+    left, right = dw.dewarp_spread(img, m, out_w=150, out_h=100)
+    assert left.shape == (100, 150, 3)
+    assert right.shape == (100, 150, 3)
+    assert left.mean() < 90 and right.mean() > 170
+
+
+def test_spread_handles_cover_all_draggables():
+    m = dw.default_spread_model(500, 400)
+    hs = dw.spread_handles(m)
+    kinds = [x[0] for x in hs]
+    assert kinds.count("anchor") == 6
+    assert kinds.count("mid") == 4
+    assert kinds.count("tip") == 8
+    assert kinds.count("stip") == 4
+    # move a spine anchor and a spine tip
+    dw.spread_move_handle(m, ("anchor", "spine_top", None), (321.0, 45.0))
+    assert m.anchors["spine_top"] == [321.0, 45.0]
+    dw.spread_move_handle(m, ("stip", "left_top", None), (300.0, 60.0))
+    p = dw.spread_handle_pos(m, ("stip", "left_top", None))
+    assert p == pytest.approx([300.0, 60.0])
+
+
+def test_refine_spread_no_lines_unrefined():
+    gray = np.full((400, 800), 235, np.uint8)
+    m = dw.default_spread_model(800, 400)
+    m2, refined = dw.refine_spread_with_text(gray, m)
+    assert refined is False

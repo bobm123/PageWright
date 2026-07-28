@@ -678,17 +678,24 @@ def _geometry(top, bot, out_w=None, out_h=None):
     return Hinv, top_s, bot_s, out_w, out_h
 
 
-def dewarp_page(image, model, out_w=None, out_h=None,
-                interp=cv2.INTER_CUBIC):
-    """Flatten the page to an out_w x out_h image (either may be None:
-    missing dimensions come from the page's natural size/aspect)."""
-    top, bot = page_edges(model)
+def dewarp_from_dense(image, top, bot, out_w=None, out_h=None,
+                      interp=cv2.INTER_CUBIC):
+    """Flatten the region between two dense edge curves (shared by the
+    single-page and two-page dewarps)."""
     Hinv, top_s, bot_s, out_w, out_h = _geometry(top, bot, out_w, out_h)
     t = np.linspace(0.0, 1.0, out_h)[:, None, None]
     grid = _h_apply(Hinv, (1.0 - t) * top_s[None] + t * bot_s[None])
     return cv2.remap(image, grid[..., 0].astype(np.float32),
                      grid[..., 1].astype(np.float32), interp,
                      borderMode=cv2.BORDER_REPLICATE)
+
+
+def dewarp_page(image, model, out_w=None, out_h=None,
+                interp=cv2.INTER_CUBIC):
+    """Flatten the page to an out_w x out_h image (either may be None:
+    missing dimensions come from the page's natural size/aspect)."""
+    top, bot = page_edges(model)
+    return dewarp_from_dense(image, top, bot, out_w, out_h, interp)
 
 
 # ---------------------------------------------------------------------------
@@ -786,4 +793,434 @@ def refine_with_text(gray, model, iters=2, work_h=1100):
         bot_new = _h_apply(Hinv, (1.0 - bb) * top_s[idx] + bb * bot_s[idx])
         model = model_from_traces(top_new, bot_new)
         refined = True
+    return model, refined
+
+
+# ---------------------------------------------------------------------------
+# Two-page spread model: 6 anchors (incl. spine) + 4 edge splines
+# ---------------------------------------------------------------------------
+# Ported from the BookScan project's book_dewarp.py (same code lineage as
+# the single-page model above). The spread adds spine_top/spine_bot
+# anchors where the pages meet; each curved edge runs corner-to-spine and
+# carries a spine_handle - the tangent at the fold, pointing INTO its own
+# page - so the two pages can meet with a genuine tangent discontinuity
+# and each page dewarps independently.
+
+# edge name -> (start anchor, end anchor); all edges run left-to-right
+SPREAD_EDGES = {
+    "left_top": ("tl", "spine_top"),
+    "left_bottom": ("bl", "spine_bot"),
+    "right_top": ("spine_top", "tr"),
+    "right_bottom": ("spine_bot", "br"),
+}
+SPREAD_PAGES = {"left": ("left_top", "left_bottom"),
+                "right": ("right_top", "right_bottom")}
+
+
+@dataclass
+class SpreadEdge:
+    """One curved edge of a spread (corner to spine fold).
+
+    mid           on-curve control point [x, y]
+    handle        mirrored tangent handle at mid (drawn as mid +/- handle)
+    spine_handle  tangent handle at the spine end, pointing from the fold
+                  INTO this edge's page; None = chord default
+    """
+    mid: List[float]
+    handle: List[float]
+    spine_handle: Optional[List[float]] = None
+
+    def copy(self) -> "SpreadEdge":
+        return SpreadEdge(list(self.mid), list(self.handle),
+                          None if self.spine_handle is None
+                          else list(self.spine_handle))
+
+    def to_dict(self) -> dict:
+        d = {"mid": list(self.mid), "handle": list(self.handle)}
+        if self.spine_handle is not None:
+            d["spine_handle"] = list(self.spine_handle)
+        return d
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SpreadEdge":
+        sh = d.get("spine_handle")
+        return cls(list(d["mid"]), list(d["handle"]),
+                   None if sh is None else list(sh))
+
+
+@dataclass
+class SpreadModel:
+    """Open-book spread outline: 6 anchors + 4 edge splines.
+
+    anchors  tl, tr, bl, br (outer corners) + spine_top, spine_bot
+    edges    SPREAD_EDGES name -> SpreadEdge
+
+    to_dict/from_dict match BookScan's *_points.json outline format
+    (dict keys and vector conventions identical), so outlines can be
+    exchanged with book_dewarp.py.
+    """
+    anchors: Dict[str, List[float]]
+    edges: Dict[str, "SpreadEdge"]
+
+    def copy(self) -> "SpreadModel":
+        return SpreadModel({k: list(v) for k, v in self.anchors.items()},
+                           {k: e.copy() for k, e in self.edges.items()})
+
+    def to_dict(self) -> dict:
+        return {"anchors": {k: list(v) for k, v in self.anchors.items()},
+                "edges": {k: e.to_dict() for k, e in self.edges.items()}}
+
+    @classmethod
+    def from_dict(cls, d: dict) -> "SpreadModel":
+        return cls({k: list(v) for k, v in d["anchors"].items()},
+                   {k: SpreadEdge.from_dict(e)
+                    for k, e in d["edges"].items()})
+
+    def scaled(self, s: float) -> "SpreadModel":
+        """Deep copy scaled by s (coords AND vectors, spine handles
+        included - forgetting those warps the curves)."""
+        out = self.copy()
+        for k in out.anchors:
+            out.anchors[k] = [v * s for v in out.anchors[k]]
+        for e in out.edges.values():
+            e.mid = [v * s for v in e.mid]
+            e.handle = [v * s for v in e.handle]
+            if e.spine_handle is not None:
+                e.spine_handle = [v * s for v in e.spine_handle]
+        return out
+
+
+def _spread_spine_end(name):
+    """'start' if the edge begins at a spine anchor, else 'end'."""
+    a_name, _ = SPREAD_EDGES[name]
+    return "start" if a_name.startswith("spine") else "end"
+
+
+def spread_edge_dense(model, name, n=DENSE):
+    """Dense polyline of one spread edge (BookScan edge_dense)."""
+    a_name, b_name = SPREAD_EDGES[name]
+    e = model.edges[name]
+    ta = tb = None
+    sh = e.spine_handle
+    if sh is not None:
+        # stored pointing from the fold INTO its own page; convert to a
+        # tangent along the left-to-right curve direction
+        if _spread_spine_end(name) == "start":   # right page: spine first
+            ta = 3.0 * np.asarray(sh, np.float64)
+        else:                                    # left page: spine last
+            tb = -3.0 * np.asarray(sh, np.float64)
+    return spline_edge_dense(model.anchors[a_name], e.mid,
+                             e.handle, model.anchors[b_name],
+                             ta=ta, tb=tb, n=n)
+
+
+def ensure_spine_handles(model):
+    """Fill in chord-equivalent spine handles where missing."""
+    for name, e in model.edges.items():
+        if e.spine_handle is None:
+            a_name, b_name = SPREAD_EDGES[name]
+            m = np.asarray(e.mid, np.float64)
+            if _spread_spine_end(name) == "start":
+                a = np.asarray(model.anchors[a_name], np.float64)
+                e.spine_handle = ((m - a) / 3.0).tolist()
+            else:
+                b = np.asarray(model.anchors[b_name], np.float64)
+                e.spine_handle = ((m - b) / 3.0).tolist()
+    return model
+
+
+def spread_page_curves(model, n=DENSE):
+    """{'left': (top_dense, bottom_dense), 'right': (...)}."""
+    out = {}
+    for page, (te, be) in SPREAD_PAGES.items():
+        out[page] = (spread_edge_dense(model, te, n),
+                     spread_edge_dense(model, be, n))
+    return out
+
+
+def fit_spread_edge(a, b, target, spine_at=None, n_fit=200, iters=3):
+    """Least-squares fit of a spread edge to a dense target curve
+    (BookScan fit_spline_edge). Free parameters: the on-curve mid, its
+    tangent, and (when spine_at is 'start'/'end') the tangent at the
+    spine endpoint; the other endpoint keeps its chord tangent. Returns
+    (mid, mid_handle, spine_tangent-or-None)."""
+    a = np.asarray(a, np.float64)
+    b = np.asarray(b, np.float64)
+    s_frac = np.linspace(0.0, 1.0, n_fit)
+    tgt, _ = sample_by_arclength(target, s_frac)
+    u_match = s_frac.copy()
+    m_fit, tm_fit, ts_fit = (a + b) / 2, (b - a) / 2, None
+    for _ in range(iters):
+        seg2 = u_match > 0.5
+        u = np.where(seg2, (u_match - 0.5) * 2, u_match * 2)[:, None]
+        h00 = (2 * u ** 3 - 3 * u ** 2 + 1).ravel()
+        h10 = (u ** 3 - 2 * u ** 2 + u).ravel()
+        h01 = (-2 * u ** 3 + 3 * u ** 2).ravel()
+        h11 = (u ** 3 - u ** 2).ravel()
+        # seg1: a -> m ; seg2: m -> b
+        if spine_at == "start":     # free tangent ta at a (seg 1)
+            cm = np.where(seg2, h00 - h11, h01)
+            ct = np.where(seg2, h10, h11)
+            cs = np.where(seg2, 0.0, h10)
+            const = np.where(seg2[:, None], (h01 + h11)[:, None] * b,
+                             h00[:, None] * a)
+        elif spine_at == "end":     # free tangent tb at b (seg 2)
+            cm = np.where(seg2, h00, h10 + h01)
+            ct = np.where(seg2, h10, h11)
+            cs = np.where(seg2, h11, 0.0)
+            const = np.where(seg2[:, None], h01[:, None] * b,
+                             (h00 - h10)[:, None] * a)
+        else:                       # both endpoint tangents from chords
+            cm = np.where(seg2, h00 - h11, h10 + h01)
+            ct = np.where(seg2, h10, h11)
+            cs = None
+            const = np.where(seg2[:, None], (h01 + h11)[:, None] * b,
+                             (h00 - h10)[:, None] * a)
+        cols = [cm, ct] + ([cs] if cs is not None else [])
+        A = np.stack(cols, axis=1)
+        sol, *_ = np.linalg.lstsq(A, tgt - const, rcond=None)
+        m_fit, tm_fit = sol[0], sol[1]
+        ts_fit = sol[2] if cs is not None else None
+        ta = ts_fit if spine_at == "start" else None
+        tb = ts_fit if spine_at == "end" else None
+        dense = spline_edge_dense(a, m_fit, tm_fit / 3.0, b,
+                                  ta=ta, tb=tb, n=800)
+        d2 = ((dense[None, :, :] - tgt[:, None, :]) ** 2).sum(axis=2)
+        seg_len = np.sqrt(((dense[1:] - dense[:-1]) ** 2).sum(axis=1))
+        cum = np.concatenate([[0.0], np.cumsum(seg_len)])
+        cum /= max(cum[-1], 1e-9)
+        u_match = cum[np.argmin(d2, axis=1)]
+    return m_fit, tm_fit / 3.0, ts_fit
+
+
+def spread_from_bounds(bounds):
+    """Build the spread model from per-page edge point lists (BookScan
+    model_from_bounds). bounds = {"left": {"top": pts, "bottom": pts},
+    "right": {...}} with each trace running left-to-right."""
+    lt = np.asarray(bounds["left"]["top"], np.float64)
+    lb = np.asarray(bounds["left"]["bottom"], np.float64)
+    rt = np.asarray(bounds["right"]["top"], np.float64)
+    rb = np.asarray(bounds["right"]["bottom"], np.float64)
+    anchors = {"tl": lt[0].tolist(), "bl": lb[0].tolist(),
+               "tr": rt[-1].tolist(), "br": rb[-1].tolist(),
+               "spine_top": ((lt[-1] + rt[0]) / 2).tolist(),
+               "spine_bot": ((lb[-1] + rb[0]) / 2).tolist()}
+    edges = {}
+    for name, pts in (("left_top", lt), ("left_bottom", lb),
+                      ("right_top", rt), ("right_bottom", rb)):
+        a_name, b_name = SPREAD_EDGES[name]
+        a = np.array(anchors[a_name])
+        b = np.array(anchors[b_name])
+        target = fit_smooth_curve(pts)
+        spine_at = _spread_spine_end(name)
+        m, h, ts = fit_spread_edge(a, b, target, spine_at=spine_at)
+        # store handle pointing from the fold into its own page
+        sh = (ts / 3.0 if spine_at == "start" else -ts / 3.0)
+        edges[name] = SpreadEdge(mid=m.tolist(), handle=h.tolist(),
+                                 spine_handle=sh.tolist())
+    return SpreadModel(anchors, edges)
+
+
+def default_spread_model(w, h):
+    """Rough starting spread outline for a w x h image."""
+    anchors = {"tl": [w * 0.10, h * 0.15], "tr": [w * 0.90, h * 0.15],
+               "bl": [w * 0.10, h * 0.85], "br": [w * 0.90, h * 0.85],
+               "spine_top": [w * 0.50, h * 0.17],
+               "spine_bot": [w * 0.50, h * 0.87]}
+    edges = {}
+    for name, (an, bn) in SPREAD_EDGES.items():
+        a, b = np.array(anchors[an]), np.array(anchors[bn])
+        edges[name] = SpreadEdge(mid=((a + b) / 2).tolist(),
+                                 handle=((b - a) / 6).tolist())
+    return ensure_spine_handles(SpreadModel(anchors, edges))
+
+
+def dewarp_spread(image, model, out_w=None, out_h=None,
+                  interp=cv2.INTER_CUBIC, n=DENSE):
+    """Dewarp both pages independently. Returns (left, right) images.
+    out_w/out_h apply PER PAGE (None = each page's natural size)."""
+    curves = spread_page_curves(model, n)
+    out = []
+    for side in ("left", "right"):
+        top, bot = curves[side]
+        out.append(dewarp_from_dense(image, top, bot,
+                                     out_w=out_w, out_h=out_h,
+                                     interp=interp))
+    return out[0], out[1]
+
+
+def spread_size_px(model):
+    """(width, height) estimate per page in source pixels: the max of
+    the two pages' physical sizes (so one output size fits both)."""
+    curves = spread_page_curves(model)
+    w = h = 0.0
+    for side in ("left", "right"):
+        top, bot = curves[side]
+        _, len_top = sample_by_arclength(top, np.array([0.0]))
+        _, len_bot = sample_by_arclength(bot, np.array([0.0]))
+        w = max(w, 0.5 * (len_top + len_bot))
+        h = max(h, 0.5 * (np.linalg.norm(top[0] - bot[0])
+                          + np.linalg.norm(top[-1] - bot[-1])))
+    return float(w), float(h)
+
+
+# ----- conversions ----------------------------------------------------------
+
+def _split_dense_at_mid(dense, n_half):
+    """Split a dense edge curve at its parametric midpoint (the on-curve
+    mid control point) into left/right traces of n_half points each."""
+    mid_idx = len(dense) // 2
+    left = _decimate(dense[:mid_idx + 1], n_half)
+    right = _decimate(dense[mid_idx:], n_half)
+    return left, right
+
+
+def page_to_spread(model):
+    """Convert a single-page model to a spread: the on-curve mid of each
+    edge becomes the spine fold (natural for a two-page outline whose
+    gutter sits at the mid control point)."""
+    top, bot = page_edges(model)
+    lt, rt = _split_dense_at_mid(top, N_PTS)
+    lb, rb = _split_dense_at_mid(bot, N_PTS)
+    return spread_from_bounds({"left": {"top": lt, "bottom": lb},
+                               "right": {"top": rt, "bottom": rb}})
+
+
+def spread_to_page(model):
+    """Convert a spread to a single-page model spanning the whole
+    outline (concatenated edges refit as one top and one bottom)."""
+    lt = spread_edge_dense(model, "left_top")
+    rt = spread_edge_dense(model, "right_top")
+    lb = spread_edge_dense(model, "left_bottom")
+    rb = spread_edge_dense(model, "right_bottom")
+    top = np.vstack([lt, rt[1:]])
+    bot = np.vstack([lb, rb[1:]])
+    return model_from_traces(_decimate(top, 2 * N_PTS - 1),
+                             _decimate(bot, 2 * N_PTS - 1))
+
+
+def quad_to_spread(points, gutter_t=0.5):
+    """Build a straight-edged spread from 4 quad corners with the spine
+    at fraction gutter_t along the top/bottom edges (0..1, left-to-
+    right). Result is identical to the quad transform until edited."""
+    rect = order_points(points)
+    tl, tr, br, bl = [np.asarray(p, np.float64) for p in rect]
+    gutter_t = float(min(0.95, max(0.05, gutter_t)))
+    st = tl + gutter_t * (tr - tl)
+    sb = bl + gutter_t * (br - bl)
+    n = N_PTS
+    bounds = {"left": {"top": np.linspace(tl, st, n),
+                       "bottom": np.linspace(bl, sb, n)},
+              "right": {"top": np.linspace(st, tr, n),
+                        "bottom": np.linspace(sb, br, n)}}
+    return spread_from_bounds(bounds)
+
+
+# ----- GUI handle support ---------------------------------------------------
+
+def spread_handles(model):
+    """Draggable handles: per-edge mid + mirrored tips + spine tip, and
+    the 6 anchors (listed last so they win hit-test ties)."""
+    out = []
+    for e in SPREAD_EDGES:
+        out.append(("mid", e, None))
+        out.append(("tip", e, 1))
+        out.append(("tip", e, -1))
+        out.append(("stip", e, None))    # spine-fold tangent tip
+    out += [("anchor", k, None) for k in
+            ("tl", "tr", "bl", "br", "spine_top", "spine_bot")]
+    return out
+
+
+def _spread_spine_anchor(model, edge):
+    a_name, b_name = SPREAD_EDGES[edge]
+    nm = a_name if a_name.startswith("spine") else b_name
+    return np.array(model.anchors[nm], np.float64)
+
+
+def spread_handle_pos(model, h):
+    kind, key, sgn = h
+    if kind == "anchor":
+        return np.array(model.anchors[key], np.float64)
+    e = model.edges[key]
+    if kind == "mid":
+        return np.array(e.mid, np.float64)
+    if kind == "stip":
+        return (_spread_spine_anchor(model, key)
+                + np.array(e.spine_handle, np.float64))
+    return (np.array(e.mid, np.float64)
+            + sgn * np.array(e.handle, np.float64))
+
+
+def spread_move_handle(model, h, pos):
+    kind, key, sgn = h
+    pos_l = [float(pos[0]), float(pos[1])]
+    if kind == "anchor":
+        model.anchors[key] = pos_l
+    elif kind == "mid":
+        model.edges[key].mid = pos_l
+    elif kind == "stip":
+        s = _spread_spine_anchor(model, key)
+        model.edges[key].spine_handle = \
+            (np.array(pos_l, np.float64) - s).tolist()
+    else:
+        m = np.array(model.edges[key].mid, np.float64)
+        model.edges[key].handle = \
+            (sgn * (np.array(pos_l, np.float64) - m)).tolist()
+
+
+# ----- text-line refinement -------------------------------------------------
+
+def refine_spread_with_text(gray, model, iters=2, work_h=1200):
+    """Correct the spread so each page's isolines match its text lines
+    (BookScan refine_model_with_text). Pages with <5 detected lines keep
+    their current curves. Returns (model, refined_any)."""
+    refined = False
+    for _ in range(iters):
+        curves = spread_page_curves(model)
+        bounds = {}
+        for side in ("left", "right"):
+            top, bot = curves[side]
+            s7 = np.linspace(0.0, 1.0, N_PTS)
+
+            def keep_current():
+                t7, _ = sample_by_arclength(top, s7)
+                b7, _ = sample_by_arclength(bot, s7)
+                return {"top": t7.tolist(), "bottom": b7.tolist()}
+
+            Hinv, top_s, bot_s, out_w, out_h = _geometry(
+                top, bot, out_h=work_h)
+            t = np.linspace(0.0, 1.0, out_h)[:, None, None]
+            grid = _h_apply(Hinv,
+                            (1.0 - t) * top_s[None] + t * bot_s[None])
+            flat = cv2.remap(gray, grid[..., 0].astype(np.float32),
+                             grid[..., 1].astype(np.float32),
+                             cv2.INTER_LINEAR,
+                             borderMode=cv2.BORDER_REPLICATE)
+            lines = _detect_text_lines(flat)
+            if len(lines) < 5:
+                bounds[side] = keep_current()
+                continue
+            sol = _solve_line_disparity(lines, xdeg=4, ydeg=1)
+            xs = np.linspace(0, out_w - 1, N_PTS)
+            d_top = _eval_disparity(sol, xs, np.full(N_PTS, 0.0))
+            d_bot = _eval_disparity(sol, xs,
+                                    np.full(N_PTS, out_h - 1.0))
+            xc = np.array([out_w / 2.0])
+            d_top -= _eval_disparity(sol, xc, np.array([0.0]))[0]
+            d_bot -= _eval_disparity(sol, xc,
+                                     np.array([out_h - 1.0]))[0]
+            idx = xs.round().astype(int)
+            tt = (d_top / (out_h - 1.0))[:, None]
+            bb = ((out_h - 1.0 + d_bot) / (out_h - 1.0))[:, None]
+            top_new = _h_apply(Hinv,
+                               (1.0 - tt) * top_s[idx] + tt * bot_s[idx])
+            bot_new = _h_apply(Hinv,
+                               (1.0 - bb) * top_s[idx] + bb * bot_s[idx])
+            bounds[side] = {"top": top_new.tolist(),
+                            "bottom": bot_new.tolist()}
+            refined = True
+        if not refined:
+            return model, False
+        model = spread_from_bounds(bounds)
     return model, refined
