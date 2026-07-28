@@ -351,12 +351,14 @@ studio" and the "Session Handoff" section below it) and
   working image; offer to save it permanently (and/or keep the original).
   Add the curved-page spline mode (the mode selector reserves a slot) using
   `core.dewarp.PageModel` / `dewarp_page` / `refine_with_text`.
-- **Two-page (book spread) dewarp mode.** PARTIALLY DONE: the mode
-  selector now has Book - One Page (smooth gutter default) and Book -
-  Two Page (broken-corner gutter default); switching modes re-applies the
-  default to the current outline. REMAINING: a proper spine (BookScan's
-  spine_top/spine_bot anchors) so each page dewarps independently and
-  outputs as two separate pages.
+- **Two-page (book spread) dewarp mode.** DONE: Book - Two Page mode
+  uses a full SpreadModel (BookScan port, bitwise-verified): 6 anchors
+  incl. spine_top/spine_bot, 4 corner-to-spine edges with draggable
+  spine tangent handles; each page dewarps independently and Apply
+  offers Left / Right / Both. Outline JSON interchanges with BookScan's
+  *_points.json. Possible follow-ons: BookScan's smarter spread
+  detection (spine-dip cues) instead of split-at-mid seeding; batch
+  book mode (seed each page from the previous outline, roadmap P5).
   The richer two-page core already exists in BookScan
   (`book_dewarp.py` OutlineModel: 6 anchors incl. spine_top/spine_bot +
   4 edges) - the studio plan (section 13, P1/P2) is to unify that with the

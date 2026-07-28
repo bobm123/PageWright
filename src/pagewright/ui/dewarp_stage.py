@@ -58,8 +58,8 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
                                QGraphicsPolygonItem, QGraphicsScene,
                                QGraphicsSimpleTextItem, QGraphicsView,
                                QHBoxLayout, QInputDialog, QLabel, QMenu,
-                               QPushButton, QSpinBox, QSplitter,
-                               QVBoxLayout, QWidget)
+                               QMessageBox, QPushButton, QSpinBox,
+                               QSplitter, QVBoxLayout, QWidget)
 
 from ..core import dewarp as dw
 
@@ -87,6 +87,11 @@ _LINE_COLOR = QColor("#22cc66")
 _TOP_COLOR = QColor("#50dc50")
 _BOT_COLOR = QColor("#ffb450")
 _TIP_COLOR = QColor("#ffffff")
+# spread edge colors (match BookScan's GUI palette)
+_SPREAD_COLORS = {"left_top": QColor("#50dc50"),
+                  "left_bottom": QColor("#ffb450"),
+                  "right_top": QColor("#3ca0ff"),
+                  "right_bottom": QColor("#dc50dc")}
 
 # scoped enum name, robust across PySide6 versions
 _IGNORE_XFORM = QGraphicsItem.GraphicsItemFlag.ItemIgnoresTransformations
@@ -506,18 +511,27 @@ class _SourceView(_AutoFitView):
                 return name, self.mapToScene(view_pos)
         return None
 
+    def _is_spread(self):
+        return isinstance(self._model, dw.SpreadModel)
+
     def _nearest_spline_handle(self, view_pos):
         if self._model is None:
             return None
+        if self._is_spread():
+            all_handles = dw.spread_handles(self._model)
+            pos_of = lambda h: dw.spread_handle_pos(self._model, h)
+        else:
+            all_handles = dw.handles(self._model)
+            pos_of = lambda h: dw.handle_pos(self._model, h)
         best, best_d = None, HIT_R
-        for h in dw.handles(self._model):
+        for h in all_handles:
             if h[0] == "ctip":
                 # inactive corner tips are not shown; don't hit-test them
                 edge_name, end = h[1], h[2]
                 e = self._model.edges[edge_name]
                 if (e.tip_a if end == "a" else e.tip_b) is None:
                     continue
-            p = dw.handle_pos(self._model, h)
+            p = pos_of(h)
             vp = self.mapFromScene(QPointF(float(p[0]), float(p[1])))
             d = (vp - view_pos).manhattanLength()
             if d <= best_d:
@@ -597,7 +611,11 @@ class _SourceView(_AutoFitView):
             self._redraw_overlay()
             self.cornersChanged.emit()
         else:
-            dw.move_handle(self._model, self._drag, (sp.x(), sp.y()))
+            if self._is_spread():
+                dw.spread_move_handle(self._model, self._drag,
+                                      (sp.x(), sp.y()))
+            else:
+                dw.move_handle(self._model, self._drag, (sp.x(), sp.y()))
             self._redraw_overlay()
             self.modelChanged.emit()
 
@@ -618,7 +636,11 @@ class _SourceView(_AutoFitView):
         self._clear_overlay()
         if self._mode == MODE_QUAD:
             self._draw_quad_overlay()
-        elif self._model is not None:
+        elif self._model is None:
+            pass
+        elif self._is_spread():
+            self._draw_spread_overlay()
+        else:
             self._draw_spline_overlay()
 
     # -- quad --
@@ -716,6 +738,63 @@ class _SourceView(_AutoFitView):
             self._add_round_handle(QPointF(float(p[0]), float(p[1])),
                                    HANDLE_R, col)
         for k in ("tl", "tr", "bl", "br"):
+            p = m.anchors[k]
+            self._add_square_handle(QPointF(float(p[0]), float(p[1])),
+                                    HANDLE_R)
+
+    # -- spread (two-page) --
+    def _draw_spread_overlay(self):
+        m = self._model
+        # straight side edges + the spine, dashed
+        side_pen = QPen(QColor("#dddddd"))
+        side_pen.setCosmetic(True)
+        side_pen.setStyle(Qt.DashLine)
+        for a, b in (("tl", "bl"), ("tr", "br"),
+                     ("spine_top", "spine_bot")):
+            p, q = m.anchors[a], m.anchors[b]
+            ln = self._scene.addLine(p[0], p[1], q[0], q[1], side_pen)
+            self._overlay.append(ln)
+        for name, col in _SPREAD_COLORS.items():
+            dense = dw.spread_edge_dense(m, name, 200)
+            path = QPainterPath(QPointF(float(dense[0, 0]),
+                                        float(dense[0, 1])))
+            for x, y in dense[1:]:
+                path.lineTo(float(x), float(y))
+            pen = QPen(col)
+            pen.setCosmetic(True)
+            pen.setWidth(2)
+            self._overlay.append(self._scene.addPath(path, pen))
+            e = m.edges[name]
+            mid = np.asarray(e.mid, float)
+            hpen = QPen(QColor("#bbbbbb"))
+            hpen.setCosmetic(True)
+            hpen.setStyle(Qt.DashLine)
+            for sgn in (1, -1):
+                tp = dw.spread_handle_pos(m, ("tip", name, sgn))
+                self._overlay.append(self._scene.addLine(
+                    mid[0], mid[1], float(tp[0]), float(tp[1]), hpen))
+            # spine tangent handle: dashed line fold -> tip
+            sa = dw._spread_spine_anchor(m, name)
+            st = dw.spread_handle_pos(m, ("stip", name, None))
+            cpen = QPen(col)
+            cpen.setCosmetic(True)
+            cpen.setStyle(Qt.DashLine)
+            self._overlay.append(self._scene.addLine(
+                float(sa[0]), float(sa[1]), float(st[0]), float(st[1]),
+                cpen))
+        # handles: tips first, mids, then anchors on top
+        for name, col in _SPREAD_COLORS.items():
+            for sgn in (1, -1):
+                p = dw.spread_handle_pos(m, ("tip", name, sgn))
+                self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                       TIP_R, _TIP_COLOR)
+            p = dw.spread_handle_pos(m, ("stip", name, None))
+            self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                   TIP_R, col)
+            p = dw.spread_handle_pos(m, ("mid", name, None))
+            self._add_round_handle(QPointF(float(p[0]), float(p[1])),
+                                   HANDLE_R, col)
+        for k in ("tl", "tr", "bl", "br", "spine_top", "spine_bot"):
             p = m.anchors[k]
             self._add_square_handle(QPointF(float(p[0]), float(p[1])),
                                     HANDLE_R)
@@ -923,48 +1002,51 @@ class DewarpStageWidget(QWidget):
         self._full.setEnabled(idx == IDX_QUAD)
         if self._src is None:
             return
-        if idx != IDX_QUAD:
-            model = self._source.model()
+        model = self._source.model()
+        h, w = self._src.shape[:2]
+        if idx == IDX_ONE_PAGE:
             if model is None:
-                h, w = self._src.shape[:2]
                 self._set_spline_model(dw.default_model(w, h))
+            elif isinstance(model, dw.SpreadModel):
+                # merge the spread back into one outline
+                self._set_spline_model(dw.spread_to_page(model))
             else:
-                # keep the outline; re-apply this book mode's gutter
-                # default (one page: smooth center, two page: V fold)
-                self._apply_mid_defaults(model)
                 self._source.notify_model_edit()
+        elif idx == IDX_TWO_PAGE:
+            if model is None:
+                self._set_spread_model(dw.default_spread_model(w, h))
+            elif isinstance(model, dw.SpreadModel):
+                self._request_preview()
+            else:
+                # split the single outline at its mid (the gutter)
+                self._set_spread_model(dw.page_to_spread(model))
         else:
             self._request_preview()
 
-    def _apply_mid_defaults(self, model):
-        for name in ("top", "bottom"):
-            if self._two_page():
-                dw.break_mid_tangent(model, name)
-            else:
-                dw.smooth_mid_tangent(model, name)
-
     def _set_spline_model(self, model):
-        """Install a spline outline with book-friendly defaults:
-
-        - center (gutter) control points follow the mode: ONE PAGE keeps
-          them smooth; TWO PAGE breaks them into corners (V fold) so
-          pulling the center into the gutter creases. Right-click a mid
-          handle to override per edge.
-        - all four corner tangent handles are ACTIVE and adjustable out
-          of the box, seeded at the curve-neutral chord/3 position
-          (right-click a corner to hide/deactivate its handle)
-        """
-        self._apply_mid_defaults(model)
+        """Install a ONE-PAGE outline: smooth center control points and
+        all four corner tangent handles active (seeded curve-neutral;
+        right-click a corner to hide its handle)."""
+        for name in ("top", "bottom"):
+            dw.smooth_mid_tangent(model, name)
         for c in ("tl", "tr", "bl", "br"):
             if not dw.corner_tip_active(model, c):
                 dw.toggle_corner_tip(model, c)
         self._source.set_model(model)
 
+    def _set_spread_model(self, model):
+        """Install a TWO-PAGE spread outline (spine anchors + per-edge
+        spine tangent handles; each page dewarps independently)."""
+        dw.ensure_spine_handles(model)
+        self._source.set_model(model)
+
     def _reset_selection(self):
         if self._src is None:
             return
-        if self._spline_mode():
-            h, w = self._src.shape[:2]
+        h, w = self._src.shape[:2]
+        if self._two_page():
+            self._set_spread_model(dw.default_spread_model(w, h))
+        elif self._spline_mode():
             self._set_spline_model(dw.default_model(w, h))
         else:
             self._source.clear_corners()
@@ -979,33 +1061,34 @@ class DewarpStageWidget(QWidget):
 
         - "corner:<tl|tr|bl|br>": that corner's tangent handle is
           activated -> ONE-PAGE book mode (curving an outer corner)
-        - "top"/"bottom": that edge's on-curve mid point is pulled to the
-          clicked position -> TWO-PAGE book mode (a center point added on
-          an edge is the gutter of a spread, creased by default)
+        - "top"/"bottom": a point added on an edge is the GUTTER of a
+          spread -> TWO-PAGE book mode with the spine placed at the
+          clicked position along the edge
         """
         corners = self._source.corners()
         if len(corners) != 4 or self._src is None:
             return
         rect = dw.order_points(corners)           # tl, tr, br, bl
         tl, tr, br, bl = [np.asarray(p, np.float64) for p in rect]
-        n = dw.N_PTS
-        top = np.linspace(tl, tr, n)
-        bot = np.linspace(bl, br, n)
-        model = dw.model_from_traces(top, bot)
-        for e in model.edges.values():            # start as normal corners
-            e.tip_a = None
-            e.tip_b = None
-        target = IDX_ONE_PAGE
         if what.startswith("corner:"):
+            n = dw.N_PTS
+            model = dw.model_from_traces(np.linspace(tl, tr, n),
+                                         np.linspace(bl, br, n))
+            for e in model.edges.values():        # start as normal corners
+                e.tip_a = None
+                e.tip_b = None
             dw.toggle_corner_tip(model, what.split(":", 1)[1])
+            self._source.set_model(model)
+            self._mode.setCurrentIndex(IDX_ONE_PAGE)
         elif what:
-            dw.move_handle(model, ("mid", what, None),
-                           (scene_pos.x(), scene_pos.y()))
-            target = IDX_TWO_PAGE
-        self._source.set_model(model)
-        # switching the combo applies the mode's gutter defaults to the
-        # existing model (see _on_mode_changed) and re-renders the preview
-        self._mode.setCurrentIndex(target)
+            # spine fraction from the click position along that edge
+            a, b = (tl, tr) if what == "top" else (bl, br)
+            v = b - a
+            p = np.array([scene_pos.x(), scene_pos.y()], np.float64)
+            t = float(np.dot(p - a, v) / max(1e-9, float(v @ v)))
+            model = dw.quad_to_spread(corners, gutter_t=t)
+            self._source.set_model(model)
+            self._mode.setCurrentIndex(IDX_TWO_PAGE)
 
     # ----- sizing ----------------------------------------------------------
     def _on_auto_size_toggled(self, checked):
@@ -1087,7 +1170,10 @@ class DewarpStageWidget(QWidget):
         except Exception as exc:   # RuntimeError and friends
             self._size_label.setText("Auto-detect failed: %s" % exc)
             return
-        if self._spline_mode():
+        if self._two_page():
+            # split the detected outline at its mid to seed the spread
+            self._set_spread_model(dw.page_to_spread(model))
+        elif self._spline_mode():
             self._set_spline_model(model)
         else:
             a = model.anchors
@@ -1099,15 +1185,20 @@ class DewarpStageWidget(QWidget):
             return
         gray = cv2.cvtColor(self._src, cv2.COLOR_BGR2GRAY)
         try:
-            refined, ok = dw.refine_with_text(gray, model.copy())
+            if isinstance(model, dw.SpreadModel):
+                refined, ok = dw.refine_spread_with_text(gray, model.copy())
+            else:
+                refined, ok = dw.refine_with_text(gray, model.copy())
         except Exception as exc:
             self._size_label.setText("Refine failed: %s" % exc)
             return
-        if ok:
-            self._set_spline_model(refined)
-        else:
+        if not ok:
             self._size_label.setText(
                 "No usable text lines found; outline unchanged")
+        elif isinstance(refined, dw.SpreadModel):
+            self._set_spread_model(refined)
+        else:
+            self._set_spline_model(refined)
 
     # ----- preview ---------------------------------------------------------
     def _request_preview(self, *_):
@@ -1166,9 +1257,17 @@ class DewarpStageWidget(QWidget):
         pv_w = max(2, int(round(pv_h * out_w / max(1, out_h))))
         pv_model = model.scaled(self._pv_scale)
         try:
-            flat = dw.dewarp_page(self._pv_img, pv_model,
-                                  out_w=pv_w, out_h=pv_h,
-                                  interp=cv2.INTER_LINEAR)
+            if isinstance(model, dw.SpreadModel):
+                left, right = dw.dewarp_spread(self._pv_img, pv_model,
+                                               out_w=pv_w, out_h=pv_h,
+                                               interp=cv2.INTER_LINEAR,
+                                               n=800)
+                pad = np.full((pv_h, 10, 3), 30, np.uint8)
+                flat = np.hstack([left, pad, right])
+            else:
+                flat = dw.dewarp_page(self._pv_img, pv_model,
+                                      out_w=pv_w, out_h=pv_h,
+                                      interp=cv2.INTER_LINEAR)
         except Exception as exc:
             self._show_error(exc)
             return
@@ -1178,12 +1277,20 @@ class DewarpStageWidget(QWidget):
         self._resultv.set_image(flat)
         self._apply_btn.setEnabled(True)
         self._sync_size_display(out_w, out_h)
-        self._size_label.setText("Output: %d x %d px" % (out_w, out_h))
+        if isinstance(model, dw.SpreadModel):
+            self._size_label.setText(
+                "Output: 2 pages x %d x %d px" % (out_w, out_h))
+        else:
+            self._size_label.setText("Output: %d x %d px" % (out_w, out_h))
 
     def _spline_output_size(self, model):
+        """Output size per page (spread) or for the whole page."""
         if not self._auto_size.isChecked():
             return self._explicit_size()
-        w, h = dw.page_size_px(model)
+        if isinstance(model, dw.SpreadModel):
+            w, h = dw.spread_size_px(model)
+        else:
+            w, h = dw.page_size_px(model)
         return max(2, int(round(w))), max(2, int(round(h)))
 
     def _show_error(self, exc):
@@ -1288,6 +1395,11 @@ class DewarpStageWidget(QWidget):
                 menu.addAction(
                     "Add spline point here (curve the %s edge)" % edge,
                     lambda: self._promote_to_spline(edge, sp))
+            elif kind == "spline" and isinstance(self._source.model(),
+                                                 dw.SpreadModel):
+                # spread handles have no per-corner/V-fold toggles; the
+                # spine tangent tips are directly draggable instead
+                pass
             elif kind == "spline":
                 h = hit[1]
                 hk, key, sgn = h
@@ -1412,17 +1524,24 @@ class DewarpStageWidget(QWidget):
             return
         try:
             with open(path) as fh:
-                model = dw.PageModel.from_dict(json.load(fh))
+                data = json.load(fh)
+            if "spine_top" in data.get("anchors", {}):
+                # BookScan-format spread outline (6 anchors, 4 edges)
+                model = dw.ensure_spine_handles(
+                    dw.SpreadModel.from_dict(data))
+                target = IDX_TWO_PAGE
+            else:
+                model = dw.PageModel.from_dict(data)
+                broken = any(model.edges[n].broken
+                             for n in ("top", "bottom"))
+                target = IDX_TWO_PAGE if broken else IDX_ONE_PAGE
         except Exception as exc:
             self._size_label.setText("Load failed: %s" % exc)
             return
-        # keep the file's smooth/broken state exactly as saved; pick the
-        # matching book mode (broken gutter => two-page spread)
-        broken = any(model.edges[n].broken for n in ("top", "bottom"))
-        target = IDX_TWO_PAGE if broken else IDX_ONE_PAGE
+        # keep the file's state exactly as saved
         self._source.set_model(model)
         if self._mode.currentIndex() == target:
-            self._request_preview()
+            self._on_mode_changed(target)   # runs conversions + preview
         else:
             self._mode.setCurrentIndex(target)
 
@@ -1436,6 +1555,37 @@ class DewarpStageWidget(QWidget):
             if model is None:
                 return
             out_w, out_h = self._spline_output_size(model)
+            if isinstance(model, dw.SpreadModel):
+                try:
+                    left, right = dw.dewarp_spread(self._src, model,
+                                                   out_w=out_w,
+                                                   out_h=out_h)
+                except Exception as exc:
+                    self._show_error(exc)
+                    return
+                box = QMessageBox(self)
+                box.setWindowTitle("Use Flattened Pages")
+                box.setText("Both pages were dewarped independently.\n"
+                            "Which should become the working image?")
+                b_left = box.addButton("Left Page",
+                                       QMessageBox.AcceptRole)
+                b_right = box.addButton("Right Page",
+                                        QMessageBox.AcceptRole)
+                b_both = box.addButton("Both (side by side)",
+                                       QMessageBox.AcceptRole)
+                box.addButton(QMessageBox.Cancel)
+                box.exec()
+                clicked = box.clickedButton()
+                if clicked is b_left:
+                    self._result = left
+                elif clicked is b_right:
+                    self._result = right
+                elif clicked is b_both:
+                    self._result = np.hstack([left, right])
+                else:
+                    return
+                self.applied.emit()
+                return
             try:
                 self._result = dw.dewarp_page(self._src, model,
                                               out_w=out_w, out_h=out_h)
