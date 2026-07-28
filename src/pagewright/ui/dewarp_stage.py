@@ -946,16 +946,26 @@ class DewarpStageWidget(QWidget):
             return
         if idx == MODE_SPLINE and self._source.model() is None:
             h, w = self._src.shape[:2]
-            self._source.set_model(dw.default_model(w, h))
+            self._set_spline_model(dw.default_model(w, h))
         else:
             self._request_preview()
+
+    def _set_spline_model(self, model):
+        """Install a spline outline, defaulting the center (gutter)
+        control point of each edge to a CORNER (broken tangent) so pulling
+        it into the book gutter creases rather than curves smoothly.
+        Right-click a mid handle -> Make smooth to undo per edge. (A
+        dedicated one-page smooth mode is on the backlog, section 14.)"""
+        dw.break_mid_tangent(model, "top")
+        dw.break_mid_tangent(model, "bottom")
+        self._source.set_model(model)
 
     def _reset_selection(self):
         if self._src is None:
             return
         if self._spline_mode():
             h, w = self._src.shape[:2]
-            self._source.set_model(dw.default_model(w, h))
+            self._set_spline_model(dw.default_model(w, h))
         else:
             self._source.clear_corners()
 
@@ -989,7 +999,7 @@ class DewarpStageWidget(QWidget):
         elif what:
             dw.move_handle(model, ("mid", what, None),
                            (scene_pos.x(), scene_pos.y()))
-        self._source.set_model(model)
+        self._set_spline_model(model)
         self._mode.setCurrentIndex(MODE_SPLINE)   # triggers spline preview
 
     # ----- sizing ----------------------------------------------------------
@@ -1073,7 +1083,7 @@ class DewarpStageWidget(QWidget):
             self._size_label.setText("Auto-detect failed: %s" % exc)
             return
         if self._spline_mode():
-            self._source.set_model(model)
+            self._set_spline_model(model)
         else:
             a = model.anchors
             self._source.set_corners([a["tl"], a["tr"], a["br"], a["bl"]])
@@ -1089,7 +1099,7 @@ class DewarpStageWidget(QWidget):
             self._size_label.setText("Refine failed: %s" % exc)
             return
         if ok:
-            self._source.set_model(refined)
+            self._set_spline_model(refined)
         else:
             self._size_label.setText(
                 "No usable text lines found; outline unchanged")
