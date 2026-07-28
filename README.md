@@ -50,12 +50,14 @@ python -c "import cv2, numpy, PySide6; print('ok')"
 
 ## Run
 
-From the project root, run the script directly — no install needed (the entry
-point puts `src/` on `sys.path` itself):
+From the project root, run the launcher directly — no install needed:
 
 ```bash
-python src/pagewright/main.py
+python PageWright.py
 ```
+
+(`python src/pagewright/main.py` also still works; the entry point puts
+`src/` on `sys.path` itself.)
 
 It takes an optional file to open at startup — either a photo or a saved
 `.tiproj.json` project (chosen by extension):
