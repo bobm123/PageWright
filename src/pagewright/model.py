@@ -15,6 +15,10 @@ def default_tiling():
         "landscape": False,
         "margin_mm": 6.0,
         "overlap_mm": 10.0,
+        "overlap_unit": "mm",       # or "percent" (of the printable page)
+        "fixed_grid": False,        # True: use grid_cols x grid_rows pages
+        "grid_cols": 2,
+        "grid_rows": 2,
         "scale_percent": 100,
         "embed_photo": False,
         "crop_photo": False,

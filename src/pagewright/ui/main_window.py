@@ -131,7 +131,7 @@ class MainWindow(QMainWindow):
                   self.act_view_tiles,
                   self.act_save_project, self.act_new_object,
                   self.act_mode_roi, self.act_clear_roi,
-                  self.act_dewarp):
+                  self.act_dewarp, self.act_print_tiles):
             a.setEnabled(enabled)
 
     # ----- delegated actions -----------------------------------------------
@@ -218,6 +218,9 @@ class MainWindow(QMainWindow):
 
     def export_tiles(self):
         self.exports.export_tiles()
+
+    def print_tiles(self):
+        self.exports.print_tiles()
 
     def run_segmentation(self):
         self.editing.run_segmentation()

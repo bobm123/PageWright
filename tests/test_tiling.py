@@ -132,3 +132,37 @@ def test_inkscape_svg_has_layers_and_namedview():
     assert 'inkscape:document-units="mm"' in svg
     assert 'inkscape:groupmode="layer"' in svg
     assert 'inkscape:label="Trace"' in svg
+
+
+# ---------------------------------------------------------------------------
+# Upgrades: per-axis / percent overlap, fixed grid, corner+midpoint marks
+# ---------------------------------------------------------------------------
+
+def test_plan_tiles_accepts_per_axis_overlap():
+    p1 = tiling.plan_tiles(400.0, 300.0, "Letter", False, 6.0, (20.0, 5.0))
+    assert p1["step_x"] == pytest.approx(215.9 - 12.0 - 20.0)
+    assert p1["step_y"] == pytest.approx(279.4 - 12.0 - 5.0)
+    # scalar still works and matches the tuple form
+    p2 = tiling.plan_tiles(400.0, 300.0, "Letter", False, 6.0, 10.0)
+    p3 = tiling.plan_tiles(400.0, 300.0, "Letter", False, 6.0, (10.0, 10.0))
+    assert p2 == p3
+
+
+def test_fit_scale_fills_requested_grid():
+    # content that would need many pages at 100% fits exactly in 2x3
+    cw, ch = 500.0, 700.0
+    s = tiling.fit_scale(cw, ch, "A4", False, 6.0, 10.0, 2, 3)
+    plan = tiling.plan_tiles(cw * s, ch * s, "A4", False, 6.0, 10.0)
+    assert plan["ncols"] <= 2 and plan["nrows"] <= 3
+    # and the limiting axis uses its pages fully (within rounding)
+    max_w = 2 * plan["step_x"] + 10.0
+    max_h = 3 * plan["step_y"] + 10.0
+    assert (cw * s == pytest.approx(max_w, abs=1e-6)
+            or ch * s == pytest.approx(max_h, abs=1e-6))
+
+
+def test_registration_marks_corners_and_midpoints():
+    marks = tiling._registration_marks(6.0, 100.0, 80.0)
+    assert marks.count("<path") == 8    # 4 corners + 4 midpoints
+    # 5 mm point-to-point: half-diagonal 2.5 encoded in the path data
+    assert tiling._DIAMOND_MM == pytest.approx(2.5)

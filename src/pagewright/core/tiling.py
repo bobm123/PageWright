@@ -29,8 +29,19 @@ PAGE_SIZES_MM = {
     "A3": (297.0, 420.0),
 }
 
-_DIAMOND_MM = 3.0          # half-diagonal of a registration diamond
+_DIAMOND_MM = 2.5          # half-diagonal: 5 mm point-to-point diamonds
 _EPS = 1e-6
+
+
+def _overlaps(overlap_mm):
+    """Normalise an overlap spec to (overlap_x, overlap_y) in mm.
+    A scalar applies to both axes; a (x, y) pair is used as-is."""
+    try:
+        ox, oy = overlap_mm
+        return float(ox), float(oy)
+    except TypeError:
+        v = float(overlap_mm)
+        return v, v
 
 
 def tile_counts(content_mm, page_mm, margin_mm, overlap_mm):
@@ -38,38 +49,55 @@ def tile_counts(content_mm, page_mm, margin_mm, overlap_mm):
     printable = page_mm - 2.0 * margin_mm
     if printable <= 0.0:
         raise ValueError("printer margins leave no printable area")
-    step = printable - overlap_mm
+    step = printable - float(overlap_mm)
     if step <= 0.0:
         raise ValueError("overlap is larger than the printable area")
-    return max(1, int(math.ceil((content_mm - overlap_mm) / step)))
+    return max(1, int(math.ceil((content_mm - float(overlap_mm)) / step)))
 
 
 def plan_tiles(content_w, content_h, page, landscape, margin_mm, overlap_mm):
     """Compute the tiling geometry without rendering.
 
-    Returns a dict with page/printable sizes, step sizes and tile counts.
+    overlap_mm may be a scalar or an (x, y) pair (percent-of-page overlaps
+    resolve to different mm per axis). Returns a dict with page/printable
+    sizes, step sizes and tile counts.
     """
     if page not in PAGE_SIZES_MM:
         raise ValueError("unknown page size: %r" % (page,))
     pw, ph = PAGE_SIZES_MM[page]
     if landscape:
         pw, ph = ph, pw
+    ov_x, ov_y = _overlaps(overlap_mm)
     printable_w = pw - 2.0 * margin_mm
     printable_h = ph - 2.0 * margin_mm
     if printable_w <= 0.0 or printable_h <= 0.0:
         raise ValueError("printer margins leave no printable area")
-    step_x = printable_w - overlap_mm
-    step_y = printable_h - overlap_mm
+    step_x = printable_w - ov_x
+    step_y = printable_h - ov_y
     if step_x <= 0.0 or step_y <= 0.0:
         raise ValueError("overlap is larger than the printable area")
-    ncols = max(1, int(math.ceil((content_w - overlap_mm) / step_x)))
-    nrows = max(1, int(math.ceil((content_h - overlap_mm) / step_y)))
+    ncols = max(1, int(math.ceil((content_w - ov_x) / step_x)))
+    nrows = max(1, int(math.ceil((content_h - ov_y) / step_y)))
     return {
         "page_w": pw, "page_h": ph,
         "printable_w": printable_w, "printable_h": printable_h,
         "step_x": step_x, "step_y": step_y,
         "ncols": ncols, "nrows": nrows,
     }
+
+
+def fit_scale(content_w, content_h, page, landscape, margin_mm, overlap_mm,
+              ncols, nrows):
+    """Largest scale factor at which the content fits an EXPLICIT grid of
+    ncols x nrows pages (the 'number of repeats' mode). content_w/h are
+    the unscaled content size in mm."""
+    plan = plan_tiles(1.0, 1.0, page, landscape, margin_mm, overlap_mm)
+    ov_x, ov_y = _overlaps(overlap_mm)
+    max_w = ncols * plan["step_x"] + ov_x
+    max_h = nrows * plan["step_y"] + ov_y
+    if content_w <= 0.0 or content_h <= 0.0:
+        raise ValueError("content has no size")
+    return min(max_w / content_w, max_h / content_h)
 
 
 def grid_lines_mm(plan, content_w, content_h):
@@ -100,21 +128,25 @@ def _diamond(cx, cy):
 
 
 def _registration_marks(margin, live_w, live_h):
-    """Filled diamonds at the midpoint of each edge of the tile's live area.
+    """5 mm filled diamonds at the CORNERS and edge MIDPOINTS of the
+    tile's live area (the overlap frame).
 
-    Because the live-area edges sit on the master tile-grid lines, the mark on a
-    shared edge lands at the same master coordinate on both neighbouring tiles,
-    so the diamonds coincide when the printed sheets are overlapped.
+    Because the live-area edges sit on the master tile-grid lines, a mark
+    on a shared edge lands at the same master coordinate on both
+    neighbouring tiles, so the diamonds coincide when the printed sheets
+    are overlapped - corners register two axes at once.
     """
     if live_w <= 0.0 or live_h <= 0.0:
         return ""
+    x0, x1 = margin, margin + live_w
+    y0, y1 = margin, margin + live_h
     cx = margin + live_w / 2.0
     cy = margin + live_h / 2.0
     marks = [
-        _diamond(cx, margin),               # top edge
-        _diamond(cx, margin + live_h),      # bottom edge
-        _diamond(margin, cy),               # left edge
-        _diamond(margin + live_w, cy),      # right edge
+        _diamond(x0, y0), _diamond(x1, y0),     # top corners
+        _diamond(x0, y1), _diamond(x1, y1),     # bottom corners
+        _diamond(cx, y0), _diamond(cx, y1),     # top/bottom midpoints
+        _diamond(x0, cy), _diamond(x1, cy),     # left/right midpoints
     ]
     return "".join(marks)
 

@@ -29,6 +29,10 @@ def build_actions(w):
     w.act_export.setShortcut("Ctrl+E")
     w.act_export.triggered.connect(w.export_svg)
 
+    w.act_print_tiles = QAction("Print &Tiles…", w)
+    w.act_print_tiles.setToolTip("Send the tile pages straight to a printer")
+    w.act_print_tiles.triggered.connect(w.print_tiles)
+
     w.act_export_tiles = QAction("Export &Print Tiles…", w)
     w.act_export_tiles.triggered.connect(w.export_tiles)
 
@@ -132,6 +136,7 @@ def build_menus(w):
     m_file.addAction(w.act_open)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)
+    m_file.addAction(w.act_print_tiles)
     m_file.addSeparator()
     m_file.addAction(w.act_preferences)
     m_file.addSeparator()

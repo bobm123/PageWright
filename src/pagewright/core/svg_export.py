@@ -141,7 +141,17 @@ def build_content(project, image_bgr=None, embed_photo=True,
                 "calibrate the scale before exporting (mm/px unknown)")
         mpp = calib.mm_per_pixel
 
-    bbox = content_bbox_px(project)
+    try:
+        bbox = content_bbox_px(project)
+    except ExportError:
+        # No traces: fall back to the WHOLE IMAGE as the content (image-
+        # only export/tiling - e.g. printing a flattened page at scale).
+        if not (embed_photo and image_bgr is not None
+                and project.pixel_width and project.pixel_height):
+            raise
+        bbox = geo.bbox_of_points(
+            [(0.0, 0.0),
+             (float(project.pixel_width), float(project.pixel_height))])
     margin_px = project.margin_mm / mpp
     ox = bbox.min_x - margin_px
     oy = bbox.min_y - margin_px

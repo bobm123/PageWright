@@ -65,10 +65,26 @@ def test_uncalibrated_round_trip():
 def test_tiling_round_trip():
     p = _sample_project()
     p.tiling = {"page": "A4", "landscape": True, "margin_mm": 8.0,
-                "overlap_mm": 15.0, "scale_percent": 75, "embed_photo": True,
+                "overlap_mm": 15.0, "overlap_unit": "percent",
+                "fixed_grid": True, "grid_cols": 3, "grid_rows": 4,
+                "scale_percent": 75, "embed_photo": True,
                 "crop_photo": True, "filled": True}
     p2 = pio.project_from_dict(pio.project_to_dict(p))
     assert p2.tiling == p.tiling
+
+
+def test_old_tiling_dict_gains_new_defaults():
+    # a pre-upgrade tiling dict (no overlap_unit/grid keys) loads with
+    # the new keys defaulted, keeping older project files working
+    p = _sample_project()
+    d = pio.project_to_dict(p)
+    d["tiling"] = {"page": "A4", "landscape": True, "margin_mm": 8.0,
+                   "overlap_mm": 15.0, "scale_percent": 75,
+                   "embed_photo": True, "crop_photo": True, "filled": True}
+    t = pio.project_from_dict(d).tiling
+    assert t["page"] == "A4" and t["overlap_mm"] == 15.0
+    assert t["overlap_unit"] == "mm" and t["fixed_grid"] is False
+    assert t["grid_cols"] == 2 and t["grid_rows"] == 2
 
 
 def test_missing_tiling_gets_defaults():

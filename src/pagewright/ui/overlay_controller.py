@@ -98,17 +98,33 @@ class OverlayController:
             return
         pts = self.all_points()
         if not pts:
-            w.canvas.clear_tile_grid()
-            return
+            # nothing traced: tile the WHOLE IMAGE (image-only printing)
+            if w._loaded is None:
+                w.canvas.clear_tile_grid()
+                return
+            pts = [(0.0, 0.0),
+                   (float(w._loaded.pixel_width),
+                    float(w._loaded.pixel_height))]
         p = w.tiling_panel.params()
-        mpp = self.effective_mm_per_pixel(p["scale"])
         box = geo.bbox_of_points(pts)
-        margin_px = w.project.margin_mm / mpp
-        ox = box.min_x - margin_px
-        oy = box.min_y - margin_px
-        content_w_mm = (box.width + 2.0 * margin_px) * mpp
-        content_h_mm = (box.height + 2.0 * margin_px) * mpp
         try:
+            scale = p["scale"]
+            if scale is None:
+                # Fixed grid: scale so the content fills the page grid
+                mpp1 = self.effective_mm_per_pixel(1.0)
+                margin_px1 = w.project.margin_mm / mpp1
+                cw1 = (box.width + 2.0 * margin_px1) * mpp1
+                ch1 = (box.height + 2.0 * margin_px1) * mpp1
+                cols, rows = p["grid"]
+                scale = tiling.fit_scale(cw1, ch1, p["page"],
+                                         p["landscape"], p["margin_mm"],
+                                         p["overlap_mm"], cols, rows)
+            mpp = self.effective_mm_per_pixel(scale)
+            margin_px = w.project.margin_mm / mpp
+            ox = box.min_x - margin_px
+            oy = box.min_y - margin_px
+            content_w_mm = (box.width + 2.0 * margin_px) * mpp
+            content_h_mm = (box.height + 2.0 * margin_px) * mpp
             plan = tiling.plan_tiles(content_w_mm, content_h_mm, p["page"],
                                      p["landscape"], p["margin_mm"],
                                      p["overlap_mm"])
@@ -128,7 +144,7 @@ class OverlayController:
             segments.append((left, y_px, right, y_px))
         w.canvas.set_tile_grid(segments)
         w.statusBar().showMessage(
-            "Tile preview: %d × %d pages (%s%s, %d%%)."
+            "Tile preview: %d x %d pages (%s%s, %d%%)."
             % (plan["ncols"], plan["nrows"], p["page"],
                ", landscape" if p["landscape"] else "",
-               round(p["scale"] * 100)), 4000)
+               round(scale * 100)), 4000)
