@@ -968,6 +968,7 @@ class DewarpStageWidget(QWidget):
         self._result = None
         self._result_pv_scale = None
         self._pv_shape = None
+        self._rotation = 0            # result rotation, degrees CW
         if dpi:
             self._dpi.setValue(int(dpi))
         # downscaled copy for responsive spline previews
@@ -1234,7 +1235,7 @@ class DewarpStageWidget(QWidget):
         self._result = None            # full-res result made on Apply
         self._result_pv_scale = scale
         self._pv_shape = flat.shape[:2]
-        self._resultv.set_image(flat)
+        self._resultv.set_image(self._rotate_result_img(flat))
         self._apply_btn.setEnabled(True)
         # full-res result dimensions (canvas size in full-image mode)
         res_w = int(round(flat.shape[1] / scale))
@@ -1274,7 +1275,7 @@ class DewarpStageWidget(QWidget):
         self._result = None            # full-res result made on Apply
         self._result_pv_scale = pv_h / max(1, out_h)  # result-pane calib
         self._pv_shape = flat.shape[:2]
-        self._resultv.set_image(flat)
+        self._resultv.set_image(self._rotate_result_img(flat))
         self._apply_btn.setEnabled(True)
         self._sync_size_display(out_w, out_h)
         if isinstance(model, dw.SpreadModel):
@@ -1297,6 +1298,22 @@ class DewarpStageWidget(QWidget):
         self._resultv.show_placeholder("Dewarp error: %s" % exc)
         self._apply_btn.setEnabled(False)
         self._result = None
+
+    def _rotate_result_img(self, img):
+        """Apply the accumulated result rotation (0/90/180/270 deg CW)."""
+        rot = getattr(self, "_rotation", 0) % 360
+        if rot == 90:
+            return cv2.rotate(img, cv2.ROTATE_90_CLOCKWISE)
+        if rot == 180:
+            return cv2.rotate(img, cv2.ROTATE_180)
+        if rot == 270:
+            return cv2.rotate(img, cv2.ROTATE_90_COUNTERCLOCKWISE)
+        return img
+
+    def _rotate_result(self, clockwise):
+        self._rotation = (getattr(self, "_rotation", 0)
+                          + (90 if clockwise else -90)) % 360
+        self._request_preview()
 
     # ----- calibration -----------------------------------------------------
     def _measured_output_px(self, which, p1, p2):
@@ -1453,10 +1470,19 @@ class DewarpStageWidget(QWidget):
         sv.setEnabled(self._spline_mode()
                       and self._source.model() is not None)
         menu.addAction("Load Outline...", self._load_outline)
+        menu.addSeparator()
+        menu.addAction("Save Flattened Image...", self._save_flattened)
         menu.exec(info["global"])
 
     def _show_result_menu(self, global_pos):
         menu = QMenu(self)
+        menu.addAction("Save Flattened Image...", self._save_flattened)
+        menu.addSeparator()
+        menu.addAction("Rotate Result 90 deg CW",
+                       lambda: self._rotate_result(True))
+        menu.addAction("Rotate Result 90 deg CCW",
+                       lambda: self._rotate_result(False))
+        menu.addSeparator()
         menu.addAction("Calibrate...", self._resultv.arm_calibration)
         menu.addSeparator()
         menu.addAction("Fit to Window", self._resultv.refit)
@@ -1545,15 +1571,17 @@ class DewarpStageWidget(QWidget):
         else:
             self._mode.setCurrentIndex(target)
 
-    # ----- apply -----------------------------------------------------------
-    def _on_apply(self):
-        # previews render at a capped resolution; Apply renders full-res
+    # ----- apply / save -----------------------------------------------------
+    def _render_fullres(self, purpose):
+        """Render the final full-resolution flattened image (with the
+        accumulated result rotation). For a spread, asks which page(s);
+        returns the image or None (not ready / cancelled)."""
         if self._src is None:
-            return
+            return None
         if self._spline_mode():
             model = self._source.model()
             if model is None:
-                return
+                return None
             out_w, out_h = self._spline_output_size(model)
             if isinstance(model, dw.SpreadModel):
                 try:
@@ -1562,11 +1590,11 @@ class DewarpStageWidget(QWidget):
                                                    out_h=out_h)
                 except Exception as exc:
                     self._show_error(exc)
-                    return
+                    return None
                 box = QMessageBox(self)
-                box.setWindowTitle("Use Flattened Pages")
+                box.setWindowTitle(purpose)
                 box.setText("Both pages were dewarped independently.\n"
-                            "Which should become the working image?")
+                            "Which page(s)?")
                 b_left = box.addButton("Left Page",
                                        QMessageBox.AcceptRole)
                 b_right = box.addButton("Right Page",
@@ -1577,32 +1605,53 @@ class DewarpStageWidget(QWidget):
                 box.exec()
                 clicked = box.clickedButton()
                 if clicked is b_left:
-                    self._result = left
+                    out = left
                 elif clicked is b_right:
-                    self._result = right
+                    out = right
                 elif clicked is b_both:
-                    self._result = np.hstack([left, right])
+                    out = np.hstack([left, right])
                 else:
-                    return
-                self.applied.emit()
-                return
+                    return None
+                return self._rotate_result_img(out)
             try:
-                self._result = dw.dewarp_page(self._src, model,
-                                              out_w=out_w, out_h=out_h)
+                out = dw.dewarp_page(self._src, model,
+                                     out_w=out_w, out_h=out_h)
             except Exception as exc:
                 self._show_error(exc)
-                return
-        else:
-            corners = self._source.corners()
-            if len(corners) != 4:
-                return
-            out_w, out_h = self._quad_output_size(corners)
-            try:
-                self._result = dw.dewarp_quad(
-                    self._src, corners, out_w, out_h,
-                    full_image=self._full.isChecked())
-            except Exception as exc:
-                self._show_error(exc)
-                return
-        if self._result is not None:
+                return None
+            return self._rotate_result_img(out)
+        corners = self._source.corners()
+        if len(corners) != 4:
+            return None
+        out_w, out_h = self._quad_output_size(corners)
+        try:
+            out = dw.dewarp_quad(self._src, corners, out_w, out_h,
+                                 full_image=self._full.isChecked())
+        except Exception as exc:
+            self._show_error(exc)
+            return None
+        return self._rotate_result_img(out)
+
+    def _on_apply(self):
+        # previews render at a capped resolution; Apply renders full-res
+        result = self._render_fullres("Use Flattened Image")
+        if result is not None:
+            self._result = result
             self.applied.emit()
+
+    def _save_flattened(self):
+        """Save the flattened image straight to a file - the user may
+        only need to flatten and/or scale, without tracing."""
+        result = self._render_fullres("Save Flattened Image")
+        if result is None:
+            return
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Flattened Image", "flattened.png",
+            "Images (*.png *.jpg *.jpeg *.tif *.tiff *.bmp)")
+        if not path:
+            return
+        if cv2 is None or not cv2.imwrite(path, result):
+            self._size_label.setText("Save failed: could not write %s"
+                                     % path)
+            return
+        self._size_label.setText("Saved %s" % path)
