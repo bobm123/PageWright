@@ -121,7 +121,7 @@ def _photo_image_tag(img, off_x, off_y, w_px, h_px, ox, oy, mpp,
 
 def build_content(project, image_bgr=None, embed_photo=True,
                   downscale_max=None, filled=False, as_layers=False,
-                  mm_per_pixel=None, crop_photo=False):
+                  mm_per_pixel=None, crop_photo=False, region_px=None):
     """Build the inner photo+trace fragment and return (content, w_mm, h_mm).
 
     Coordinates use master mm space with origin (0, 0) at the top-left of the
@@ -141,17 +141,28 @@ def build_content(project, image_bgr=None, embed_photo=True,
                 "calibrate the scale before exporting (mm/px unknown)")
         mpp = calib.mm_per_pixel
 
-    try:
-        bbox = content_bbox_px(project)
-    except ExportError:
-        # No traces: fall back to the WHOLE IMAGE as the content (image-
-        # only export/tiling - e.g. printing a flattened page at scale).
-        if not (embed_photo and image_bgr is not None
-                and project.pixel_width and project.pixel_height):
-            raise
-        bbox = geo.bbox_of_points(
-            [(0.0, 0.0),
-             (float(project.pixel_width), float(project.pixel_height))])
+    if region_px is not None:
+        # Explicit content region (e.g. the Select Area rectangle): tile
+        # exactly this part of the image. The photo is cropped to it so
+        # tiles don't bleed surrounding image into margins/overlap.
+        x0, y0, x1, y1 = region_px
+        bbox = geo.bbox_of_points([(float(x0), float(y0)),
+                                   (float(x1), float(y1))])
+        crop_photo = True
+    else:
+        try:
+            bbox = content_bbox_px(project)
+        except ExportError:
+            # No traces: fall back to the WHOLE IMAGE as the content
+            # (image-only export/tiling - e.g. printing a flattened page
+            # at scale).
+            if not (embed_photo and image_bgr is not None
+                    and project.pixel_width and project.pixel_height):
+                raise
+            bbox = geo.bbox_of_points(
+                [(0.0, 0.0),
+                 (float(project.pixel_width),
+                  float(project.pixel_height))])
     margin_px = project.margin_mm / mpp
     ox = bbox.min_x - margin_px
     oy = bbox.min_y - margin_px

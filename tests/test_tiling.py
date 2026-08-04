@@ -166,3 +166,24 @@ def test_registration_marks_corners_and_midpoints():
     assert marks.count("<path") == 8    # 4 corners + 4 midpoints
     # 5 mm point-to-point: half-diagonal 2.5 encoded in the path data
     assert tiling._DIAMOND_MM == pytest.approx(2.5)
+
+
+def test_region_px_tiles_only_that_area():
+    import numpy as np
+    from pagewright.model import Project
+    from pagewright.core import image_io
+    img = np.full((1000, 2000, 3), 200, np.uint8)
+    p = Project()
+    p.set_source_image(image_io.LoadedImage(path="x.png", data=img))
+    p.margin_mm = 0.0
+    # whole image at 1 mm/px would be 2000x1000 mm; region is 400x300
+    tiles = tiling.build_tiles(p, image_bgr=img, page="Letter",
+                               landscape=False, margin_mm=6.0,
+                               overlap_mm=10.0, embed_photo=True,
+                               mm_per_pixel=1.0,
+                               region_px=(100, 100, 500, 400))
+    plan = tiling.plan_tiles(400.0, 300.0, "Letter", False, 6.0, 10.0)
+    assert len(tiles) == plan["ncols"] * plan["nrows"]
+    # far fewer than the whole-image tiling would need
+    whole = tiling.plan_tiles(2000.0, 1000.0, "Letter", False, 6.0, 10.0)
+    assert len(tiles) < whole["ncols"] * whole["nrows"]

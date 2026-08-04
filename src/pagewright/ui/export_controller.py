@@ -68,6 +68,22 @@ class ExportController:
 
         w.statusBar().showMessage("Exported %s" % path, 6000)
 
+    def _tile_region(self):
+        """The Select Area rectangle as (x0, y0, x1, y1) image px, clamped
+        to the image, or None. When set it defines the tiled region."""
+        w = self._w
+        rect = w.canvas.roi_rect()
+        if rect is None or w._loaded is None:
+            return None
+        pw, ph = w._loaded.pixel_width, w._loaded.pixel_height
+        x0 = max(0.0, min(float(rect.left()), float(pw)))
+        y0 = max(0.0, min(float(rect.top()), float(ph)))
+        x1 = max(0.0, min(float(rect.right()), float(pw)))
+        y1 = max(0.0, min(float(rect.bottom()), float(ph)))
+        if x1 - x0 < 2 or y1 - y0 < 2:
+            return None
+        return (x0, y0, x1, y1)
+
     def _resolved_tile_params(self, title):
         """Common preflight for tile export/printing. Returns (params,
         mm_per_pixel) or None. Image-only tiling (no traces) is allowed
@@ -77,6 +93,7 @@ class ExportController:
             return None
         w._sync_model()
         p = w.tiling_panel.params()
+        region = self._tile_region()
         if not w.project.objects and not p["embed"]:
             QMessageBox.information(
                 w, title,
@@ -87,13 +104,16 @@ class ExportController:
         if scale is None:
             # Fixed grid: derive the scale that fills cols x rows pages
             from ..core import geometry as geo
-            pts = []
-            for obj in w.project.objects:
-                for c in obj.contours:
-                    pts.extend(c.points)
-            if not pts:
-                pts = [(0.0, 0.0), (float(w._loaded.pixel_width),
-                                    float(w._loaded.pixel_height))]
+            if region is not None:
+                pts = [(region[0], region[1]), (region[2], region[3])]
+            else:
+                pts = []
+                for obj in w.project.objects:
+                    for c in obj.contours:
+                        pts.extend(c.points)
+                if not pts:
+                    pts = [(0.0, 0.0), (float(w._loaded.pixel_width),
+                                        float(w._loaded.pixel_height))]
             box = geo.bbox_of_points(pts)
             mpp1 = w.effective_mm_per_pixel(1.0)
             margin_px1 = w.project.margin_mm / mpp1
@@ -124,7 +144,8 @@ class ExportController:
                     margin_mm=p["margin_mm"], overlap_mm=p["overlap_mm"],
                     embed_photo=p["embed"], filled=p["filled"],
                     base_name=base_name, mm_per_pixel=mpp,
-                    crop_photo=p["crop"])
+                    crop_photo=p["crop"],
+                    region_px=self._tile_region())
             finally:
                 QApplication.restoreOverrideCursor()
         except (svg_export.ExportError, ValueError) as exc:

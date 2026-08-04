@@ -208,18 +208,21 @@ def _tile_svg(content, plan, r, c, content_w, content_h):
 def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
                 margin_mm=6.0, overlap_mm=10.0, embed_photo=True,
                 downscale_max=None, filled=False, base_name="tile",
-                mm_per_pixel=None, crop_photo=False):
+                mm_per_pixel=None, crop_photo=False, region_px=None):
     """Build one page-sized SVG per tile.
 
     Returns a list of (filename, svg_text); filenames look like
     "<base_name>-r1c1.svg" (row, then column). `mm_per_pixel` overrides the
     project's calibration (for an uncalibrated default size or a scale factor).
     `crop_photo` clips the embedded photo to the content bounding box.
+    `region_px` = (x0, y0, x1, y1) tiles exactly that image region (the
+    Select Area rectangle) instead of the trace bbox / whole image.
     """
     content, content_w, content_h = svg_export.build_content(
         project, image_bgr=image_bgr, embed_photo=embed_photo,
         downscale_max=downscale_max, filled=filled, as_layers=False,
-        mm_per_pixel=mm_per_pixel, crop_photo=crop_photo)
+        mm_per_pixel=mm_per_pixel, crop_photo=crop_photo,
+        region_px=region_px)
 
     plan = plan_tiles(content_w, content_h, page, landscape,
                       margin_mm, overlap_mm)

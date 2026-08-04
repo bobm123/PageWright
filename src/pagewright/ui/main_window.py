@@ -71,6 +71,7 @@ class MainWindow(QMainWindow):
         self.canvas.deleteSelectionRequested.connect(
             self.delete_selected_vertices)
         self.canvas.roiSelected.connect(self._on_roi_selected)
+        self.canvas.roiCleared.connect(self.clear_roi)
 
         self.projects = ProjectController(self)
         self.exports = ExportController(self)
@@ -338,8 +339,8 @@ class MainWindow(QMainWindow):
         self._refresh_editability()
         self._refresh_undo_actions()
         self.statusBar().showMessage(
-            "Drag a box to zoom to it and limit tracing to that area "
-            "(click once to clear it).", 6000)
+            "Drag a box to zoom to it; tracing AND tiling are limited to "
+            "that area (click once to clear it).", 6000)
 
     def _on_roi_selected(self, rect):
         """A trace area was dragged out: zoom so it fills the window
@@ -347,15 +348,17 @@ class MainWindow(QMainWindow):
         self.canvas.zoom_to_rect(rect)
         self.act_mode_pan.setChecked(True)
         self._mode_pan()
+        self._update_tile_grid()      # tiling follows the selected area
         self.statusBar().showMessage(
-            "Trace area set (%d × %d px). Trace Poly will only generate "
-            "polygons here." % (round(rect.width()), round(rect.height())),
-            6000)
+            "Area set (%d x %d px): Trace Poly and the print tiles now "
+            "use only this region." % (round(rect.width()),
+                                       round(rect.height())), 6000)
 
     def clear_roi(self):
         self.canvas.clear_roi()
+        self._update_tile_grid()      # back to traces / whole image
         self.statusBar().showMessage(
-            "Trace area cleared; tracing uses the whole image.", 4000)
+            "Area cleared; tracing and tiling use the whole image.", 4000)
 
     def _is_edit_mode(self):
         return self.act_mode_edit.isChecked()

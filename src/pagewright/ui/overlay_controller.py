@@ -96,15 +96,20 @@ class OverlayController:
         if not w.canvas.has_photo() or not w.act_view_tiles.isChecked():
             w.canvas.clear_tile_grid()
             return
-        pts = self.all_points()
-        if not pts:
-            # nothing traced: tile the WHOLE IMAGE (image-only printing)
-            if w._loaded is None:
-                w.canvas.clear_tile_grid()
-                return
-            pts = [(0.0, 0.0),
-                   (float(w._loaded.pixel_width),
-                    float(w._loaded.pixel_height))]
+        region = w.exports._tile_region()
+        if region is not None:
+            # Select Area rectangle set: tile exactly that region
+            pts = [(region[0], region[1]), (region[2], region[3])]
+        else:
+            pts = self.all_points()
+            if not pts:
+                # nothing traced: tile the WHOLE IMAGE (image-only print)
+                if w._loaded is None:
+                    w.canvas.clear_tile_grid()
+                    return
+                pts = [(0.0, 0.0),
+                       (float(w._loaded.pixel_width),
+                        float(w._loaded.pixel_height))]
         p = w.tiling_panel.params()
         box = geo.bbox_of_points(pts)
         try:

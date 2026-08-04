@@ -54,6 +54,8 @@ class Canvas(QGraphicsView):
     deleteSelectionRequested = Signal()
     # Emitted with the scene rect once a trace area is dragged out.
     roiSelected = Signal(QRectF)
+    # Emitted when the trace area is cleared by clicking (vs. dragging).
+    roiCleared = Signal()
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -512,6 +514,7 @@ class Canvas(QGraphicsView):
             # A click (rather than a drag) clears the area instead.
             if rect.width() < 4.0 or rect.height() < 4.0:
                 self.clear_roi()
+                self.roiCleared.emit()
             else:
                 rect = rect.intersected(self._scene.sceneRect())
                 self.set_roi(rect)
