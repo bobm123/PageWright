@@ -182,49 +182,118 @@ class ExportController:
         w.statusBar().showMessage(
             "Wrote %d tile(s) to %s" % (len(tiles), out_dir), 6000)
 
-    def print_tiles(self):
-        """Send the tiles straight to a printer (true 1:1: the printer
-        page size is set from the tiling page choice and the tile SVG is
-        painted onto the full page)."""
-        w = self._w
-        tiles = self._build_tiles("Print Tiles")
-        if not tiles:
-            return
-        from PySide6.QtCore import QMarginsF, QSizeF
-        from PySide6.QtGui import QPageLayout, QPageSize, QPainter
-        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
-        from PySide6.QtSvg import QSvgRenderer
-
-        p = w.tiling_panel.params()
+    def _tile_page_mm(self):
+        """The tiling page size in mm, orientation applied."""
+        p = self._w.tiling_panel.params()
         pw_mm, ph_mm = tiling.PAGE_SIZES_MM[p["page"]]
         if p["landscape"]:
             pw_mm, ph_mm = ph_mm, pw_mm
+        return pw_mm, ph_mm
 
+    def _make_printer(self):
+        """A QPrinter preset to the tiling page size AND orientation (so
+        the print dialog opens matching the tile layout)."""
+        from PySide6.QtCore import QMarginsF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize
+        from PySide6.QtPrintSupport import QPrinter
+        p = self._w.tiling_panel.params()
+        pw_mm, ph_mm = tiling.PAGE_SIZES_MM[p["page"]]   # portrait base
         printer = QPrinter(QPrinter.HighResolution)
-        layout = QPageLayout(QPageSize(QSizeF(pw_mm, ph_mm),
-                                       QPageSize.Millimeter),
-                             QPageLayout.Portrait, QMarginsF(0, 0, 0, 0))
+        layout = QPageLayout(
+            QPageSize(QSizeF(pw_mm, ph_mm), QPageSize.Millimeter),
+            (QPageLayout.Landscape if p["landscape"]
+             else QPageLayout.Portrait),
+            QMarginsF(0, 0, 0, 0))
         printer.setPageLayout(layout)
         printer.setFullPage(True)
-        dlg = QPrintDialog(printer, w)
-        dlg.setWindowTitle("Print Tiles")
-        if dlg.exec() != QDialog.Accepted:
-            return
+        return printer
+
+    def _paint_tiles(self, printer, tiles):
+        """Paint the tile SVGs onto the printer at TRUE mm scale.
+
+        The device-pixel-per-mm factor comes from the printer's ACTUAL
+        paper, so a mismatched paper size or orientation can only clip
+        the tile - never stretch it (the 'ovals' failure mode)."""
+        from PySide6.QtCore import QRectF
+        from PySide6.QtGui import QPageLayout, QPainter
+        from PySide6.QtPrintSupport import QPrinter
+        from PySide6.QtSvg import QSvgRenderer
+
+        pw_mm, ph_mm = self._tile_page_mm()
         painter = QPainter()
         if not painter.begin(printer):
-            QMessageBox.critical(w, "Print Tiles",
-                                 "Could not start the print job.")
-            return
+            return False
         try:
             for i, (_name, svg) in enumerate(tiles):
                 if i:
                     printer.newPage()
-                renderer = QSvgRenderer(bytearray(svg, "utf-8"))
-                renderer.render(painter, printer.pageRect(
-                    QPrinter.DevicePixel))
+                paper_mm = printer.pageLayout().fullRect(
+                    QPageLayout.Millimeter)
+                dev = printer.pageRect(QPrinter.DevicePixel)
+                sx = dev.width() / max(1e-6, paper_mm.width())
+                sy = dev.height() / max(1e-6, paper_mm.height())
+                target = QRectF(0.0, 0.0, pw_mm * sx, ph_mm * sy)
+                QSvgRenderer(bytearray(svg, "utf-8")).render(painter,
+                                                             target)
         finally:
             painter.end()
+        return True
+
+    def _check_paper_match(self, printer, title):
+        """Warn when the chosen paper/orientation does not match the tile
+        layout. Returns False if the user cancels."""
+        from PySide6.QtGui import QPageLayout
+        pw_mm, ph_mm = self._tile_page_mm()
+        paper = printer.pageLayout().fullRect(QPageLayout.Millimeter)
+        if (abs(paper.width() - pw_mm) <= 2.0
+                and abs(paper.height() - ph_mm) <= 2.0):
+            return True
+        resp = QMessageBox.warning(
+            self._w, title,
+            "The selected paper is %.0f x %.0f mm but the tiles were "
+            "laid out for %.0f x %.0f mm.\n\nTiles will still print at "
+            "TRUE scale (never stretched) but may be clipped. Match the "
+            "page size/orientation in the tiling panel or the print "
+            "dialog for best results." % (paper.width(), paper.height(),
+                                          pw_mm, ph_mm),
+            QMessageBox.Ok | QMessageBox.Cancel)
+        return resp == QMessageBox.Ok
+
+    def print_tiles(self):
+        """Send the tiles to a printer at true 1:1. The print dialog
+        opens preset to the tiling page size and orientation."""
+        w = self._w
+        tiles = self._build_tiles("Print Tiles")
+        if not tiles:
+            return
+        from PySide6.QtPrintSupport import QPrintDialog
+        printer = self._make_printer()
+        dlg = QPrintDialog(printer, w)
+        dlg.setWindowTitle("Print Tiles")
+        if dlg.exec() != QDialog.Accepted:
+            return
+        if not self._check_paper_match(printer, "Print Tiles"):
+            return
+        if not self._paint_tiles(printer, tiles):
+            QMessageBox.critical(w, "Print Tiles",
+                                 "Could not start the print job.")
+            return
         w.statusBar().showMessage(
-            "Sent %d tile page(s) to the printer. Make sure printer "
-            "scaling / 'fit to page' is OFF for true 1:1." % len(tiles),
+            "Sent %d tile page(s) to the printer at true scale. Make "
+            "sure driver scaling / 'fit to page' is OFF." % len(tiles),
             8000)
+
+    def print_preview_tiles(self):
+        """On-screen preview of the tile pages (same rendering path as
+        printing; its toolbar prints from the preview)."""
+        w = self._w
+        tiles = self._build_tiles("Print Preview")
+        if not tiles:
+            return
+        from PySide6.QtPrintSupport import QPrintPreviewDialog
+        printer = self._make_printer()
+        dlg = QPrintPreviewDialog(printer, w)
+        dlg.setWindowTitle("Print Preview - %d tile page(s)" % len(tiles))
+        dlg.paintRequested.connect(
+            lambda pr: self._paint_tiles(pr, tiles))
+        dlg.exec()

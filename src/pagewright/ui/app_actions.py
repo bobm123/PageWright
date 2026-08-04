@@ -33,6 +33,10 @@ def build_actions(w):
     w.act_print_tiles.setToolTip("Send the tile pages straight to a printer")
     w.act_print_tiles.triggered.connect(w.print_tiles)
 
+    w.act_print_preview = QAction("Print Pre&view…", w)
+    w.act_print_preview.setToolTip("Preview the tile pages before printing")
+    w.act_print_preview.triggered.connect(w.print_preview_tiles)
+
     w.act_export_tiles = QAction("Export &Print Tiles…", w)
     w.act_export_tiles.triggered.connect(w.export_tiles)
 
@@ -136,6 +140,7 @@ def build_menus(w):
     m_file.addAction(w.act_open)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)
+    m_file.addAction(w.act_print_preview)
     m_file.addAction(w.act_print_tiles)
     m_file.addSeparator()
     m_file.addAction(w.act_preferences)
