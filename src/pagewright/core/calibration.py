@@ -57,3 +57,26 @@ def mm_per_pixel(p0, p1, real_distance, unit):
 def format_length(value_mm, unit, decimals=2):
     """Human-readable length in the requested display unit, e.g. '152.40 mm'."""
     return "%.*f %s" % (decimals, from_mm(value_mm, unit), unit)
+
+
+def parse_length_mm(text):
+    """Parse a user-entered length WITH an optional unit into millimetres.
+
+    Accepts forms like '133.35', '133.35 mm', '13.3cm', '5.25 in',
+    '5.25"', '56 cm'. A bare number is millimetres. Raises ValueError
+    for anything unparseable or non-positive.
+    """
+    import re
+    s = str(text).strip().lower().replace('"', ' in')
+    m = re.fullmatch(r"([0-9]*\.?[0-9]+)\s*(mm|cm|in|inch|inches)?",
+                     s)
+    if not m:
+        raise ValueError("cannot parse length: %r" % (text,))
+    value = float(m.group(1))
+    unit = m.group(2) or "mm"
+    factor = {"mm": 1.0, "cm": 10.0,
+              "in": 25.4, "inch": 25.4, "inches": 25.4}[unit]
+    mm = value * factor
+    if mm <= 0.0:
+        raise ValueError("length must be positive")
+    return mm

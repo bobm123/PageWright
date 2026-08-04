@@ -203,9 +203,18 @@ class MainWindow(QMainWindow):
         self._leave_dewarp_stage()
         # start_dewarp=False: this photo IS the dewarp result
         self.projects.load_photo(out_path, start_dewarp=False)
+        # The dewarp stage rendered at a known DPI with a known mm size,
+        # so the adopted image's real-world scale is already determined -
+        # carry it into the project calibration (fixes 'not calibrated'
+        # and wildly wrong tile counts after flattening).
+        dpi = self.dewarp_stage.output_dpi()
+        if dpi and self._loaded is not None:
+            self.project.calibration.mm_per_pixel = 25.4 / float(dpi)
+            self._refresh_scale_readout()
         self.statusBar().showMessage(
-            "Flattened image is now the working image "
-            "(temporary file - use Save/Export to keep it).", 8000)
+            "Flattened image is now the working image; scale calibrated "
+            "from the dewarp output (%d DPI). Temporary file - use "
+            "Save/Export to keep it." % dpi, 8000)
 
     def save_project_file(self):
         self.projects.save_project()

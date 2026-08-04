@@ -61,6 +61,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
                                QMessageBox, QPushButton, QSpinBox,
                                QSplitter, QVBoxLayout, QWidget)
 
+from ..core import calibration as calib_core
 from ..core import dewarp as dw
 
 # _SourceView interaction modes
@@ -121,6 +122,31 @@ def ndarray_to_qimage(bgr):
 
 def ndarray_to_qpixmap(bgr):
     return QPixmap.fromImage(ndarray_to_qimage(bgr))
+
+
+class MmSpinBox(QDoubleSpinBox):
+    """A millimetre spinbox that accepts unit-suffixed input.
+
+    Users can type '5.25 in', '56 cm', '133.35 mm' or a bare number
+    (millimetres); the value is converted and displayed canonically in
+    mm. Spinner arrows still step in mm."""
+
+    def validate(self, text, pos):
+        from PySide6.QtGui import QValidator
+        try:
+            calib_core.parse_length_mm(text)
+            return (QValidator.Acceptable, text, pos)
+        except ValueError:
+            return (QValidator.Intermediate, text, pos)
+
+    def valueFromText(self, text):
+        try:
+            return calib_core.parse_length_mm(text)
+        except ValueError:
+            return self.value()
+
+    def textFromValue(self, value):
+        return "%.2f mm" % value
 
 
 def display_downscale(bgr, max_side=DISPLAY_MAX):
@@ -857,14 +883,13 @@ class DewarpStageWidget(QWidget):
         self._auto_size.setChecked(True)
         self._auto_size.toggled.connect(self._on_auto_size_toggled)
 
-        self._w_mm = QDoubleSpinBox()
+        # unit-aware: users may type '5.25 in', '56 cm' or '133.35 mm'
+        self._w_mm = MmSpinBox()
         self._w_mm.setRange(1.0, 5000.0)
         self._w_mm.setValue(210.0)          # A4-ish default
-        self._w_mm.setSuffix(" mm")
-        self._h_mm = QDoubleSpinBox()
+        self._h_mm = MmSpinBox()
         self._h_mm.setRange(1.0, 5000.0)
         self._h_mm.setValue(297.0)
-        self._h_mm.setSuffix(" mm")
         self._dpi = QSpinBox()
         self._dpi.setRange(30, 1200)
         self._dpi.setValue(300)
@@ -987,6 +1012,12 @@ class DewarpStageWidget(QWidget):
 
     def result_image(self):
         return self._result
+
+    def output_dpi(self):
+        """The DPI the flattened output was rendered at. Since the output
+        size is known in mm (Width/Height or auto/calibrated), this fixes
+        the result's real-world scale: mm_per_pixel = 25.4 / dpi."""
+        return self._dpi.value()
 
     # ----- mode ------------------------------------------------------------
     def _spline_mode(self):
@@ -1367,11 +1398,16 @@ class DewarpStageWidget(QWidget):
                 "Calibration needs a placed outline and a longer line")
             return
         d_px = m[0]
-        real_mm, ok = QInputDialog.getDouble(
+        text, ok = QInputDialog.getText(
             self, "Calibrate Scale",
-            "Real-world length of the measured line (mm):",
-            100.0, 0.01, 10000.0, 2)
+            "Real-world length of the measured line\n"
+            "(e.g. 100 mm, 5.25 in, 56 cm):", text="100 mm")
         if not ok:
+            return
+        try:
+            real_mm = calib_core.parse_length_mm(text)
+        except ValueError:
+            self._size_label.setText("Could not parse length: %s" % text)
             return
         dpi = self._dpi.value()
         # current output size in mm (from the active sizing mode)

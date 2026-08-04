@@ -63,3 +63,19 @@ def test_mm_per_pixel_nonpositive_real_raises():
 def test_format_length():
     assert calib.format_length(25.4, "in", decimals=2) == "1.00 in"
     assert calib.format_length(100.0, "cm", decimals=1) == "10.0 cm"
+
+
+def test_parse_length_mm_units():
+    assert calib.parse_length_mm("133.35") == pytest.approx(133.35)
+    assert calib.parse_length_mm("133.35 mm") == pytest.approx(133.35)
+    assert calib.parse_length_mm("5.25 in") == pytest.approx(133.35)
+    assert calib.parse_length_mm('5.25"') == pytest.approx(133.35)
+    assert calib.parse_length_mm("56 cm") == pytest.approx(560.0)
+    assert calib.parse_length_mm(" 13.3cm ") == pytest.approx(133.0)
+    assert calib.parse_length_mm("2 inches") == pytest.approx(50.8)
+
+
+def test_parse_length_mm_rejects_garbage():
+    for bad in ("", "abc", "5 furlongs", "-4 mm", "0"):
+        with pytest.raises(ValueError):
+            calib.parse_length_mm(bad)
