@@ -260,23 +260,66 @@ class ExportController:
         return resp == QMessageBox.Ok
 
     def print_tiles(self):
-        """Send the tiles to a printer at true 1:1. The print dialog
-        opens preset to the tiling page size and orientation."""
+        """Preview-first printing at true 1:1: a Qt preview of the tile
+        pages opens immediately (the Windows print dialog's own preview
+        pane never works for desktop Qt apps); its Print... button then
+        opens the printer dialog, preset to the tiling page size and
+        orientation, and sends the job through the same paint path."""
         w = self._w
         tiles = self._build_tiles("Print Tiles")
         if not tiles:
             return
-        from PySide6.QtPrintSupport import QPrintDialog
+        from PySide6.QtPrintSupport import (QPrintDialog,
+                                            QPrintPreviewWidget)
+        from PySide6.QtWidgets import (QHBoxLayout, QPushButton,
+                                       QVBoxLayout)
         printer = self._make_printer()
-        dlg = QPrintDialog(printer, w)
-        dlg.setWindowTitle("Print Tiles")
+
+        dlg = QDialog(w)
+        dlg.setWindowTitle("Print Tiles - %d page(s)" % len(tiles))
+        dlg.resize(1000, 720)
+        lay = QVBoxLayout(dlg)
+        preview = QPrintPreviewWidget(printer, dlg)
+        preview.paintRequested.connect(
+            lambda pr: self._paint_tiles(pr, tiles))
+        lay.addWidget(preview, 1)
+
+        row = QHBoxLayout()
+        for label, slot in (("Fit page", preview.fitInView),
+                            ("Fit width", preview.fitToWidth),
+                            ("Zoom -", preview.zoomOut),
+                            ("Zoom +", preview.zoomIn)):
+            btn = QPushButton(label, dlg)
+            btn.setAutoDefault(False)
+            btn.clicked.connect(slot)
+            row.addWidget(btn)
+        row.addStretch(1)
+        btn_print = QPushButton("Print…", dlg)
+        btn_print.setDefault(True)
+        btn_cancel = QPushButton("Cancel", dlg)
+        btn_cancel.setAutoDefault(False)
+        row.addWidget(btn_print)
+        row.addWidget(btn_cancel)
+        lay.addLayout(row)
+        btn_cancel.clicked.connect(dlg.reject)
+
+        def do_print():
+            pd = QPrintDialog(printer, dlg)
+            pd.setWindowTitle("Print Tiles")
+            if pd.exec() != QDialog.Accepted:
+                preview.updatePreview()   # reflect any settings changes
+                return
+            if not self._check_paper_match(printer, "Print Tiles"):
+                preview.updatePreview()
+                return
+            if not self._paint_tiles(printer, tiles):
+                QMessageBox.critical(dlg, "Print Tiles",
+                                     "Could not start the print job.")
+                return
+            dlg.accept()
+
+        btn_print.clicked.connect(do_print)
         if dlg.exec() != QDialog.Accepted:
-            return
-        if not self._check_paper_match(printer, "Print Tiles"):
-            return
-        if not self._paint_tiles(printer, tiles):
-            QMessageBox.critical(w, "Print Tiles",
-                                 "Could not start the print job.")
             return
         w.statusBar().showMessage(
             "Sent %d tile page(s) to the printer at true scale. Make "
