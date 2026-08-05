@@ -217,19 +217,54 @@ def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
     `crop_photo` clips the embedded photo to the content bounding box.
     `region_px` = (x0, y0, x1, y1) tiles exactly that image region (the
     Select Area rectangle) instead of the trace bbox / whole image.
+
+    When the photo is embedded, each tile embeds ONLY the slice of the
+    photo its page shows (plus a small bleed). A tile SVG therefore stays
+    about one page's worth of pixels no matter how large the source
+    image is - embedding the full photo into every tile made multi-tile
+    jobs balloon to hundreds of MB and hang print preview/rendering.
     """
-    content, content_w, content_h = svg_export.build_content(
-        project, image_bgr=image_bgr, embed_photo=embed_photo,
-        downscale_max=downscale_max, filled=filled, as_layers=False,
-        mm_per_pixel=mm_per_pixel, crop_photo=crop_photo,
-        region_px=region_px)
+    embed = embed_photo and image_bgr is not None
+    # Vector-only master content (traces); photo slices are added per
+    # tile below. allow_image_bbox keeps the image-only case working.
+    content_vec, content_w, content_h, geom = svg_export.build_content(
+        project, image_bgr=None, embed_photo=False,
+        downscale_max=None, filled=filled, as_layers=False,
+        mm_per_pixel=mm_per_pixel, region_px=region_px,
+        allow_image_bbox=embed, return_geometry=True)
 
     plan = plan_tiles(content_w, content_h, page, landscape,
                       margin_mm, overlap_mm)
 
+    ox, oy, mpp = geom["ox"], geom["oy"], geom["mpp"]
+    img_h = image_bgr.shape[0] if embed else 0
+    img_w = image_bgr.shape[1] if embed else 0
+    pw, ph = plan["page_w"], plan["page_h"]
+    margin = (pw - plan["printable_w"]) / 2.0
+    bleed_mm = 3.0
+
     tiles = []
     for r in range(plan["nrows"]):
         for c in range(plan["ncols"]):
+            content = content_vec
+            if embed:
+                # master-mm rect this page shows, with bleed
+                x0m = c * plan["step_x"] - margin - bleed_mm
+                y0m = r * plan["step_y"] - margin - bleed_mm
+                x1m = x0m + pw + 2.0 * bleed_mm
+                y1m = y0m + ph + 2.0 * bleed_mm
+                # -> image px, clamped
+                cx0 = max(0, int(math.floor(x0m / mpp + ox)))
+                cy0 = max(0, int(math.floor(y0m / mpp + oy)))
+                cx1 = min(img_w, int(math.ceil(x1m / mpp + ox)))
+                cy1 = min(img_h, int(math.ceil(y1m / mpp + oy)))
+                if cx1 > cx0 and cy1 > cy0:
+                    sub = image_bgr[cy0:cy1, cx0:cx1]
+                    tag = svg_export._photo_image_tag(
+                        sub, cx0, cy0, cx1 - cx0, cy1 - cy0,
+                        ox, oy, mpp, downscale_max)
+                    content = ('  <g id="photo">\n%s  </g>\n' % tag
+                               ) + content_vec
             name = "%s-r%dc%d.svg" % (base_name, r + 1, c + 1)
             tiles.append((name, _tile_svg(content, plan, r, c,
                                           content_w, content_h)))

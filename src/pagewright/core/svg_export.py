@@ -121,7 +121,8 @@ def _photo_image_tag(img, off_x, off_y, w_px, h_px, ox, oy, mpp,
 
 def build_content(project, image_bgr=None, embed_photo=True,
                   downscale_max=None, filled=False, as_layers=False,
-                  mm_per_pixel=None, crop_photo=False, region_px=None):
+                  mm_per_pixel=None, crop_photo=False, region_px=None,
+                  allow_image_bbox=False, return_geometry=False):
     """Build the inner photo+trace fragment and return (content, w_mm, h_mm).
 
     Coordinates use master mm space with origin (0, 0) at the top-left of the
@@ -155,9 +156,12 @@ def build_content(project, image_bgr=None, embed_photo=True,
         except ExportError:
             # No traces: fall back to the WHOLE IMAGE as the content
             # (image-only export/tiling - e.g. printing a flattened page
-            # at scale).
-            if not (embed_photo and image_bgr is not None
-                    and project.pixel_width and project.pixel_height):
+            # at scale). allow_image_bbox permits this for callers that
+            # embed the photo themselves (per-tile crops in tiling).
+            usable = (project.pixel_width and project.pixel_height
+                      and (allow_image_bbox
+                           or (embed_photo and image_bgr is not None)))
+            if not usable:
                 raise
             bbox = geo.bbox_of_points(
                 [(0.0, 0.0),
@@ -208,6 +212,10 @@ def build_content(project, image_bgr=None, embed_photo=True,
         if path:
             out.append(path + "\n")
     out.append('  </g>\n')
+    if return_geometry:
+        # ox/oy: image-px position of the content origin; with mpp they
+        # map master mm <-> image px (used for per-tile photo crops)
+        return "".join(out), w_mm, h_mm, {"ox": ox, "oy": oy, "mpp": mpp}
     return "".join(out), w_mm, h_mm
 
 

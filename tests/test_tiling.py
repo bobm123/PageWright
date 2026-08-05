@@ -187,3 +187,29 @@ def test_region_px_tiles_only_that_area():
     # far fewer than the whole-image tiling would need
     whole = tiling.plan_tiles(2000.0, 1000.0, "Letter", False, 6.0, 10.0)
     assert len(tiles) < whole["ncols"] * whole["nrows"]
+
+
+def test_embedded_photo_is_cropped_per_tile():
+    # Each tile embeds only its own slice of the photo. Embedding the
+    # full image in every tile made multi-tile jobs balloon (hundreds of
+    # MB across tiles) and froze print preview on large flattened pages.
+    import numpy as np
+    from pagewright.model import Project
+    from pagewright.core import image_io
+    yy, xx = np.mgrid[0:3000, 0:2400]
+    base = ((xx * 0.05 + yy * 0.04) % 255).astype("uint8")
+    img = np.dstack([base, base, base]).copy()
+    p = Project()
+    p.set_source_image(image_io.LoadedImage(path="x.png", data=img))
+    # 0.2 mm/px -> 480x600 mm -> a 3x3-ish Letter grid
+    tiles = tiling.build_tiles(p, image_bgr=img, page="Letter",
+                               landscape=False, margin_mm=6.0,
+                               overlap_mm=10.0, embed_photo=True,
+                               mm_per_pixel=0.2)
+    assert len(tiles) >= 6
+    import cv2
+    ok, buf = cv2.imencode(".png", img)
+    full_embed = len(buf) * 4 / 3
+    for _name, svg in tiles:
+        assert svg.count("<image") == 1          # exactly its own slice
+        assert len(svg) < full_embed * 0.7       # bounded, not the whole

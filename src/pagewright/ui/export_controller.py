@@ -208,8 +208,21 @@ class ExportController:
         printer.setFullPage(True)
         return printer
 
-    def _paint_tiles(self, printer, tiles):
-        """Paint the tile SVGs onto the printer at TRUE mm scale.
+    def _make_renderers(self, tiles):
+        """Pre-parse each tile SVG into a QSvgRenderer ONCE (under a wait
+        cursor). The preview widget repaints pages repeatedly - parsing
+        the SVGs on every paint froze the UI on photo-embedding jobs."""
+        from PySide6.QtSvg import QSvgRenderer
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            return [QSvgRenderer(bytearray(svg, "utf-8"))
+                    for _name, svg in tiles]
+        finally:
+            QApplication.restoreOverrideCursor()
+
+    def _paint_tiles(self, printer, renderers):
+        """Paint pre-parsed tile renderers onto the printer at TRUE mm
+        scale.
 
         The device-pixel-per-mm factor comes from the printer's ACTUAL
         paper, so a mismatched paper size or orientation can only clip
@@ -217,14 +230,13 @@ class ExportController:
         from PySide6.QtCore import QRectF
         from PySide6.QtGui import QPageLayout, QPainter
         from PySide6.QtPrintSupport import QPrinter
-        from PySide6.QtSvg import QSvgRenderer
 
         pw_mm, ph_mm = self._tile_page_mm()
         painter = QPainter()
         if not painter.begin(printer):
             return False
         try:
-            for i, (_name, svg) in enumerate(tiles):
+            for i, renderer in enumerate(renderers):
                 if i:
                     printer.newPage()
                 paper_mm = printer.pageLayout().fullRect(
@@ -233,8 +245,7 @@ class ExportController:
                 sx = dev.width() / max(1e-6, paper_mm.width())
                 sy = dev.height() / max(1e-6, paper_mm.height())
                 target = QRectF(0.0, 0.0, pw_mm * sx, ph_mm * sy)
-                QSvgRenderer(bytearray(svg, "utf-8")).render(painter,
-                                                             target)
+                renderer.render(painter, target)
         finally:
             painter.end()
         return True
@@ -274,6 +285,7 @@ class ExportController:
         from PySide6.QtWidgets import (QHBoxLayout, QPushButton,
                                        QVBoxLayout)
         printer = self._make_printer()
+        renderers = self._make_renderers(tiles)
 
         dlg = QDialog(w)
         dlg.setWindowTitle("Print Tiles - %d page(s)" % len(tiles))
@@ -281,7 +293,7 @@ class ExportController:
         lay = QVBoxLayout(dlg)
         preview = QPrintPreviewWidget(printer, dlg)
         preview.paintRequested.connect(
-            lambda pr: self._paint_tiles(pr, tiles))
+            lambda pr: self._paint_tiles(pr, renderers))
         lay.addWidget(preview, 1)
 
         row = QHBoxLayout()
@@ -312,7 +324,7 @@ class ExportController:
             if not self._check_paper_match(printer, "Print Tiles"):
                 preview.updatePreview()
                 return
-            if not self._paint_tiles(printer, tiles):
+            if not self._paint_tiles(printer, renderers):
                 QMessageBox.critical(dlg, "Print Tiles",
                                      "Could not start the print job.")
                 return
@@ -335,8 +347,9 @@ class ExportController:
             return
         from PySide6.QtPrintSupport import QPrintPreviewDialog
         printer = self._make_printer()
+        renderers = self._make_renderers(tiles)
         dlg = QPrintPreviewDialog(printer, w)
         dlg.setWindowTitle("Print Preview - %d tile page(s)" % len(tiles))
         dlg.paintRequested.connect(
-            lambda pr: self._paint_tiles(pr, tiles))
+            lambda pr: self._paint_tiles(pr, renderers))
         dlg.exec()
