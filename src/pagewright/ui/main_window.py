@@ -72,6 +72,7 @@ class MainWindow(QMainWindow):
             self.delete_selected_vertices)
         self.canvas.roiSelected.connect(self._on_roi_selected)
         self.canvas.roiCleared.connect(self.clear_roi)
+        self.canvas.roiEdited.connect(self._on_roi_edited)
 
         self.projects = ProjectController(self)
         self.exports = ExportController(self)
@@ -357,6 +358,14 @@ class MainWindow(QMainWindow):
             "Area set (%d x %d px): Trace Poly and the print tiles now "
             "use only this region." % (round(rect.width()),
                                        round(rect.height())), 6000)
+
+    def _on_roi_edited(self, rect):
+        """The area was resized by dragging an edge: keep the view still,
+        just refresh the tiling that depends on it."""
+        self._update_tile_grid()
+        self.statusBar().showMessage(
+            "Area resized to %d x %d px." % (round(rect.width()),
+                                             round(rect.height())), 4000)
 
     def clear_roi(self):
         self.canvas.clear_roi()

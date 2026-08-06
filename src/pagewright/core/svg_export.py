@@ -214,8 +214,13 @@ def build_content(project, image_bgr=None, embed_photo=True,
     out.append('  </g>\n')
     if return_geometry:
         # ox/oy: image-px position of the content origin; with mpp they
-        # map master mm <-> image px (used for per-tile photo crops)
-        return "".join(out), w_mm, h_mm, {"ox": ox, "oy": oy, "mpp": mpp}
+        # map master mm <-> image px. bx*/by*: the content bounding box
+        # in image px (photo crops are clamped to it so the embedded
+        # image never extends past the traced/selected content).
+        return "".join(out), w_mm, h_mm, {
+            "ox": ox, "oy": oy, "mpp": mpp,
+            "bx0": bbox.min_x, "by0": bbox.min_y,
+            "bx1": bbox.max_x, "by1": bbox.max_y}
     return "".join(out), w_mm, h_mm
 
 

@@ -253,11 +253,17 @@ def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
                 y0m = r * plan["step_y"] - margin - bleed_mm
                 x1m = x0m + pw + 2.0 * bleed_mm
                 y1m = y0m + ph + 2.0 * bleed_mm
-                # -> image px, clamped
-                cx0 = max(0, int(math.floor(x0m / mpp + ox)))
-                cy0 = max(0, int(math.floor(y0m / mpp + oy)))
-                cx1 = min(img_w, int(math.ceil(x1m / mpp + ox)))
-                cy1 = min(img_h, int(math.ceil(y1m / mpp + oy)))
+                # -> image px, clamped to the image AND to the content
+                # bounding box (the embedded image never extends past the
+                # traced/selected content into margins or blank pages)
+                bx0 = max(0.0, geom["bx0"])
+                by0 = max(0.0, geom["by0"])
+                bx1 = min(float(img_w), geom["bx1"])
+                by1 = min(float(img_h), geom["by1"])
+                cx0 = max(0, int(math.floor(max(x0m / mpp + ox, bx0))))
+                cy0 = max(0, int(math.floor(max(y0m / mpp + oy, by0))))
+                cx1 = min(img_w, int(math.ceil(min(x1m / mpp + ox, bx1))))
+                cy1 = min(img_h, int(math.ceil(min(y1m / mpp + oy, by1))))
                 if cx1 > cx0 and cy1 > cy0:
                     sub = image_bgr[cy0:cy1, cx0:cx1]
                     tag = svg_export._photo_image_tag(

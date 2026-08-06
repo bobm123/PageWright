@@ -84,13 +84,11 @@ class TilingPanel(QGroupBox):
         self._layout_combo.currentIndexChanged.connect(self._sync_layout_mode)
         self._sync_layout_mode()
 
-        self._embed_check = QCheckBox("Include photo", self)
+        self._embed_check = QCheckBox("Include image", self)
+        self._embed_check.setToolTip(
+            "Embed the image on the tiles (always cropped to the traced/"
+            "selected bounding box).")
         form.addRow(self._embed_check)
-        self._crop_check = QCheckBox("Crop photo to bounding box", self)
-        self._crop_check.setToolTip(
-            "Embed only the photo inside the traced bounding box, so it does "
-            "not extend past the trace on the printed tiles.")
-        form.addRow(self._crop_check)
         self._filled_check = QCheckBox("Fill objects", self)
         form.addRow(self._filled_check)
 
@@ -143,7 +141,6 @@ class TilingPanel(QGroupBox):
             "grid": ((self._cols_spin.value(), self._rows_spin.value())
                      if fixed else None),
             "embed": self._embed_check.isChecked(),
-            "crop": self._crop_check.isChecked(),
             "filled": self._filled_check.isChecked(),
         }
 
@@ -161,7 +158,7 @@ class TilingPanel(QGroupBox):
             "grid_rows": self._rows_spin.value(),
             "scale_percent": self._scale_spin.value(),
             "embed_photo": self._embed_check.isChecked(),
-            "crop_photo": self._crop_check.isChecked(),
+            "crop_photo": True,   # tiles always crop to the bounding box
             "filled": self._filled_check.isChecked(),
         }
 
@@ -172,7 +169,7 @@ class TilingPanel(QGroupBox):
                    self._overlap_spin, self._overlap_unit,
                    self._layout_combo, self._cols_spin, self._rows_spin,
                    self._scale_spin, self._embed_check,
-                   self._crop_check, self._filled_check)
+                   self._filled_check)
         for w in widgets:
             w.blockSignals(True)
         self._page_combo.setCurrentText(t.get("page", "Letter"))
@@ -188,7 +185,6 @@ class TilingPanel(QGroupBox):
         self._rows_spin.setValue(int(t.get("grid_rows", 2)))
         self._scale_spin.setValue(int(t.get("scale_percent", 100)))
         self._embed_check.setChecked(bool(t.get("embed_photo", False)))
-        self._crop_check.setChecked(bool(t.get("crop_photo", False)))
         self._filled_check.setChecked(bool(t.get("filled", False)))
         for w in widgets:
             w.blockSignals(False)

@@ -56,6 +56,8 @@ class Canvas(QGraphicsView):
     roiSelected = Signal(QRectF)
     # Emitted when the trace area is cleared by clicking (vs. dragging).
     roiCleared = Signal()
+    # Emitted after an edge-drag resize of the existing area (no zoom).
+    roiEdited = Signal(QRectF)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -103,6 +105,7 @@ class Canvas(QGraphicsView):
         self._roi_rect = None      # QRectF or None
         self._roi_item = None      # persistent dashed rectangle
         self._roi_origin = None    # drag anchor while selecting
+        self._roi_edit = None      # ("l"/"r","t"/"b" combo) while resizing
 
     # ----- photo -----------------------------------------------------------
 
@@ -434,6 +437,59 @@ class Canvas(QGraphicsView):
         self.centerOn(rect.center())
         self._scale = self.transform().m11()
 
+    # ----- trace-area edge editing -----------------------------------------
+
+    _ROI_GRAB_PX = 8   # view-pixel tolerance for grabbing an edge
+
+    def _roi_edge_hit(self, view_pos):
+        """Which trace-area edges are under `view_pos`: a string of 'l',
+        'r', 't', 'b' (two chars at a corner), or None. View-pixel
+        tolerance so it works at any zoom."""
+        if self._roi_rect is None:
+            return None
+        r = self._roi_rect
+        tl = self.mapFromScene(r.topLeft())
+        br = self.mapFromScene(r.bottomRight())
+        x, y = view_pos.x(), view_pos.y()
+        g = self._ROI_GRAB_PX
+        inside_x = tl.x() - g <= x <= br.x() + g
+        inside_y = tl.y() - g <= y <= br.y() + g
+        edges = ""
+        if inside_y and abs(x - tl.x()) <= g:
+            edges += "l"
+        elif inside_y and abs(x - br.x()) <= g:
+            edges += "r"
+        if inside_x and abs(y - tl.y()) <= g:
+            edges += "t"
+        elif inside_x and abs(y - br.y()) <= g:
+            edges += "b"
+        return edges or None
+
+    @staticmethod
+    def _roi_edge_cursor(edges):
+        if edges in ("lt", "rb"):
+            return Qt.SizeFDiagCursor
+        if edges in ("rt", "lb"):
+            return Qt.SizeBDiagCursor
+        if edges in ("l", "r"):
+            return Qt.SizeHorCursor
+        return Qt.SizeVerCursor
+
+    def _roi_apply_edge_drag(self, scene_pt):
+        r = QRectF(self._roi_rect)
+        e = self._roi_edit
+        if "l" in e:
+            r.setLeft(scene_pt.x())
+        if "r" in e:
+            r.setRight(scene_pt.x())
+        if "t" in e:
+            r.setTop(scene_pt.y())
+        if "b" in e:
+            r.setBottom(scene_pt.y())
+        r = r.normalized().intersected(self._scene.sceneRect())
+        if r.width() >= 4.0 and r.height() >= 4.0:
+            self.set_roi(r)
+
     # ----- mouse events ----------------------------------------------------
 
     def mouseMoveEvent(self, event):
@@ -454,10 +510,23 @@ class Canvas(QGraphicsView):
         if self._photo_item is not None:
             scene_pt = self.mapToScene(event.position().toPoint())
             self.cursorMoved.emit(scene_pt)
+            # Resizing the trace area by its edges (any mode).
+            if (self._roi_edit is not None
+                    and (event.buttons() & Qt.LeftButton)):
+                self._roi_apply_edge_drag(scene_pt)
+                return
             if (self._mode == MODE_ROI and self._roi_origin is not None
                     and (event.buttons() & Qt.LeftButton)):
                 self.set_roi(QRectF(self._roi_origin, scene_pt).normalized())
                 return
+            # Hover feedback over the area's edges in pan/area modes.
+            if (self._mode in (MODE_PAN, MODE_ROI)
+                    and not (event.buttons() & Qt.LeftButton)):
+                edges = self._roi_edge_hit(event.position().toPoint())
+                if edges:
+                    self.viewport().setCursor(self._roi_edge_cursor(edges))
+                else:
+                    self._apply_mode_cursor()
             if self._mode in (MODE_SEED_FG, MODE_SEED_BG):
                 self._update_brush_cursor(scene_pt)
                 if (self._active_stroke is not None
@@ -478,6 +547,16 @@ class Canvas(QGraphicsView):
             self.viewport().setCursor(Qt.ClosedHandCursor)
             event.accept()
             return
+
+        # Grab a trace-area edge to resize it (pan or area mode).
+        if (event.button() == Qt.LeftButton
+                and self._mode in (MODE_PAN, MODE_ROI)):
+            edges = self._roi_edge_hit(event.position().toPoint())
+            if edges:
+                self._roi_edit = edges
+                self.viewport().setCursor(self._roi_edge_cursor(edges))
+                event.accept()
+                return
 
         if self._mode == MODE_ROI and event.button() == Qt.LeftButton:
             self._roi_origin = self.mapToScene(event.position().toPoint())
@@ -505,6 +584,14 @@ class Canvas(QGraphicsView):
         super().mousePressEvent(event)
 
     def mouseReleaseEvent(self, event):
+        # Finish an edge-drag resize: announce the new area (no zoom).
+        if self._roi_edit is not None and event.button() == Qt.LeftButton:
+            self._roi_edit = None
+            self._apply_mode_cursor()
+            if self._roi_rect is not None:
+                self.roiEdited.emit(QRectF(self._roi_rect))
+            return
+
         if (self._mode == MODE_ROI and event.button() == Qt.LeftButton
                 and self._roi_origin is not None):
             origin, self._roi_origin = self._roi_origin, None
