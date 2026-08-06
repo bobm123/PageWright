@@ -278,127 +278,180 @@ class ExportController:
         return resp == QMessageBox.Ok
 
     def print_tiles(self):
-        """Preview-first printing at true 1:1: a Qt preview of the tile
-        pages opens immediately (the Windows print dialog's own preview
-        pane never works for desktop Qt apps); its Print... button then
-        opens the printer dialog, preset to the tiling page size and
-        orientation, and sends the job through the same paint path."""
-        w = self._w
-        tiles = self._build_tiles("Print Tiles")
-        if not tiles:
-            return
-        from PySide6.QtPrintSupport import (QPrintDialog,
-                                            QPrintPreviewWidget)
-        from PySide6.QtWidgets import (QHBoxLayout, QLabel,
-                                       QPushButton, QVBoxLayout)
-        printer = self._make_printer()
-        renderers = self._make_renderers(tiles)
-        n_pages = len(renderers)
-
-        dlg = QDialog(w)
-        dlg.setWindowTitle("Print Tiles - %d page(s)" % n_pages)
-        dlg.resize(1000, 720)
-        lay = QVBoxLayout(dlg)
-        preview = QPrintPreviewWidget(printer, dlg)
-        # one SHEET at a time (not a continuous scroll); Prev/Next flip
-        preview.setViewMode(QPrintPreviewWidget.SinglePageView)
-        preview.paintRequested.connect(
-            lambda pr: self._paint_tiles(pr, renderers))
-        lay.addWidget(preview, 1)
-
-        row = QHBoxLayout()
-        btn_prev = QPushButton("< Prev", dlg)
-        btn_prev.setAutoDefault(False)
-        btn_next = QPushButton("Next >", dlg)
-        btn_next.setAutoDefault(False)
-        page_lbl = QLabel("", dlg)
-
-        def _upd_label(*_):
-            page_lbl.setText("Sheet %d of %d"
-                             % (preview.currentPage(), n_pages))
-            btn_prev.setEnabled(preview.currentPage() > 1)
-            btn_next.setEnabled(preview.currentPage() < n_pages)
-
-        btn_prev.clicked.connect(
-            lambda: (preview.setCurrentPage(preview.currentPage() - 1),
-                     _upd_label()))
-        btn_next.clicked.connect(
-            lambda: (preview.setCurrentPage(preview.currentPage() + 1),
-                     _upd_label()))
-        preview.previewChanged.connect(_upd_label)
-        row.addWidget(btn_prev)
-        row.addWidget(page_lbl)
-        row.addWidget(btn_next)
-        row.addSpacing(20)
-        for label, slot in (("Fit page", preview.fitInView),
-                            ("Fit width", preview.fitToWidth),
-                            ("Zoom -", preview.zoomOut),
-                            ("Zoom +", preview.zoomIn)):
-            btn = QPushButton(label, dlg)
-            btn.setAutoDefault(False)
-            btn.clicked.connect(slot)
-            row.addWidget(btn)
-        row.addStretch(1)
-        btn_print = QPushButton("Print…", dlg)
-        btn_print.setDefault(True)
-        btn_cancel = QPushButton("Cancel", dlg)
-        btn_cancel.setAutoDefault(False)
-        row.addWidget(btn_print)
-        row.addWidget(btn_cancel)
-        lay.addLayout(row)
-        btn_cancel.clicked.connect(dlg.reject)
-        _upd_label()
-
-        def do_print():
-            from PySide6.QtPrintSupport import QAbstractPrintDialog
-            printer.setFromTo(1, n_pages)
-            pd = QPrintDialog(printer, dlg)
-            pd.setWindowTitle("Print Tiles")
-            pd.setOption(QAbstractPrintDialog.PrintPageRange, True)
-            pd.setOption(QAbstractPrintDialog.PrintCurrentPage, True)
-            if pd.exec() != QDialog.Accepted:
-                preview.updatePreview()   # reflect any settings changes
-                return
-            if not self._check_paper_match(printer, "Print Tiles"):
-                preview.updatePreview()
-                return
-            # all pages / current sheet / custom range (1-based dialog)
-            from PySide6.QtPrintSupport import QPrinter as _QP
-            rng = printer.printRange()
-            if rng == _QP.CurrentPage:
-                pages = [preview.currentPage() - 1]
-            elif rng == _QP.PageRange:
-                lo = printer.fromPage() or 1
-                hi = printer.toPage() or n_pages
-                pages = list(range(lo - 1, min(hi, n_pages)))
-            else:
-                pages = None      # all
-            if not self._paint_tiles(printer, renderers, pages):
-                QMessageBox.critical(dlg, "Print Tiles",
-                                     "Could not start the print job.")
-                return
-            dlg.accept()
-
-        btn_print.clicked.connect(do_print)
-        if dlg.exec() != QDialog.Accepted:
-            return
-        w.statusBar().showMessage(
-            "Sent %d tile page(s) to the printer at true scale. Make "
-            "sure driver scaling / 'fit to page' is OFF." % len(tiles),
-            8000)
+        """Preview-first printing at true 1:1 (see _TilePreviewDialog)."""
+        self._open_tile_preview("Print Tiles")
 
     def print_preview_tiles(self):
-        """On-screen preview of the tile pages (same rendering path as
-        printing; its toolbar prints from the preview)."""
+        """Same dialog as Print Tiles - one preview to learn."""
+        self._open_tile_preview("Print Preview")
+
+    def _open_tile_preview(self, title):
         w = self._w
-        tiles = self._build_tiles("Print Preview")
+        tiles = self._build_tiles(title)
         if not tiles:
             return
-        from PySide6.QtPrintSupport import QPrintPreviewDialog
         printer = self._make_printer()
         renderers = self._make_renderers(tiles)
-        dlg = QPrintPreviewDialog(printer, w)
-        dlg.setWindowTitle("Print Preview - %d tile page(s)" % len(tiles))
-        dlg.paintRequested.connect(
-            lambda pr: self._paint_tiles(pr, renderers))
+        dlg = _TilePreviewDialog(self, printer, renderers, w)
+        dlg.setWindowTitle("%s - %d page(s)" % (title, len(renderers)))
         dlg.exec()
+        if dlg.printed:
+            w.statusBar().showMessage(
+                "Sent tile page(s) to the printer at true scale. Make "
+                "sure driver scaling / 'fit to page' is OFF.", 8000)
+
+
+class _TilePreviewDialog(QDialog):
+    """Shared tile preview/print dialog (used by both Print Tiles and
+    Print Preview, so they look and work the same).
+
+    Layout modes: Single page / Facing / All pages (overview). The mouse
+    wheel ZOOMS (anchored at the cursor, like the dewarp panes and the
+    trace canvas); Alt+wheel steps through the sheets; left-drag pans.
+    Print... opens the printer dialog with All / Current page / Custom
+    range, then prints through the true-mm paint path."""
+
+    def __init__(self, controller, printer, renderers, parent=None):
+        super().__init__(parent)
+        from PySide6.QtPrintSupport import QPrintPreviewWidget
+        from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton,
+                                       QVBoxLayout)
+        self._c = controller
+        self._printer = printer
+        self._renderers = renderers
+        self._n = len(renderers)
+        self.printed = False
+        self.resize(1000, 720)
+
+        lay = QVBoxLayout(self)
+        self._preview = QPrintPreviewWidget(printer, self)
+        self._preview.setViewMode(QPrintPreviewWidget.SinglePageView)
+        self._preview.paintRequested.connect(
+            lambda pr: self._c._paint_tiles(pr, self._renderers))
+        lay.addWidget(self._preview, 1)
+        self._tune_inner_view()
+
+        row = QHBoxLayout()
+        # layout modes (radio-style), like QPrintPreviewDialog's toolbar
+        self._mode_btns = []
+        for label, mode in (
+                ("Single page", QPrintPreviewWidget.SinglePageView),
+                ("Facing", QPrintPreviewWidget.FacingPagesView),
+                ("All pages", QPrintPreviewWidget.AllPagesView)):
+            b = QPushButton(label, self)
+            b.setCheckable(True)
+            b.setAutoDefault(False)
+            b.clicked.connect(
+                lambda _=False, m=mode, btn=b: self._set_mode(m, btn))
+            row.addWidget(b)
+            self._mode_btns.append(b)
+        self._mode_btns[0].setChecked(True)
+        row.addSpacing(16)
+
+        self._btn_prev = QPushButton("< Prev", self)
+        self._btn_prev.setAutoDefault(False)
+        self._btn_next = QPushButton("Next >", self)
+        self._btn_next.setAutoDefault(False)
+        self._page_lbl = QLabel("", self)
+        self._btn_prev.clicked.connect(lambda: self._step_page(-1))
+        self._btn_next.clicked.connect(lambda: self._step_page(+1))
+        self._preview.previewChanged.connect(self._update_nav)
+        row.addWidget(self._btn_prev)
+        row.addWidget(self._page_lbl)
+        row.addWidget(self._btn_next)
+        row.addSpacing(16)
+        for label, slot in (("Fit page", self._preview.fitInView),
+                            ("Fit width", self._preview.fitToWidth)):
+            b = QPushButton(label, self)
+            b.setAutoDefault(False)
+            b.clicked.connect(slot)
+            row.addWidget(b)
+        row.addStretch(1)
+        btn_print = QPushButton("Print…", self)
+        btn_print.setDefault(True)
+        btn_print.clicked.connect(self._do_print)
+        btn_close = QPushButton("Close", self)
+        btn_close.setAutoDefault(False)
+        btn_close.clicked.connect(self.reject)
+        row.addWidget(btn_print)
+        row.addWidget(btn_close)
+        lay.addLayout(row)
+        self._update_nav()
+
+    # ----- inner-view behavior ---------------------------------------------
+    def _tune_inner_view(self):
+        """Make the preview feel like the app's other views: left-drag
+        pans; zooming anchors at the cursor. QPrintPreviewWidget hosts an
+        internal QGraphicsView we can reach as a child."""
+        from PySide6.QtWidgets import QGraphicsView
+        gv = self._preview.findChild(QGraphicsView)
+        self._gv = gv
+        if gv is not None:
+            gv.setDragMode(QGraphicsView.ScrollHandDrag)
+            gv.setTransformationAnchor(
+                QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+            gv.viewport().installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        from PySide6.QtCore import QEvent
+        if event.type() == QEvent.Wheel:
+            delta = event.angleDelta().y() or event.angleDelta().x()
+            if event.modifiers() & Qt.AltModifier:
+                # Alt+wheel steps through the sheets
+                self._step_page(-1 if delta > 0 else +1)
+            elif delta > 0:
+                self._preview.zoomIn(1.25)
+            elif delta < 0:
+                self._preview.zoomOut(1.25)
+            return True    # the wheel never scrolls the page list
+        return super().eventFilter(obj, event)
+
+    # ----- controls --------------------------------------------------------
+    def _set_mode(self, mode, active_btn):
+        self._preview.setViewMode(mode)
+        for b in self._mode_btns:
+            b.setChecked(b is active_btn)
+        self._update_nav()
+
+    def _step_page(self, d):
+        cur = self._preview.currentPage()
+        self._preview.setCurrentPage(max(1, min(self._n, cur + d)))
+        self._update_nav()
+
+    def _update_nav(self, *args):
+        self._page_lbl.setText(
+            "Sheet %d of %d" % (self._preview.currentPage(), self._n))
+        self._btn_prev.setEnabled(self._preview.currentPage() > 1)
+        self._btn_next.setEnabled(self._preview.currentPage() < self._n)
+
+    # ----- printing --------------------------------------------------------
+    def _do_print(self):
+        from PySide6.QtPrintSupport import (QAbstractPrintDialog,
+                                            QPrintDialog, QPrinter)
+        printer = self._printer
+        printer.setFromTo(1, self._n)
+        pd = QPrintDialog(printer, self)
+        pd.setWindowTitle("Print Tiles")
+        pd.setOption(QAbstractPrintDialog.PrintPageRange, True)
+        pd.setOption(QAbstractPrintDialog.PrintCurrentPage, True)
+        if pd.exec() != QDialog.Accepted:
+            self._preview.updatePreview()   # reflect settings changes
+            return
+        if not self._c._check_paper_match(printer, "Print Tiles"):
+            self._preview.updatePreview()
+            return
+        rng = printer.printRange()
+        if rng == QPrinter.CurrentPage:
+            pages = [self._preview.currentPage() - 1]
+        elif rng == QPrinter.PageRange:
+            lo = printer.fromPage() or 1
+            hi = printer.toPage() or self._n
+            pages = list(range(lo - 1, min(hi, self._n)))
+        else:
+            pages = None
+        if not self._c._paint_tiles(printer, self._renderers, pages):
+            QMessageBox.critical(self, "Print Tiles",
+                                 "Could not start the print job.")
+            return
+        self.printed = True
+        self.accept()

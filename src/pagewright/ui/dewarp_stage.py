@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
 
 from ..core import calibration as calib_core
 from ..core import dewarp as dw
+from . import zoom
 
 # _SourceView interaction modes
 MODE_QUAD = 0
@@ -201,8 +202,7 @@ class _AutoFitView(QGraphicsView):
         self._fitting = False         # re-entrancy guard for _autofit
         self.setBackgroundBrush(QBrush(QColor("#202020")))
         # zoom toward the cursor rather than the view center
-        self.setTransformationAnchor(
-            QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        zoom.anchor_under_cursor(self)
         # Scrollbars OFF: fitInView() in resizeEvent() would otherwise
         # toggle a scrollbar, which resizes the viewport, which fires
         # resizeEvent again - for a PERFECTLY SQUARE image the fit lands
@@ -268,11 +268,11 @@ class _AutoFitView(QGraphicsView):
 
     def zoom_in(self):
         self._user_zoomed = True
-        self.scale(1.25, 1.25)
+        self.scale(zoom.ZOOM_STEP, zoom.ZOOM_STEP)
 
     def zoom_out(self):
         self._user_zoomed = True
-        self.scale(0.8, 0.8)
+        self.scale(1.0 / zoom.ZOOM_STEP, 1.0 / zoom.ZOOM_STEP)
 
     def _autofit(self):
         if self._fitting or self._user_zoomed:
@@ -292,9 +292,10 @@ class _AutoFitView(QGraphicsView):
         self._autofit()
 
     def wheelEvent(self, event):
-        self._user_zoomed = True
-        factor = 1.25 if event.angleDelta().y() > 0 else 0.8
-        self.scale(factor, factor)
+        # shared cursor-anchored zoom (ui/zoom.py); works while placing
+        # corners, dragging spline handles and during calibration
+        if zoom.wheel_zoom(self, event):
+            self._user_zoomed = True
 
     def _start_pan(self, view_pos):
         self._panning = True

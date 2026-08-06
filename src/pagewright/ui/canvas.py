@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
+from . import zoom
 from .editable import VertexHandle
 
 # Interaction modes.
@@ -172,12 +173,12 @@ class Canvas(QGraphicsView):
         self.scale(factor, factor)
 
     def wheelEvent(self, event):
+        # Shared cursor-anchored zoom (ui/zoom.py) - works in EVERY mode,
+        # including while placing calibration points.
         if self._photo_item is None:
             return
-        if event.angleDelta().y() > 0:
-            self._apply_zoom(_ZOOM_STEP)
-        else:
-            self._apply_zoom(1.0 / _ZOOM_STEP)
+        if zoom.wheel_zoom(self, event, _MIN_SCALE, _MAX_SCALE):
+            self._scale = self.transform().m11()
 
     # ----- mode switching --------------------------------------------------
 
@@ -247,12 +248,16 @@ class Canvas(QGraphicsView):
         item.setZValue(15)
         self._calib_markers.append(item)
 
-    def _add_line(self, p0, p1):
+    @staticmethod
+    def _calib_pen():
         pen = QPen(QColor(255, 80, 80))
         pen.setCosmetic(True)
         pen.setWidth(2)
+        return pen
+
+    def _add_line(self, p0, p1):
         self._calib_line = self._scene.addLine(
-            p0.x(), p0.y(), p1.x(), p1.y(), pen)
+            p0.x(), p0.y(), p1.x(), p1.y(), self._calib_pen())
         self._calib_line.setZValue(14)
 
     # ----- seed painting ---------------------------------------------------
@@ -510,6 +515,15 @@ class Canvas(QGraphicsView):
         if self._photo_item is not None:
             scene_pt = self.mapToScene(event.position().toPoint())
             self.cursorMoved.emit(scene_pt)
+            # Calibration: stretch a preview line from the first point.
+            if (self._mode == MODE_CALIBRATE
+                    and len(self._calib_points) == 1):
+                if self._calib_line is not None:
+                    self._scene.removeItem(self._calib_line)
+                self._calib_line = self._scene.addLine(
+                    self._calib_points[0].x(), self._calib_points[0].y(),
+                    scene_pt.x(), scene_pt.y(), self._calib_pen())
+                self._calib_line.setZValue(30)
             # Resizing the trace area by its edges (any mode).
             if (self._roi_edit is not None
                     and (event.buttons() & Qt.LeftButton)):
@@ -568,6 +582,10 @@ class Canvas(QGraphicsView):
             self._calib_points.append(pt)
             self._add_marker(pt)
             if len(self._calib_points) == 2:
+                # drop the live rubber-band line before the final one
+                if self._calib_line is not None:
+                    self._scene.removeItem(self._calib_line)
+                    self._calib_line = None
                 p0, p1 = self._calib_points
                 self._add_line(p0, p1)
                 self.cancel_calibration()
