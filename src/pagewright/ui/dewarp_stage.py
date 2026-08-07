@@ -864,6 +864,9 @@ class DewarpStageWidget(QWidget):
         self._pv_img = None
         self._pv_scale = 1.0
         self._result = None
+        # receive R/L rotate keys even when a pane has focus (unhandled
+        # keys propagate up from the QGraphicsViews)
+        self.setFocusPolicy(Qt.StrongFocus)
 
         self._source = _SourceView(self)
         self._resultv = _ResultView(self)
@@ -985,6 +988,22 @@ class DewarpStageWidget(QWidget):
             lambda p1, p2: self._on_calibrated("result", p1, p2))
         self._source.menuRequested.connect(self._show_source_menu)
         self._resultv.menuRequested.connect(self._show_result_menu)
+
+    def keyPressEvent(self, event):
+        """R = rotate 90 CW, L = rotate 90 CCW - applied to the pane
+        under the mouse: left (source) rotates the working copy and
+        resets the outline; right (result) rotates the flattened
+        output (preview, Apply and Save all follow)."""
+        key = event.key()
+        if key in (Qt.Key_R, Qt.Key_L) and self._src is not None:
+            clockwise = (key == Qt.Key_R)
+            if self._resultv.underMouse():
+                self._rotate_result(clockwise)
+            else:
+                self._rotate_source(clockwise)
+            event.accept()
+            return
+        super().keyPressEvent(event)
 
     # ----- entry / result ---------------------------------------------------
     def set_source_image(self, bgr_image, dpi=300):

@@ -57,6 +57,13 @@ def build_actions(w):
     w.act_zoom_out.setShortcut(QKeySequence.ZoomOut)
     w.act_zoom_out.triggered.connect(w.canvas.zoom_out)
 
+    w.act_rotate_cw = QAction("Rotate Image 90 deg CW", w)
+    w.act_rotate_cw.setShortcut("R")
+    w.act_rotate_cw.triggered.connect(lambda: w.rotate_working(True))
+    w.act_rotate_ccw = QAction("Rotate Image 90 deg CCW", w)
+    w.act_rotate_ccw.setShortcut("L")
+    w.act_rotate_ccw.triggered.connect(lambda: w.rotate_working(False))
+
     w.act_fit = QAction("&Fit to Window", w)
     w.act_fit.triggered.connect(w.canvas.fit_to_view)
 
@@ -155,6 +162,9 @@ def build_menus(w):
     m_view.addAction(w.act_zoom_in)
     m_view.addAction(w.act_zoom_out)
     m_view.addAction(w.act_fit)
+    m_view.addSeparator()
+    m_view.addAction(w.act_rotate_cw)
+    m_view.addAction(w.act_rotate_ccw)
     m_view.addSeparator()
     m_view.addAction(w.act_show_bbox)
     m_view.addAction(w.act_view_tiles)

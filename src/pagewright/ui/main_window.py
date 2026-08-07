@@ -26,7 +26,8 @@ from ..core import undo
 from ..model import Project
 from . import app_actions
 from .canvas import Canvas
-from .dewarp_stage import DewarpStageWidget
+from .dewarp_stage import (DewarpStageWidget, display_downscale,
+                           ndarray_to_qpixmap)
 from .dialogs import CalibrationDialog, PreferencesDialog
 from .editing_controller import EditingController
 from .export_controller import ExportController
@@ -134,7 +135,8 @@ class MainWindow(QMainWindow):
                   self.act_save_project, self.act_new_object,
                   self.act_mode_roi, self.act_clear_roi,
                   self.act_dewarp, self.act_print_tiles,
-                  self.act_print_preview):
+                  self.act_print_preview, self.act_rotate_cw,
+                  self.act_rotate_ccw):
             a.setEnabled(enabled)
 
     # ----- delegated actions -----------------------------------------------
@@ -151,6 +153,54 @@ class MainWindow(QMainWindow):
 
     def open_photo(self):
         self.projects.open_photo()
+
+    def rotate_working(self, clockwise):
+        """R / L: rotate the working image 90 degrees. Traces and the
+        Select Area rectangle rotate WITH the image (calibration mm/px
+        is rotation-invariant); seed strokes are cleared."""
+        if self._loaded is None:
+            return
+        if self._stack.currentWidget() is self.dewarp_stage:
+            return                  # the stage has its own R/L handling
+        import cv2
+        self._sync_model()
+        old_h, old_w = self._loaded.data.shape[:2]
+        code = (cv2.ROTATE_90_CLOCKWISE if clockwise
+                else cv2.ROTATE_90_COUNTERCLOCKWISE)
+        self._loaded.data = cv2.rotate(self._loaded.data, code)
+        if clockwise:
+            def tp(x, y):
+                return (old_h - y, x)
+        else:
+            def tp(x, y):
+                return (y, old_w - x)
+        for obj in self.project.objects:
+            for c in obj.contours:
+                c.points = [tp(x, y) for (x, y) in c.points]
+        roi = self.canvas.roi_rect()
+        new_roi = None
+        if roi is not None:
+            from PySide6.QtCore import QRectF
+            pts = [tp(roi.left(), roi.top()), tp(roi.right(), roi.bottom())]
+            xs = sorted(p[0] for p in pts)
+            ys = sorted(p[1] for p in pts)
+            new_roi = QRectF(xs[0], ys[0], xs[1] - xs[0], ys[1] - ys[0])
+        self.project.set_source_image(self._loaded)
+        disp, _, _ = display_downscale(self._loaded.data)
+        self.canvas.set_photo(ndarray_to_qpixmap(disp),
+                              (self._loaded.pixel_width,
+                               self._loaded.pixel_height))
+        self._load_layers_from_project()
+        if new_roi is not None:
+            self.canvas.set_roi(new_roi)
+        self.undo_stack.clear()
+        self._refresh_object_list()
+        self._update_bbox()
+        self._update_tile_grid()
+        self._refresh_scale_readout()
+        self.statusBar().showMessage(
+            "Rotated 90 deg %s - traces and area follow the image; "
+            "seed strokes cleared." % ("CW" if clockwise else "CCW"), 5000)
 
     def dewarp_page(self):
         """Tools -> Flatten Page: switch the central view to the dewarp
