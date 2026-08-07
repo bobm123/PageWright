@@ -367,12 +367,16 @@ class _TilePreviewDialog(QDialog):
             b.clicked.connect(slot)
             row.addWidget(b)
         row.addStretch(1)
+        btn_pdf = QPushButton("Save as PDF…", self)
+        btn_pdf.setAutoDefault(False)
+        btn_pdf.clicked.connect(self._save_pdf)
         btn_print = QPushButton("Print…", self)
         btn_print.setDefault(True)
         btn_print.clicked.connect(self._do_print)
         btn_close = QPushButton("Close", self)
         btn_close.setAutoDefault(False)
         btn_close.clicked.connect(self.reject)
+        row.addWidget(btn_pdf)
         row.addWidget(btn_print)
         row.addWidget(btn_close)
         lay.addLayout(row)
@@ -423,6 +427,35 @@ class _TilePreviewDialog(QDialog):
             "Sheet %d of %d" % (self._preview.currentPage(), self._n))
         self._btn_prev.setEnabled(self._preview.currentPage() > 1)
         self._btn_next.setEnabled(self._preview.currentPage() < self._n)
+
+    # ----- PDF -------------------------------------------------------------
+    def _save_pdf(self):
+        """Write every tile sheet to one multi-page PDF (same true-mm
+        paint path as printing) - a reliable preview/handoff fallback
+        that sidesteps printer dialogs entirely."""
+        from PySide6.QtCore import QMarginsF, QSizeF
+        from PySide6.QtGui import QPageLayout, QPageSize
+        from PySide6.QtPrintSupport import QPrinter
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Tiles as PDF", "tiles.pdf", "PDF (*.pdf)")
+        if not path:
+            return
+        pw_mm, ph_mm = self._c._tile_page_mm()
+        pdf = QPrinter(QPrinter.HighResolution)
+        pdf.setOutputFormat(QPrinter.PdfFormat)
+        pdf.setOutputFileName(path)
+        pdf.setPageLayout(QPageLayout(
+            QPageSize(QSizeF(pw_mm, ph_mm), QPageSize.Millimeter),
+            QPageLayout.Portrait, QMarginsF(0, 0, 0, 0)))
+        pdf.setFullPage(True)
+        if not self._c._paint_tiles(pdf, self._renderers):
+            QMessageBox.critical(self, "Save Tiles as PDF",
+                                 "Could not write the PDF.")
+            return
+        QMessageBox.information(
+            self, "Save Tiles as PDF",
+            "Wrote %d sheet(s) to:\n%s\n\nPrint the PDF with scaling / "
+            "'fit to page' OFF for true 1:1." % (self._n, path))
 
     # ----- printing --------------------------------------------------------
     def _do_print(self):
