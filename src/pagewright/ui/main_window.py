@@ -30,6 +30,7 @@ from .dewarp_stage import (DewarpStageWidget, display_downscale,
                            ndarray_to_qpixmap)
 from .dialogs import CalibrationDialog, PreferencesDialog
 from .ocr_stage import OcrStageWidget
+from .scale_stage import ScaleStageWidget
 from .editing_controller import EditingController
 from .export_controller import ExportController
 from .objects import ObjectLayer
@@ -62,11 +63,16 @@ class MainWindow(QMainWindow):
         self.dewarp_stage.cancelled.connect(self._leave_dewarp_stage)
         self.ocr_stage = OcrStageWidget(self)
         self.ocr_stage.cancelled.connect(lambda: self.switch_tool("trace"))
+        self.scale_stage = ScaleStageWidget(self)
+        self.scale_stage.cancelled.connect(lambda: self.switch_tool("trace"))
+        self.scale_stage.mmPerPixelChanged.connect(self._on_scale_set)
+        self.scale_stage.printRequested.connect(self.print_tiles)
         # central stack of first-class tools: trace / flatten / OCR
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self.canvas)
         self._stack.addWidget(self.dewarp_stage)
         self._stack.addWidget(self.ocr_stage)
+        self._stack.addWidget(self.scale_stage)
         self.setCentralWidget(self._stack)
         self.canvas.calibrationPicked.connect(self._on_calibration_picked)
         self.canvas.cursorMoved.connect(self._on_cursor_moved)
@@ -212,13 +218,15 @@ class MainWindow(QMainWindow):
             return "flatten"
         if cur is self.ocr_stage:
             return "ocr"
+        if cur is self.scale_stage:
+            return "scale"
         return "trace"
 
     def switch_tool(self, name):
         """Hub switching between the first-class tools: 'trace',
         'flatten', 'ocr'. All operate on the shared working image; switch
         at will."""
-        if name in ("flatten", "ocr") and self._loaded is None:
+        if name != "trace" and self._loaded is None:
             self.statusBar().showMessage(
                 "Load or paste an image first.", 4000)
             self._sync_tool_checks(self._current_tool_name())
@@ -229,12 +237,15 @@ class MainWindow(QMainWindow):
             self.dewarp_page()
         elif name == "ocr":
             self.enter_ocr()
+        elif name == "scale":
+            self.enter_scale()
         self._sync_tool_checks(name)
 
     def _sync_tool_checks(self, name):
         for act, key in ((self.act_tool_trace, "trace"),
                          (self.act_tool_flatten, "flatten"),
-                         (self.act_tool_ocr, "ocr")):
+                         (self.act_tool_ocr, "ocr"),
+                         (self.act_tool_scale, "scale")):
             act.blockSignals(True)
             act.setChecked(key == name)
             act.blockSignals(False)
@@ -252,6 +263,33 @@ class MainWindow(QMainWindow):
         self._set_tools_enabled(False)
         self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
+
+    def enter_scale(self):
+        """Scale tool: set the document's real-world size (sometimes the
+        only thing a document needs)."""
+        if self._loaded is None:
+            return
+        if self._stack.currentWidget() is self.scale_stage:
+            return
+        c = self.project.calibration
+        self.scale_stage.set_source_image(
+            self._loaded.data,
+            c.mm_per_pixel if c.is_calibrated else None)
+        self._stack.setCurrentWidget(self.scale_stage)
+        self._set_tools_enabled(False)
+        # printing/preview stay available - they are the point here
+        self.act_print_tiles.setEnabled(True)
+        self.act_print_preview.setEnabled(True)
+        self._dock_was_visible = self._dock.isVisible()
+        self._dock.hide()
+
+    def _on_scale_set(self, mpp):
+        """The Scale tool set mm/px: apply to the project so tiling,
+        exports and readouts all follow."""
+        self.project.calibration.mm_per_pixel = float(mpp)
+        self._refresh_scale_readout()
+        self._update_bbox()
+        self._update_tile_grid()
 
     def paste_image(self):
         """Edit -> Paste Image (Ctrl+V): start from a screenshot or any
@@ -304,7 +342,8 @@ class MainWindow(QMainWindow):
 
     def _leave_dewarp_stage(self):
         if self._stack.currentWidget() in (self.dewarp_stage,
-                                           self.ocr_stage):
+                                           self.ocr_stage,
+                                           self.scale_stage):
             if self._dock_was_visible:
                 self._dock.show()
         self._stack.setCurrentWidget(self.canvas)

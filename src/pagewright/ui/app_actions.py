@@ -37,7 +37,13 @@ def build_actions(w):
     w.act_tool_flatten.triggered.connect(lambda: w.switch_tool("flatten"))
     w.act_tool_ocr = QAction("&OCR", w, checkable=True)
     w.act_tool_ocr.triggered.connect(lambda: w.switch_tool("ocr"))
-    for a in (w.act_tool_trace, w.act_tool_flatten, w.act_tool_ocr):
+    w.act_tool_scale = QAction("&Scale", w, checkable=True)
+    w.act_tool_scale.setToolTip(
+        "Set the document's real-world size (calibrate / type a size), "
+        "then print or save at true scale")
+    w.act_tool_scale.triggered.connect(lambda: w.switch_tool("scale"))
+    for a in (w.act_tool_trace, w.act_tool_flatten, w.act_tool_scale,
+              w.act_tool_ocr):
         w.tool_group.addAction(a)
 
     w.act_open = QAction("&Load Image…", w)
@@ -196,6 +202,7 @@ def build_menus(w):
     m_tools = mb.addMenu("&Tools")
     m_tools.addAction(w.act_tool_trace)
     m_tools.addAction(w.act_tool_flatten)
+    m_tools.addAction(w.act_tool_scale)
     m_tools.addAction(w.act_tool_ocr)
     m_tools.addSeparator()
     m_tools.addAction(w.act_dewarp)
@@ -222,6 +229,7 @@ def build_toolbar(w):
     # the hub: co-equal tools over one shared working image
     tb.addAction(w.act_tool_trace)
     tb.addAction(w.act_tool_flatten)
+    tb.addAction(w.act_tool_scale)
     tb.addAction(w.act_tool_ocr)
     tb.addAction(w.act_print_tiles)
     tb.addSeparator()
@@ -268,6 +276,7 @@ def show_canvas_menu(w, global_pos):
     menu.addAction(w.act_fit)
     menu.addSeparator()
     menu.addAction(w.act_tool_flatten)   # jump to the other tools
+    menu.addAction(w.act_tool_scale)
     menu.addAction(w.act_tool_ocr)
     menu.addAction(w.act_print_tiles)
     menu.exec(global_pos)
