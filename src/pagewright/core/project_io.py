@@ -49,6 +49,22 @@ def _object_to_dict(obj):
     }
 
 
+def natural_key(name):
+    """Sort key treating digit runs numerically (page2 < page10)."""
+    import re
+    return [int(t) if t.isdigit() else t.lower()
+            for t in re.split(r"(\d+)", name)]
+
+
+def objects_to_list(objects):
+    """Serialize TracedObjects to the schema used inside pages[]."""
+    return [_object_to_dict(o) for o in objects]
+
+
+def objects_from_list(lst):
+    return [_object_from_dict(o) for o in (lst or [])]
+
+
 def project_to_dict(project):
     """Serialise a Project to a JSON-ready dict."""
     return {
@@ -64,6 +80,12 @@ def project_to_dict(project):
         "margin_mm": project.margin_mm,
         "tiling": dict(project.tiling),
         "objects": [_object_to_dict(o) for o in project.objects],
+        # canonical form: a project is always at least a one-page job
+        "pages": ([dict(pg) for pg in project.pages] if project.pages
+                  else [{"source_path": project.source_image_path,
+                         "objects": [_object_to_dict(o)
+                                     for o in project.objects]}]),
+        "current_page": int(getattr(project, "current_page", 0)),
     }
 
 
@@ -120,6 +142,16 @@ def project_from_dict(d):
     project.tiling = tiling
 
     project.objects = [_object_from_dict(o) for o in d.get("objects", [])]
+    pages = d.get("pages")
+    if pages:
+        project.pages = [dict(pg) for pg in pages]
+        project.current_page = max(
+            0, min(int(d.get("current_page", 0)), len(pages) - 1))
+    else:
+        # older single-page file -> one-page job
+        project.pages = [{"source_path": project.source_image_path,
+                          "objects": d.get("objects", [])}]
+        project.current_page = 0
     return project
 
 

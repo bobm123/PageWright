@@ -114,3 +114,34 @@ def test_bad_file_raises():
         fh.write("{not valid json")
     with pytest.raises(pio.ProjectIOError):
         pio.load_project(bad)
+
+
+def test_natural_key_orders_pages():
+    names = ["page10.png", "page2.png", "Page1.png"]
+    assert sorted(names, key=pio.natural_key) == [
+        "Page1.png", "page2.png", "page10.png"]
+
+
+def test_pages_round_trip():
+    p = _sample_project()
+    p.pages = [{"source_path": "a.png",
+                "objects": pio.objects_to_list(p.objects)},
+               {"source_path": "b.png", "objects": []}]
+    p.current_page = 1
+    d = pio.project_to_dict(p)
+    p2 = pio.project_from_dict(d)
+    assert len(p2.pages) == 2 and p2.current_page == 1
+    assert p2.pages[0]["source_path"] == "a.png"
+    # per-page objects deserialize identically to top-level ones
+    objs = pio.objects_from_list(p2.pages[0]["objects"])
+    assert len(objs) == len(p.objects)
+
+
+def test_old_project_becomes_one_page_job():
+    p = _sample_project()
+    d = pio.project_to_dict(p)
+    d.pop("pages", None)
+    d.pop("current_page", None)
+    p2 = pio.project_from_dict(d)
+    assert len(p2.pages) == 1 and p2.current_page == 0
+    assert p2.pages[0]["source_path"] == p.source_image_path

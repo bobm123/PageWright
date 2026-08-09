@@ -83,6 +83,11 @@ class Project:
         self.pixel_height = 0
         self.dpi = None
         self.calibration = Calibration()
+        # Multi-page job (M1): plain dicts {"source_path", "objects":[...]}
+        # with objects pre-serialized (project_io schema). The classic
+        # single-image fields describe the CURRENT page.
+        self.pages = []
+        self.current_page = 0
         self.margin_mm = 5.0
         self.objects = []   # [TracedObject]
         self.tiling = default_tiling()   # tiled-printing settings

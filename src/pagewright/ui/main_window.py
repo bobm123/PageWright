@@ -36,6 +36,7 @@ from .export_controller import ExportController
 from .objects import ObjectLayer
 from .objects_panel import ObjectsPanel
 from .overlay_controller import OverlayController
+from .pages_panel import PagesPanel
 from .project_controller import ProjectController
 from .tiling_panel import TilingPanel
 
@@ -107,6 +108,13 @@ class MainWindow(QMainWindow):
                          | QDockWidget.DockWidgetFloatable)
         panel = QWidget(dock)
         layout = QVBoxLayout(panel)
+
+        self.pages_panel = PagesPanel(panel)
+        self.pages_panel.pageActivated.connect(self.activate_page)
+        self.pages_panel.addImagesRequested.connect(self.add_page_images)
+        self.pages_panel.addFolderRequested.connect(self.add_page_folder)
+        self.pages_panel.removeRequested.connect(self.remove_page)
+        layout.addWidget(self.pages_panel)
 
         self.objects_panel = ObjectsPanel(self.project.margin_mm, panel)
         self.objects_panel.newRequested.connect(self.add_polygon)
@@ -290,6 +298,111 @@ class MainWindow(QMainWindow):
         self._refresh_scale_readout()
         self._update_bbox()
         self._update_tile_grid()
+
+    # ----- multi-page job (M1) ---------------------------------------------
+    def _refresh_pages_panel(self):
+        self.pages_panel.set_pages(
+            [pg.get("source_path") or "" for pg in self.project.pages],
+            self.project.current_page)
+
+    def _store_current_page(self):
+        """Serialize the on-canvas state into the current page entry."""
+        from ..core import project_io as pio
+        if not self.project.pages:
+            return
+        self._sync_model()
+        i = self.project.current_page
+        if 0 <= i < len(self.project.pages):
+            pg = self.project.pages[i]
+            pg["source_path"] = self._loaded.path if self._loaded else \
+                pg.get("source_path")
+            pg["objects"] = pio.objects_to_list(self.project.objects)
+
+    def activate_page(self, index):
+        """Switch the working image to page `index`, preserving the
+        job-wide calibration/tiling and each page's traces."""
+        from ..core import project_io as pio
+        if not (0 <= index < len(self.project.pages)):
+            return
+        if index == self.project.current_page and self._loaded is not None:
+            return
+        self._store_current_page()
+        pg = self.project.pages[index]
+        path = pg.get("source_path")
+        loaded, pixmap = self.projects._read_image(path or "", "Open Page")
+        if loaded is None:
+            return
+        self.switch_tool("trace")
+        self.project.current_page = index
+        self.project.set_source_image(loaded)
+        self._loaded = loaded
+        self.undo_stack.clear()
+        self.canvas.set_photo(pixmap,
+                              (loaded.pixel_width, loaded.pixel_height))
+        self.project.objects = pio.objects_from_list(pg.get("objects"))
+        self._load_layers_from_project()
+        self._polygon_counter = self._max_polygon_number()
+        self._set_tools_enabled(True)
+        self.act_mode_pan.setChecked(True)
+        self._mode_pan()
+        self._refresh_object_list()
+        self._refresh_scale_readout()
+        self._update_bbox()
+        self._update_tile_grid()
+        self._refresh_pages_panel()
+        self.statusBar().showMessage(
+            "Page %d of %d." % (index + 1, len(self.project.pages)), 4000)
+
+    def _append_pages(self, paths):
+        added = [p for p in paths if p]
+        if not added:
+            return
+        first_job_page = not self.project.pages and self._loaded is None
+        self.project.pages.extend(
+            {"source_path": p, "objects": []} for p in added)
+        self._refresh_pages_panel()
+        self.statusBar().showMessage(
+            "Added %d page(s); double-click a page to open it."
+            % len(added), 5000)
+        if first_job_page:
+            self.activate_page(0)
+
+    def add_page_images(self):
+        from PySide6.QtWidgets import QFileDialog
+        from .project_controller import IMAGE_FILTER
+        paths, _ = QFileDialog.getOpenFileNames(
+            self, "Add Images", "", IMAGE_FILTER)
+        self._append_pages(paths)
+
+    def add_page_folder(self):
+        import os
+        from PySide6.QtWidgets import QFileDialog
+        from ..core.project_io import natural_key
+        d = QFileDialog.getExistingDirectory(self, "Add Folder of Images")
+        if not d:
+            return
+        exts = (".png", ".jpg", ".jpeg", ".bmp", ".tif", ".tiff", ".webp")
+        names = sorted((n for n in os.listdir(d)
+                        if n.lower().endswith(exts)), key=natural_key)
+        self._append_pages([os.path.join(d, n) for n in names])
+
+    def remove_page(self, index):
+        if not (0 <= index < len(self.project.pages)) \
+                or len(self.project.pages) <= 1:
+            self.statusBar().showMessage(
+                "A job keeps at least one page.", 4000)
+            return
+        cur = self.project.current_page
+        del self.project.pages[index]
+        if index < cur or cur >= len(self.project.pages):
+            self.project.current_page = max(0, cur - 1)
+        if index == cur:
+            self.project.current_page = min(index,
+                                            len(self.project.pages) - 1)
+            self._refresh_pages_panel()
+            self.activate_page(self.project.current_page)
+        else:
+            self._refresh_pages_panel()
 
     def paste_image(self):
         """Edit -> Paste Image (Ctrl+V): start from a screenshot or any

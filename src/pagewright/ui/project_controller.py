@@ -88,6 +88,10 @@ class ProjectController:
         w.set_unit(w.project.calibration.display_unit)
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
         w._refresh_scale_readout()
+        # a freshly loaded image starts a one-page job (M1)
+        w.project.pages = [{"source_path": loaded.path, "objects": []}]
+        w.project.current_page = 0
+        w._refresh_pages_panel()
         if start_dewarp:
             w.switch_tool("flatten")
 
@@ -131,6 +135,7 @@ class ProjectController:
         w._refresh_object_list()
         w._refresh_scale_readout()
         w._update_bbox()
+        w._refresh_pages_panel()
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
 
         if saved_w and (saved_w != loaded.pixel_width
@@ -145,7 +150,7 @@ class ProjectController:
         w = self._w
         if w._loaded is None:
             return
-        w._sync_model()
+        w._store_current_page()   # pages[] carries every page's traces
         w.project.tiling = w.tiling_panel.to_dict()
         base = os.path.splitext(
             os.path.basename(w._loaded.path or "project"))[0]
