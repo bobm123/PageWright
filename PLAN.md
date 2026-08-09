@@ -351,6 +351,13 @@ studio" and the "Session Handoff" section below it) and
   working image; offer to save it permanently (and/or keep the original).
   Add the curved-page spline mode (the mode selector reserves a slot) using
   `core.dewarp.PageModel` / `dewarp_page` / `refine_with_text`.
+- **Workflow hub (DONE).** Trace / Flatten / OCR are co-equal tools in a
+  toolbar switcher over one shared working image, with Print Tiles one
+  click away; loading no longer force-enters Flatten. Paste Image
+  (Ctrl+V) starts a job from the clipboard. Context menus trimmed per
+  window. OCR is the P4 basic version (pytesseract; whole image or the
+  Select Area; copy/save text) - follow-ons: language choice, positioned
+  text regions, searchable-PDF output (P5).
 - **Two-page (book spread) dewarp mode.** DONE: Book - Two Page mode
   uses a full SpreadModel (BookScan port, bitwise-verified): 6 anchors
   incl. spine_top/spine_bot, 4 corner-to-spine edges with draggable

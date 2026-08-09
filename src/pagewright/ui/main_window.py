@@ -29,6 +29,7 @@ from .canvas import Canvas
 from .dewarp_stage import (DewarpStageWidget, display_downscale,
                            ndarray_to_qpixmap)
 from .dialogs import CalibrationDialog, PreferencesDialog
+from .ocr_stage import OcrStageWidget
 from .editing_controller import EditingController
 from .export_controller import ExportController
 from .objects import ObjectLayer
@@ -59,10 +60,13 @@ class MainWindow(QMainWindow):
         self.dewarp_stage = DewarpStageWidget(self)
         self.dewarp_stage.applied.connect(self._on_dewarp_applied)
         self.dewarp_stage.cancelled.connect(self._leave_dewarp_stage)
-        # central stack: index 0 = trace canvas, index 1 = dewarp stage
+        self.ocr_stage = OcrStageWidget(self)
+        self.ocr_stage.cancelled.connect(lambda: self.switch_tool("trace"))
+        # central stack of first-class tools: trace / flatten / OCR
         self._stack = QStackedWidget(self)
         self._stack.addWidget(self.canvas)
         self._stack.addWidget(self.dewarp_stage)
+        self._stack.addWidget(self.ocr_stage)
         self.setCentralWidget(self._stack)
         self.canvas.calibrationPicked.connect(self._on_calibration_picked)
         self.canvas.cursorMoved.connect(self._on_cursor_moved)
@@ -202,9 +206,85 @@ class MainWindow(QMainWindow):
             "Rotated 90 deg %s - traces and area follow the image; "
             "seed strokes cleared." % ("CW" if clockwise else "CCW"), 5000)
 
+    def _current_tool_name(self):
+        cur = self._stack.currentWidget()
+        if cur is self.dewarp_stage:
+            return "flatten"
+        if cur is self.ocr_stage:
+            return "ocr"
+        return "trace"
+
+    def switch_tool(self, name):
+        """Hub switching between the first-class tools: 'trace',
+        'flatten', 'ocr'. All operate on the shared working image; switch
+        at will."""
+        if name in ("flatten", "ocr") and self._loaded is None:
+            self.statusBar().showMessage(
+                "Load or paste an image first.", 4000)
+            self._sync_tool_checks(self._current_tool_name())
+            return
+        if name == "trace":
+            self._leave_dewarp_stage()
+        elif name == "flatten":
+            self.dewarp_page()
+        elif name == "ocr":
+            self.enter_ocr()
+        self._sync_tool_checks(name)
+
+    def _sync_tool_checks(self, name):
+        for act, key in ((self.act_tool_trace, "trace"),
+                         (self.act_tool_flatten, "flatten"),
+                         (self.act_tool_ocr, "ocr")):
+            act.blockSignals(True)
+            act.setChecked(key == name)
+            act.blockSignals(False)
+
+    def enter_ocr(self):
+        """OCR tool: recognize text on the working image (whole image
+        or the Select Area rectangle)."""
+        if self._loaded is None:
+            return
+        if self._stack.currentWidget() is self.ocr_stage:
+            return
+        region = self.exports._tile_region()   # Select Area, if set
+        self.ocr_stage.set_source_image(self._loaded.data, region)
+        self._stack.setCurrentWidget(self.ocr_stage)
+        self._set_tools_enabled(False)
+        self._dock_was_visible = self._dock.isVisible()
+        self._dock.hide()
+
+    def paste_image(self):
+        """Edit -> Paste Image (Ctrl+V): start from a screenshot or any
+        image on the clipboard."""
+        from PySide6.QtWidgets import QApplication
+        qimg = QApplication.clipboard().image()
+        if qimg.isNull():
+            self.statusBar().showMessage(
+                "The clipboard has no image to paste.", 4000)
+            return
+        import os
+        import tempfile
+        import numpy as np
+        import cv2
+        qimg = qimg.convertToFormat(qimg.Format.Format_RGB888)
+        h, w = qimg.height(), qimg.width()
+        buf = np.frombuffer(qimg.constBits(), np.uint8)
+        arr = buf.reshape(h, qimg.bytesPerLine())[:, :w * 3]
+        bgr = arr.reshape(h, w, 3)[:, :, ::-1].copy()
+        tmp_dir = tempfile.mkdtemp(prefix="pagewright_paste_")
+        path = os.path.join(tmp_dir, "clipboard.png")
+        if not cv2.imwrite(path, bgr):
+            self.statusBar().showMessage("Could not save the pasted "
+                                         "image.", 4000)
+            return
+        self.projects.load_photo(path)
+        self.statusBar().showMessage(
+            "Pasted %d x %d image from the clipboard (temporary file - "
+            "use Save/Export to keep results)." % (w, h), 6000)
+
     def dewarp_page(self):
-        """Tools -> Flatten Page: switch the central view to the dewarp
-        stage (left: photo + outline, right: live flattened preview)."""
+        """Flatten tool: switch the central view to the dewarp stage
+        (left: photo + outline, right: live flattened preview)."""
         if self._loaded is None:
             return
         if self._stack.currentWidget() is self.dewarp_stage:
@@ -217,16 +297,20 @@ class MainWindow(QMainWindow):
         self._set_tools_enabled(False)
         self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
+        self._sync_tool_checks("flatten")
         self.statusBar().showMessage(
             "Flatten Page: place the outline on the left; the right pane "
             "previews the result. Use Flattened Image to adopt it.", 8000)
 
     def _leave_dewarp_stage(self):
-        if self._stack.currentWidget() is self.dewarp_stage:
+        if self._stack.currentWidget() in (self.dewarp_stage,
+                                           self.ocr_stage):
             if self._dock_was_visible:
                 self._dock.show()
         self._stack.setCurrentWidget(self.canvas)
         self._set_tools_enabled(self._loaded is not None)
+        if hasattr(self, "act_tool_trace"):
+            self._sync_tool_checks("trace")
 
     def _on_dewarp_applied(self):
         """Adopt the flattened image as the new working image.

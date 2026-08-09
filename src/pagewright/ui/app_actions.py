@@ -21,6 +21,25 @@ def build_actions(w):
     w.act_save_project.setShortcut(QKeySequence.Save)        # Ctrl+S
     w.act_save_project.triggered.connect(w.save_project_file)
 
+    w.act_paste = QAction("&Paste Image", w)
+    w.act_paste.setShortcut(QKeySequence.Paste)
+    w.act_paste.setToolTip("Start from a screenshot or image on the "
+                           "clipboard")
+    w.act_paste.triggered.connect(w.paste_image)
+
+    # first-class tool switcher (trace / flatten / OCR share the image)
+    w.tool_group = QActionGroup(w)
+    w.tool_group.setExclusive(True)
+    w.act_tool_trace = QAction("&Trace", w, checkable=True)
+    w.act_tool_trace.setChecked(True)
+    w.act_tool_trace.triggered.connect(lambda: w.switch_tool("trace"))
+    w.act_tool_flatten = QAction("F&latten", w, checkable=True)
+    w.act_tool_flatten.triggered.connect(lambda: w.switch_tool("flatten"))
+    w.act_tool_ocr = QAction("&OCR", w, checkable=True)
+    w.act_tool_ocr.triggered.connect(lambda: w.switch_tool("ocr"))
+    for a in (w.act_tool_trace, w.act_tool_flatten, w.act_tool_ocr):
+        w.tool_group.addAction(a)
+
     w.act_open = QAction("&Load Image…", w)
     w.act_open.setShortcut("Ctrl+Shift+O")
     w.act_open.triggered.connect(w.open_photo)
@@ -145,6 +164,7 @@ def build_menus(w):
     m_file.addAction(w.act_save_project)
     m_file.addSeparator()
     m_file.addAction(w.act_open)
+    m_file.addAction(w.act_paste)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)
     m_file.addAction(w.act_print_preview)
@@ -174,6 +194,10 @@ def build_menus(w):
         m_units.addAction(w.act_units[unit])
 
     m_tools = mb.addMenu("&Tools")
+    m_tools.addAction(w.act_tool_trace)
+    m_tools.addAction(w.act_tool_flatten)
+    m_tools.addAction(w.act_tool_ocr)
+    m_tools.addSeparator()
     m_tools.addAction(w.act_dewarp)
     m_tools.addAction(w.act_calibrate)
     m_tools.addSeparator()
@@ -195,6 +219,12 @@ def build_toolbar(w):
     and the right-click menu."""
     tb = w.addToolBar("Main")
     tb.setMovable(False)
+    # the hub: co-equal tools over one shared working image
+    tb.addAction(w.act_tool_trace)
+    tb.addAction(w.act_tool_flatten)
+    tb.addAction(w.act_tool_ocr)
+    tb.addAction(w.act_print_tiles)
+    tb.addSeparator()
     tb.addAction(w.act_mode_pan)
     tb.addAction(w.act_mode_roi)
     tb.addSeparator()
@@ -208,33 +238,36 @@ def build_toolbar(w):
 
 
 def show_canvas_menu(w, global_pos):
-    """The right-click quick-action menu -- the workflow hub."""
+    """Right-click menu on the trace canvas: the tools that matter for
+    tracing, mode-aware, plus one-click jumps to the other stages."""
     menu = QMenu(w)
-    menu.addAction(w.act_mode_fg)
-    menu.addAction(w.act_mode_bg)
     menu.addAction(w.act_run_seg)       # Trace Poly
     menu.addAction(w.act_new_object)    # New Polygon
     menu.addSeparator()
-    menu.addAction(w.act_mode_edit)
     menu.addAction(w.act_mode_pan)
     menu.addAction(w.act_mode_roi)
+    menu.addAction(w.act_mode_fg)
+    menu.addAction(w.act_mode_bg)
+    menu.addAction(w.act_mode_edit)
     if w.canvas.roi_rect() is not None:
         menu.addAction(w.act_clear_roi)
+    # brush size only matters while seeding
+    from .canvas import MODE_SEED_BG, MODE_SEED_FG
+    if w.canvas._mode in (MODE_SEED_FG, MODE_SEED_BG):
+        brush_menu = menu.addMenu("Brush Size")
+        cur = int(round(w.canvas.brush_radius()))
+        for sz in _BRUSH_PRESETS:
+            a = brush_menu.addAction("%d px" % sz)
+            a.setCheckable(True)
+            a.setChecked(sz == cur)
+            a.triggered.connect(
+                lambda _=False, s=sz: w.canvas.set_brush_radius(s))
+        menu.addAction(w.act_clear_seeds)
     menu.addSeparator()
-    brush_menu = menu.addMenu("Brush Size")
-    cur = int(round(w.canvas.brush_radius()))
-    for sz in _BRUSH_PRESETS:
-        a = brush_menu.addAction("%d px" % sz)
-        a.setCheckable(True)
-        a.setChecked(sz == cur)
-        a.triggered.connect(
-            lambda _=False, s=sz: w.canvas.set_brush_radius(s))
-    menu.addAction(w.act_clear_seeds)
-    menu.addSeparator()
-    menu.addAction(w.act_undo)
-    menu.addAction(w.act_redo)
-    menu.addSeparator()
-    menu.addAction(w.act_zoom_in)
-    menu.addAction(w.act_zoom_out)
+    menu.addAction(w.act_calibrate)
     menu.addAction(w.act_fit)
+    menu.addSeparator()
+    menu.addAction(w.act_tool_flatten)   # jump to the other tools
+    menu.addAction(w.act_tool_ocr)
+    menu.addAction(w.act_print_tiles)
     menu.exec(global_pos)

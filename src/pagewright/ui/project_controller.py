@@ -57,12 +57,13 @@ class ProjectController:
 
     # ----- workers ---------------------------------------------------------
 
-    def load_photo(self, path, start_dewarp=True):
+    def load_photo(self, path, start_dewarp=False):
         """Load a photo as the working image.
 
-        start_dewarp: freshly imported photos go straight into the
-        dewarp stage (flatten first, then trace). Pass False when the
-        photo IS a dewarp result being adopted."""
+        The app lands in the Trace tool (calibrate/tile/print home) and
+        the user switches tools at will - workflows vary too much for a
+        forced flatten-first entry. start_dewarp=True still jumps to the
+        Flatten tool for callers that want it."""
         w = self._w
         loaded, pixmap = self._read_image(path, "Load Image")
         if loaded is None:
@@ -88,7 +89,7 @@ class ProjectController:
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
         w._refresh_scale_readout()
         if start_dewarp:
-            w.dewarp_page()   # dewarp-first workflow: flatten, then trace
+            w.switch_tool("flatten")
 
     def load_project(self, path):
         w = self._w

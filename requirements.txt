@@ -1,3 +1,4 @@
 opencv-python>=4.8
 numpy>=1.24
 PySide6>=6.6
+pytesseract>=0.3   # OCR stage bridge; ALSO install the Tesseract engine (winget install UB-Mannheim.TesseractOCR)
