@@ -371,3 +371,70 @@ studio" and the "Session Handoff" section below it) and
   4 edges) - the studio plan (section 13, P1/P2) is to unify that with the
   ported single-page `core.dewarp` so PageWright can consume it. Until then
   the V-fold break is the workaround.
+
+
+---
+
+## 15. Multi-page jobs (design sketch, not yet built)
+
+Scenarios to support: a directory of book/magazine scan images; a
+multi-page PDF with only some pages worth processing; a single large
+image (or PDF page) that gets TILED and whose output pages then need
+per-page post-processing (some OCR, some tracing).
+
+### Concept: Job = ordered list of Pages
+
+- A **Page** owns: a source reference (image file / PDF file + page
+  number + render DPI / clipboard capture / DERIVED from another page,
+  e.g. a tile or a flattened result), the working image, and per-page
+  state: outline model (page or spread), traces, OCR text, calibration
+  (inheritable job-wide since a scan session usually has one scale),
+  and status flags (flattened? traced? OCR'd? printed?).
+- The current single-image app is the degenerate one-page job; all
+  existing tools keep operating on the CURRENT page unchanged.
+
+### Sources
+
+- **Folder of images**: natural-sort file names -> pages.
+- **Multi-page PDF**: rasterize via PyMuPDF (fitz) at a chosen DPI;
+  a page-picker dialog selects which pages become job pages (covers
+  idea #005). PDF vector content is rasterized - this stays an
+  image-processing app.
+- **Derived pages**: any tool output can be RE-ENQUEUED as a new page
+  (the flattened image, each page of a dewarped spread, each print
+  tile). That is the 'multiple pages out, post-process some' loop:
+  tile a large sheet -> outputs become pages -> OCR page 3, trace
+  page 5.
+
+### UI
+
+- A **Pages panel** (dock, thumbnail filmstrip): current page
+  highlighted, checkboxes for batch selection, reorder by drag,
+  add/remove. Double-click switches the working image; every stage
+  (Trace/Flatten/OCR/Print) follows the current page.
+- **Batch actions** on the checked pages: apply the current flatten
+  outline (seeding each page's outline from the previous page's, the
+  book-spline reuse idea from section 13/P5), batch flatten, batch
+  OCR, batch export/tiles.
+
+### Persistence
+
+- Extend .tiproj.json (section 13 decision #2 anticipated this):
+  top-level pages[] with per-page source ref + state; the current
+  single-page schema loads as a one-page job. Jobs are resumable at
+  any stage.
+
+### Outputs
+
+- Per-page exports with numbered naming (<job>-p03-flat.png, ...).
+- Combined **searchable PDF** (page images + OCR text layer) as the
+  book-scan endgame = roadmap P5.
+
+### Phasing (each useful alone)
+
+- **M1** Pages panel + folder-of-images loading + per-page state in the
+  project file (single-page tools untouched).
+- **M2** PDF import (PyMuPDF) with page picker + render-DPI choice.
+- **M3** Derived pages (re-enqueue flatten/spread/tile outputs) +
+  batch apply with outline propagation.
+- **M4** Searchable-PDF output (P5 complete).
