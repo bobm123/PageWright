@@ -358,6 +358,16 @@ studio" and the "Session Handoff" section below it) and
   window. OCR is the P4 basic version (pytesseract; whole image or the
   Select Area; copy/save text) - follow-ons: language choice, positioned
   text regions, searchable-PDF output (P5).
+- **Scale as a first-class tool (PLANNED).** Scaling may be the ONLY
+  thing a document needs: load -> calibrate -> set true size -> print or
+  save. The pieces exist but are scattered (calibrate in Trace/Flatten,
+  scale % in the tiling panel, mm sizes in the Flatten spinners). Add a
+  SCALE tool to the hub switcher: the image with the two-point calibrate
+  gesture front and center, an editable real-size readout (unit-aware
+  Width/Height fields driving one mm/px scalar, so aspect is inherently
+  true), an output DPI choice, and direct Print Tiles... / Save Scaled
+  Image... buttons. Internally it is a thin stage over the existing
+  calibration + tiling/print machinery - no new math.
 - **Two-page (book spread) dewarp mode.** DONE: Book - Two Page mode
   uses a full SpreadModel (BookScan port, bitwise-verified): 6 anchors
   incl. spine_top/spine_bot, 4 corner-to-spine edges with draggable
