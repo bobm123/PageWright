@@ -46,6 +46,10 @@ def build_actions(w):
               w.act_tool_ocr):
         w.tool_group.addAction(a)
 
+    w.act_import_pdf = QAction("Import P&DF…", w)
+    w.act_import_pdf.setToolTip("Rasterize selected PDF pages as job pages")
+    w.act_import_pdf.triggered.connect(w.import_pdf)
+
     w.act_open = QAction("&Load Image…", w)
     w.act_open.setShortcut("Ctrl+Shift+O")
     w.act_open.triggered.connect(w.open_photo)
@@ -170,6 +174,7 @@ def build_menus(w):
     m_file.addAction(w.act_save_project)
     m_file.addSeparator()
     m_file.addAction(w.act_open)
+    m_file.addAction(w.act_import_pdf)
     m_file.addAction(w.act_paste)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)

@@ -40,6 +40,8 @@ class ProjectController:
             return
         if path.lower().endswith(".json"):
             self.load_project(path)
+        elif path.lower().endswith(".pdf"):
+            self._w.import_pdf(path)
         else:
             self.load_photo(path)
 

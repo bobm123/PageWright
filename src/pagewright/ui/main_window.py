@@ -404,6 +404,63 @@ class MainWindow(QMainWindow):
         else:
             self._refresh_pages_panel()
 
+    def import_pdf(self, path=None):
+        """File -> Import PDF: rasterize chosen pages (M2). Rendered
+        pages have a KNOWN physical size, so the job calibration is set
+        from the render DPI when not already calibrated."""
+        import os
+        import tempfile
+        from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+        from ..core import pdf_import
+        from .pdf_import_dialog import PdfImportDialog
+        err = pdf_import.availability_error()
+        if err:
+            QMessageBox.warning(self, "Import PDF", err)
+            return
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Import PDF", "", "PDF (*.pdf)")
+            if not path:
+                return
+        try:
+            sizes = pdf_import.page_sizes_mm(path)
+        except Exception as exc:
+            QMessageBox.critical(self, "Import PDF",
+                                 "Could not read the PDF: %s" % (exc,))
+            return
+        dlg = PdfImportDialog(sizes, self)
+        if dlg.exec() != dlg.DialogCode.Accepted:
+            return
+        indices, dpi = dlg.values()
+        if not indices:
+            return
+        import cv2
+        stem = os.path.splitext(os.path.basename(path))[0]
+        tmp_dir = tempfile.mkdtemp(prefix="pagewright_pdf_")
+        out = []
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            for i in indices:
+                bgr = pdf_import.render_page(path, i, dpi)
+                fp = os.path.join(tmp_dir, "%s-p%03d.png" % (stem, i + 1))
+                if cv2.imwrite(fp, bgr):
+                    out.append(fp)
+        except Exception as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Import PDF",
+                                 "Rendering failed: %s" % (exc,))
+            return
+        QApplication.restoreOverrideCursor()
+        self._append_pages(out)
+        if not self.project.calibration.is_calibrated:
+            self.project.calibration.mm_per_pixel = 25.4 / float(dpi)
+            self._refresh_scale_readout()
+            self._update_tile_grid()
+        self.statusBar().showMessage(
+            "Imported %d PDF page(s) at %d DPI - true size known, so the "
+            "scale is calibrated. Temporary files; use Save/Export to "
+            "keep results." % (len(out), dpi), 8000)
+
     def paste_image(self):
         """Edit -> Paste Image (Ctrl+V): start from a screenshot or any
         image on the clipboard."""
