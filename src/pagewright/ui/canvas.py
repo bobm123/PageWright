@@ -75,6 +75,7 @@ class Canvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor(40, 40, 40)))
 
         self._photo_item = None
+        self._image_rect = QRectF()
         self._scale = 1.0
         self._mode = MODE_PAN
 
@@ -138,9 +139,15 @@ class Canvas(QGraphicsView):
             full_w, full_h = image_wh
             if pixmap.width() and pixmap.width() != full_w:
                 self._photo_item.setScale(full_w / pixmap.width())
-            self._scene.setSceneRect(0, 0, full_w, full_h)
+            self._image_rect = QRectF(0, 0, full_w, full_h)
         else:
-            self._scene.setSceneRect(self._photo_item.boundingRect())
+            self._image_rect = QRectF(self._photo_item.boundingRect())
+        # Margin around the image (as in the dewarp panes): without it the
+        # scene rect ends at the image edge and centerOn CLAMPS, so a
+        # Select Area near a border could never be centered after its
+        # zoom. Overlays/ROI still clamp to _image_rect below.
+        m = 0.25 * max(self._image_rect.width(), self._image_rect.height())
+        self._scene.setSceneRect(self._image_rect.adjusted(-m, -m, m, m))
         self.fit_to_view()
         self.seedsChanged.emit()
 
@@ -491,7 +498,7 @@ class Canvas(QGraphicsView):
             r.setTop(scene_pt.y())
         if "b" in e:
             r.setBottom(scene_pt.y())
-        r = r.normalized().intersected(self._scene.sceneRect())
+        r = r.normalized().intersected(self._image_rect)
         if r.width() >= 4.0 and r.height() >= 4.0:
             self.set_roi(r)
 
@@ -621,7 +628,7 @@ class Canvas(QGraphicsView):
                 self.clear_roi()
                 self.roiCleared.emit()
             else:
-                rect = rect.intersected(self._scene.sceneRect())
+                rect = rect.intersected(self._image_rect)
                 self.set_roi(rect)
                 self.roiSelected.emit(rect)
             return
