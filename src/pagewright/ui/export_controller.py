@@ -231,6 +231,8 @@ class ExportController:
         from PySide6.QtGui import QPageLayout, QPainter
         from PySide6.QtPrintSupport import QPrinter
 
+        from ..core.tiling import _DIAMOND_MM
+
         if pages is None:
             chosen = list(renderers)
         else:
@@ -252,7 +254,24 @@ class ExportController:
                 sx = dev.width() / max(1e-6, paper_mm.width())
                 sy = dev.height() / max(1e-6, paper_mm.height())
                 target = QRectF(0.0, 0.0, pw_mm * sx, ph_mm * sy)
+                # Qt's SVG renderer (SVG Tiny profile) IGNORES the
+                # clip-path in each tile SVG, so without help the whole
+                # translated master content paints on every page - every
+                # polygon shows again on every tile. Clip at the painter
+                # level to the printable area instead, padded by the
+                # registration-diamond size so the marks straddling the
+                # live edge keep their outer halves. (Exported tile SVGs
+                # don't need this: Inkscape et al honor clip-path.)
+                mg = float(self._w.tiling_panel.to_dict().get(
+                    "margin_mm", 6.0))
+                pad = _DIAMOND_MM
+                clip = QRectF((mg - pad) * sx, (mg - pad) * sy,
+                              (pw_mm - 2.0 * (mg - pad)) * sx,
+                              (ph_mm - 2.0 * (mg - pad)) * sy)
+                painter.save()
+                painter.setClipRect(clip)
                 renderer.render(painter, target)
+                painter.restore()
         finally:
             painter.end()
         return True

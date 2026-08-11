@@ -385,6 +385,12 @@ studio" and the "Session Handoff" section below it) and
 
 ---
 
+- Polygon trace color from the context menu: right-click a polygon
+  (or the active object) and pick its stroke color. The model already
+  stores a per-object Style.stroke, so this is UI only - a color
+  submenu or QColorDialog wired to the active TracedObject, refresh
+  canvas + SVG export picks it up for free. (Robert, 2026-08-11)
+
 ## 15. Multi-page jobs (design sketch, not yet built)
 
 Scenarios to support: a directory of book/magazine scan images; a
