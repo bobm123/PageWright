@@ -10,7 +10,10 @@ sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pagewright.core import pdf_import  # noqa: E402
 
-fitz = pytest.importorskip("fitz")
+try:
+    import pymupdf as fitz
+except ImportError:
+    fitz = pytest.importorskip("fitz")
 
 
 def _make_pdf(pages_mm):

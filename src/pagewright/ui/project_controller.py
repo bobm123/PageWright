@@ -126,6 +126,9 @@ class ProjectController:
         w.canvas.set_photo(pixmap,
                            (loaded.pixel_width, loaded.pixel_height))
         w._load_layers_from_project()
+        # the current page's Select Area comes back with its traces
+        if 0 <= project.current_page < len(project.pages):
+            w._restore_page_roi(project.pages[project.current_page])
         w._polygon_counter = w._max_polygon_number()
 
         w._set_tools_enabled(True)

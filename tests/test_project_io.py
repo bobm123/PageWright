@@ -145,3 +145,13 @@ def test_old_project_becomes_one_page_job():
     p2 = pio.project_from_dict(d)
     assert len(p2.pages) == 1 and p2.current_page == 0
     assert p2.pages[0]["source_path"] == p.source_image_path
+
+
+def test_page_roi_round_trips():
+    p = _sample_project()
+    p.pages = [{"source_path": "a.png", "objects": [],
+                "roi": [10.0, 20.0, 300.0, 400.0]},
+               {"source_path": "b.png", "objects": [], "roi": None}]
+    p2 = pio.project_from_dict(pio.project_to_dict(p))
+    assert p2.pages[0]["roi"] == [10.0, 20.0, 300.0, 400.0]
+    assert p2.pages[1]["roi"] is None

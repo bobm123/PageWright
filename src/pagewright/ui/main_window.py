@@ -317,6 +317,16 @@ class MainWindow(QMainWindow):
             pg["source_path"] = self._loaded.path if self._loaded else \
                 pg.get("source_path")
             pg["objects"] = pio.objects_to_list(self.project.objects)
+            r = self.canvas.roi_rect()
+            pg["roi"] = ([r.x(), r.y(), r.width(), r.height()]
+                         if r is not None else None)
+
+    def _restore_page_roi(self, pg):
+        """Re-apply a page's saved Select Area (set_photo cleared it)."""
+        roi = pg.get("roi")
+        if roi:
+            from PySide6.QtCore import QRectF
+            self.canvas.set_roi(QRectF(*roi))
 
     def activate_page(self, index):
         """Switch the working image to page `index`, preserving the
@@ -341,6 +351,7 @@ class MainWindow(QMainWindow):
                               (loaded.pixel_width, loaded.pixel_height))
         self.project.objects = pio.objects_from_list(pg.get("objects"))
         self._load_layers_from_project()
+        self._restore_page_roi(pg)
         self._polygon_counter = self._max_polygon_number()
         self._set_tools_enabled(True)
         self.act_mode_pan.setChecked(True)
