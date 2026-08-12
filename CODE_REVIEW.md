@@ -182,3 +182,19 @@ backwards import edge), then introduce the PageEntry dataclass while
 the pages[] schema is three keys old. Both are prerequisites that
 make M3 cheaper, neither risks the numeric core, and the 117-test
 suite pins everything that matters during the move.
+
+## Addendum: delta review of 8fe99f4 (eye toggle), 2026-08-11
+
+Scope: canvas.py (+10), pages_panel.py (+41), main_window.py (+2).
+No new issues. Specifically checked: the only _scene.clear() is in
+set_photo, which reassigns _photo_item before control returns, and
+set_photo_visible guards None - no stale-item window; button state
+and canvas._photo_visible share one signal path (no desync);
+signal-to-signal connect is valid PySide6; fit_to_view works on an
+invisible item (bounding rect remains). The change follows house
+style: view-only widget emitting a signal, window wires it, canvas
+owns the state. Two non-defects to know about: the eye icon color is
+sampled from the palette once at construction (a live theme switch
+will not recolor it), and hiding the image is display-only by
+design - tile print/export with "Include image" still embeds the
+photo (the checkbox, not the eye, controls output).
