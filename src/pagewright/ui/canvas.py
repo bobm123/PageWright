@@ -75,6 +75,7 @@ class Canvas(QGraphicsView):
         self.setBackgroundBrush(QBrush(QColor(40, 40, 40)))
 
         self._photo_item = None
+        self._photo_visible = True   # eye toggle in the Pages panel
         self._image_rect = QRectF()
         self._scale = 1.0
         self._mode = MODE_PAN
@@ -135,6 +136,7 @@ class Canvas(QGraphicsView):
         self._roi_origin = None
         self._photo_item = self._scene.addPixmap(pixmap)
         self._photo_item.setZValue(0)
+        self._photo_item.setVisible(self._photo_visible)
         if image_wh is not None:
             full_w, full_h = image_wh
             if pixmap.width() and pixmap.width() != full_w:
@@ -417,6 +419,14 @@ class Canvas(QGraphicsView):
     def roi_rect(self):
         """The current trace area as a QRectF in pixel coords, or None."""
         return self._roi_rect
+
+    def set_photo_visible(self, on):
+        """Show/hide the photo (traces and overlays stay visible) -
+        handy for judging polygon shapes without the image behind them.
+        Sticky across page switches and reloads."""
+        self._photo_visible = bool(on)
+        if self._photo_item is not None:
+            self._photo_item.setVisible(self._photo_visible)
 
     def set_roi(self, rect):
         """Show `rect` (QRectF, pixel coords) as the trace area."""

@@ -114,6 +114,8 @@ class MainWindow(QMainWindow):
         self.pages_panel.addImagesRequested.connect(self.add_page_images)
         self.pages_panel.addFolderRequested.connect(self.add_page_folder)
         self.pages_panel.removeRequested.connect(self.remove_page)
+        self.pages_panel.imageVisibilityToggled.connect(
+            self.canvas.set_photo_visible)
         layout.addWidget(self.pages_panel)
 
         self.objects_panel = ObjectsPanel(self.project.margin_mm, panel)
