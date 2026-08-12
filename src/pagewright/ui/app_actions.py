@@ -46,10 +46,6 @@ def build_actions(w):
               w.act_tool_ocr):
         w.tool_group.addAction(a)
 
-    w.act_import_pdf = QAction("Import P&DF…", w)
-    w.act_import_pdf.setToolTip("Rasterize selected PDF pages as job pages")
-    w.act_import_pdf.triggered.connect(w.import_pdf)
-
     w.act_open = QAction("&Load Image…", w)
     w.act_open.setShortcut("Ctrl+Shift+O")
     w.act_open.triggered.connect(w.open_photo)
@@ -59,14 +55,13 @@ def build_actions(w):
     w.act_export.triggered.connect(w.export_svg)
 
     w.act_print_tiles = QAction("Print &Tiles…", w)
-    w.act_print_tiles.setToolTip("Send the tile pages straight to a printer")
+    w.act_print_tiles.setToolTip(
+        "Preview the tile pages, then print or save as PDF")
     w.act_print_tiles.triggered.connect(w.print_tiles)
 
-    w.act_print_preview = QAction("Print Pre&view…", w)
-    w.act_print_preview.setToolTip("Preview the tile pages before printing")
-    w.act_print_preview.triggered.connect(w.print_preview_tiles)
-
-    w.act_export_tiles = QAction("Export &Print Tiles…", w)
+    w.act_export_tiles = QAction("&Export Tiles…", w)
+    w.act_export_tiles.setToolTip(
+        "Preview the tile pages, then write them as SVG files")
     w.act_export_tiles.triggered.connect(w.export_tiles)
 
     w.act_preferences = QAction("&Preferences…", w)
@@ -174,11 +169,9 @@ def build_menus(w):
     m_file.addAction(w.act_save_project)
     m_file.addSeparator()
     m_file.addAction(w.act_open)
-    m_file.addAction(w.act_import_pdf)
     m_file.addAction(w.act_paste)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)
-    m_file.addAction(w.act_print_preview)
     m_file.addAction(w.act_print_tiles)
     m_file.addSeparator()
     m_file.addAction(w.act_preferences)

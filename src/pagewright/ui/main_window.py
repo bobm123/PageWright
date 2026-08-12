@@ -153,7 +153,7 @@ class MainWindow(QMainWindow):
                   self.act_save_project, self.act_new_object,
                   self.act_mode_roi, self.act_clear_roi,
                   self.act_dewarp, self.act_print_tiles,
-                  self.act_print_preview, self.act_rotate_cw,
+                  self.act_rotate_cw,
                   self.act_rotate_ccw):
             a.setEnabled(enabled)
 
@@ -287,7 +287,6 @@ class MainWindow(QMainWindow):
         self._set_tools_enabled(False)
         # printing/preview stay available - they are the point here
         self.act_print_tiles.setEnabled(True)
-        self.act_print_preview.setEnabled(True)
         self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
 

@@ -19,7 +19,8 @@ from ..model import Project
 from .dewarp_stage import display_downscale, ndarray_to_qpixmap
 
 IMAGE_FILTER = (
-    "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp);;All files (*)")
+    "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.pdf);;"
+    "All files (*)")
 PROJECT_FILTER = "PageWright project (*.tiproj.json *.json);;All files (*)"
 
 
@@ -67,6 +68,10 @@ class ProjectController:
         forced flatten-first entry. start_dewarp=True still jumps to the
         Flatten tool for callers that want it."""
         w = self._w
+        if path.lower().endswith(".pdf"):
+            # Load Image accepts PDFs too: hand off to the page picker
+            w.import_pdf(path)
+            return
         loaded, pixmap = self._read_image(path, "Load Image")
         if loaded is None:
             return

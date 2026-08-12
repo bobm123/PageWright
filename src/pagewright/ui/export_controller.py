@@ -155,17 +155,16 @@ class ExportController:
             return None
 
     def export_tiles(self):
-        w = self._w
-        tiles = None
-        out_dir = None
-        if w._loaded is None:
-            return
+        """File > Export Tiles: the same preview dialog as Print Tiles,
+        with the Print button swapped for Export (writes the tile SVGs
+        to a chosen folder)."""
+        self._open_tile_preview("Export Tiles", export=True)
+
+    def _write_tiles(self, tiles, parent):
+        """Write (name, svg) pairs to a user-chosen folder."""
         out_dir = QFileDialog.getExistingDirectory(
-            w, "Choose a folder for the tile SVGs", os.getcwd())
+            parent, "Choose a folder for the tile SVGs", os.getcwd())
         if not out_dir:
-            return
-        tiles = self._build_tiles("Export Print Tiles")
-        if tiles is None:
             return
         try:
             for name, svg in tiles:
@@ -173,12 +172,12 @@ class ExportController:
                           encoding="utf-8") as fh:
                     fh.write(svg)
         except OSError as exc:
-            QMessageBox.critical(w, "Export Print Tiles", str(exc))
+            QMessageBox.critical(parent, "Export Tiles", str(exc))
             return
         QMessageBox.information(
-            w, "Export Print Tiles",
+            parent, "Export Tiles",
             "Wrote %d tile(s) to:\n%s" % (len(tiles), out_dir))
-        w.statusBar().showMessage(
+        self._w.statusBar().showMessage(
             "Wrote %d tile(s) to %s" % (len(tiles), out_dir), 6000)
 
     def _tile_page_mm(self):
@@ -304,14 +303,15 @@ class ExportController:
         """Same dialog as Print Tiles - one preview to learn."""
         self._open_tile_preview("Print Preview")
 
-    def _open_tile_preview(self, title):
+    def _open_tile_preview(self, title, export=False):
         w = self._w
         tiles = self._build_tiles(title)
         if not tiles:
             return
         printer = self._make_printer()
         renderers = self._make_renderers(tiles)
-        dlg = _TilePreviewDialog(self, printer, renderers, w)
+        dlg = _TilePreviewDialog(self, printer, renderers, w,
+                                 tiles=tiles, export=export)
         dlg.setWindowTitle("%s - %d page(s)" % (title, len(renderers)))
         dlg.exec()
         if dlg.printed:
@@ -330,7 +330,8 @@ class _TilePreviewDialog(QDialog):
     Print... opens the printer dialog with All / Current page / Custom
     range, then prints through the true-mm paint path."""
 
-    def __init__(self, controller, printer, renderers, parent=None):
+    def __init__(self, controller, printer, renderers, parent=None,
+                 tiles=None, export=False):
         super().__init__(parent)
         from PySide6.QtPrintSupport import QPrintPreviewWidget
         from PySide6.QtWidgets import (QHBoxLayout, QLabel, QPushButton,
@@ -338,6 +339,8 @@ class _TilePreviewDialog(QDialog):
         self._c = controller
         self._printer = printer
         self._renderers = renderers
+        self._tiles = tiles or []
+        self._export = export
         self._n = len(renderers)
         self.printed = False
         self.resize(1000, 720)
@@ -389,9 +392,15 @@ class _TilePreviewDialog(QDialog):
         btn_pdf = QPushButton("Save as PDF…", self)
         btn_pdf.setAutoDefault(False)
         btn_pdf.clicked.connect(self._save_pdf)
-        btn_print = QPushButton("Print…", self)
-        btn_print.setDefault(True)
-        btn_print.clicked.connect(self._do_print)
+        if export:
+            btn_print = QPushButton("Export…", self)
+            btn_print.setDefault(True)
+            btn_print.clicked.connect(
+                lambda: self._c._write_tiles(self._tiles, self))
+        else:
+            btn_print = QPushButton("Print…", self)
+            btn_print.setDefault(True)
+            btn_print.clicked.connect(self._do_print)
         btn_close = QPushButton("Close", self)
         btn_close.setAutoDefault(False)
         btn_close.clicked.connect(self.reject)
