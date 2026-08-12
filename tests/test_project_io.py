@@ -9,7 +9,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pagewright.core import project_io as pio  # noqa: E402
-from pagewright.model import Contour, Project, Style, TracedObject  # noqa: E402
+from pagewright.model import (Contour, PageEntry, Project, Style,  # noqa: E402
+                              TracedObject)
 
 
 def _sample_project():
@@ -124,16 +125,15 @@ def test_natural_key_orders_pages():
 
 def test_pages_round_trip():
     p = _sample_project()
-    p.pages = [{"source_path": "a.png",
-                "objects": pio.objects_to_list(p.objects)},
-               {"source_path": "b.png", "objects": []}]
+    p.pages = [PageEntry("a.png", pio.objects_to_list(p.objects)),
+               PageEntry("b.png")]
     p.current_page = 1
     d = pio.project_to_dict(p)
     p2 = pio.project_from_dict(d)
     assert len(p2.pages) == 2 and p2.current_page == 1
-    assert p2.pages[0]["source_path"] == "a.png"
+    assert p2.pages[0].source_path == "a.png"
     # per-page objects deserialize identically to top-level ones
-    objs = pio.objects_from_list(p2.pages[0]["objects"])
+    objs = pio.objects_from_list(p2.pages[0].objects)
     assert len(objs) == len(p.objects)
 
 
@@ -144,14 +144,13 @@ def test_old_project_becomes_one_page_job():
     d.pop("current_page", None)
     p2 = pio.project_from_dict(d)
     assert len(p2.pages) == 1 and p2.current_page == 0
-    assert p2.pages[0]["source_path"] == p.source_image_path
+    assert p2.pages[0].source_path == p.source_image_path
 
 
 def test_page_roi_round_trips():
     p = _sample_project()
-    p.pages = [{"source_path": "a.png", "objects": [],
-                "roi": [10.0, 20.0, 300.0, 400.0]},
-               {"source_path": "b.png", "objects": [], "roi": None}]
+    p.pages = [PageEntry("a.png", roi=[10.0, 20.0, 300.0, 400.0]),
+               PageEntry("b.png")]
     p2 = pio.project_from_dict(pio.project_to_dict(p))
-    assert p2.pages[0]["roi"] == [10.0, 20.0, 300.0, 400.0]
-    assert p2.pages[1]["roi"] is None
+    assert p2.pages[0].roi == [10.0, 20.0, 300.0, 400.0]
+    assert p2.pages[1].roi is None

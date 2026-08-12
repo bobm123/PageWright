@@ -23,11 +23,11 @@ from PySide6.QtWidgets import (
 
 from ..core import calibration as calib
 from ..core import undo
-from ..model import Project
+from ..model import PageEntry, Project
 from . import app_actions
 from .canvas import Canvas
-from .dewarp_stage import (DewarpStageWidget, display_downscale,
-                           ndarray_to_qpixmap)
+from .dewarp_stage import DewarpStageWidget
+from .display import display_downscale, ndarray_to_qpixmap
 from .dialogs import CalibrationDialog, PreferencesDialog
 from .ocr_stage import OcrStageWidget
 from .scale_stage import ScaleStageWidget
@@ -303,7 +303,7 @@ class MainWindow(QMainWindow):
     # ----- multi-page job (M1) ---------------------------------------------
     def _refresh_pages_panel(self):
         self.pages_panel.set_pages(
-            [pg.get("source_path") or "" for pg in self.project.pages],
+            [pg.source_path or "" for pg in self.project.pages],
             self.project.current_page)
 
     def _store_current_page(self):
@@ -315,16 +315,16 @@ class MainWindow(QMainWindow):
         i = self.project.current_page
         if 0 <= i < len(self.project.pages):
             pg = self.project.pages[i]
-            pg["source_path"] = self._loaded.path if self._loaded else \
-                pg.get("source_path")
-            pg["objects"] = pio.objects_to_list(self.project.objects)
+            if self._loaded:
+                pg.source_path = self._loaded.path
+            pg.objects = pio.objects_to_list(self.project.objects)
             r = self.canvas.roi_rect()
-            pg["roi"] = ([r.x(), r.y(), r.width(), r.height()]
-                         if r is not None else None)
+            pg.roi = ([r.x(), r.y(), r.width(), r.height()]
+                      if r is not None else None)
 
     def _restore_page_roi(self, pg):
         """Re-apply a page's saved Select Area (set_photo cleared it)."""
-        roi = pg.get("roi")
+        roi = pg.roi
         if roi:
             from PySide6.QtCore import QRectF
             self.canvas.set_roi(QRectF(*roi))
@@ -339,7 +339,7 @@ class MainWindow(QMainWindow):
             return
         self._store_current_page()
         pg = self.project.pages[index]
-        path = pg.get("source_path")
+        path = pg.source_path
         loaded, pixmap = self.projects._read_image(path or "", "Open Page")
         if loaded is None:
             return
@@ -350,7 +350,7 @@ class MainWindow(QMainWindow):
         self.undo_stack.clear()
         self.canvas.set_photo(pixmap,
                               (loaded.pixel_width, loaded.pixel_height))
-        self.project.objects = pio.objects_from_list(pg.get("objects"))
+        self.project.objects = pio.objects_from_list(pg.objects)
         self._load_layers_from_project()
         self._restore_page_roi(pg)
         self._polygon_counter = self._max_polygon_number()
@@ -371,7 +371,7 @@ class MainWindow(QMainWindow):
             return
         first_job_page = not self.project.pages and self._loaded is None
         self.project.pages.extend(
-            {"source_path": p, "objects": []} for p in added)
+            PageEntry(source_path=p) for p in added)
         self._refresh_pages_panel()
         self.statusBar().showMessage(
             "Added %d page(s); double-click a page to open it."

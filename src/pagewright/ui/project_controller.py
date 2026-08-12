@@ -15,8 +15,8 @@ from PySide6.QtWidgets import QFileDialog, QMessageBox
 
 from ..core import image_io
 from ..core import project_io
-from ..model import Project
-from .dewarp_stage import display_downscale, ndarray_to_qpixmap
+from ..model import PageEntry, Project
+from .display import display_downscale, ndarray_to_qpixmap
 
 IMAGE_FILTER = (
     "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.pdf);;"
@@ -96,7 +96,7 @@ class ProjectController:
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
         w._refresh_scale_readout()
         # a freshly loaded image starts a one-page job (M1)
-        w.project.pages = [{"source_path": loaded.path, "objects": []}]
+        w.project.pages = [PageEntry(source_path=loaded.path)]
         w.project.current_page = 0
         w._refresh_pages_panel()
         if start_dewarp:

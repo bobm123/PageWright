@@ -12,8 +12,8 @@ stored, and the UI reloads the image from that path when opening a project.
 
 import json
 
-from ..model import (Calibration, Contour, Project, Style, TracedObject,
-                     default_tiling)
+from ..model import (Calibration, Contour, PageEntry, Project, Style,
+                     TracedObject, default_tiling)
 
 FORMAT_VERSION = 1
 
@@ -81,10 +81,11 @@ def project_to_dict(project):
         "tiling": dict(project.tiling),
         "objects": [_object_to_dict(o) for o in project.objects],
         # canonical form: a project is always at least a one-page job
-        "pages": ([dict(pg) for pg in project.pages] if project.pages
-                  else [{"source_path": project.source_image_path,
-                         "objects": [_object_to_dict(o)
-                                     for o in project.objects]}]),
+        "pages": ([pg.to_dict() for pg in project.pages] if project.pages
+                  else [PageEntry(
+                      source_path=project.source_image_path,
+                      objects=[_object_to_dict(o)
+                               for o in project.objects]).to_dict()]),
         "current_page": int(getattr(project, "current_page", 0)),
     }
 
@@ -144,13 +145,14 @@ def project_from_dict(d):
     project.objects = [_object_from_dict(o) for o in d.get("objects", [])]
     pages = d.get("pages")
     if pages:
-        project.pages = [dict(pg) for pg in pages]
+        project.pages = [PageEntry.from_dict(pg) for pg in pages]
         project.current_page = max(
             0, min(int(d.get("current_page", 0)), len(pages) - 1))
     else:
         # older single-page file -> one-page job
-        project.pages = [{"source_path": project.source_image_path,
-                          "objects": d.get("objects", [])}]
+        project.pages = [PageEntry(
+            source_path=project.source_image_path,
+            objects=d.get("objects", []))]
         project.current_page = 0
     return project
 

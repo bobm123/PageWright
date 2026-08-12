@@ -26,6 +26,31 @@ def default_tiling():
     }
 
 
+class PageEntry:
+    """One page of a multi-page job (M1).
+
+    `objects` holds PRE-SERIALIZED traced objects (the project_io
+    schema), because pages other than the current one are never
+    hydrated into TracedObject instances. `roi` is the page's Select
+    Area as [x, y, w, h] in image pixels, or None."""
+
+    def __init__(self, source_path="", objects=None, roi=None):
+        self.source_path = source_path or ""
+        self.objects = list(objects) if objects else []
+        self.roi = list(roi) if roi is not None else None
+
+    def to_dict(self):
+        return {"source_path": self.source_path,
+                "objects": list(self.objects),
+                "roi": (list(self.roi) if self.roi is not None else None)}
+
+    @classmethod
+    def from_dict(cls, d):
+        return cls(source_path=d.get("source_path"),
+                   objects=d.get("objects"),
+                   roi=d.get("roi"))
+
+
 class Contour:
     """An ordered loop of pixel points.
 
@@ -83,9 +108,8 @@ class Project:
         self.pixel_height = 0
         self.dpi = None
         self.calibration = Calibration()
-        # Multi-page job (M1): plain dicts {"source_path", "objects":[...]}
-        # with objects pre-serialized (project_io schema). The classic
-        # single-image fields describe the CURRENT page.
+        # Multi-page job (M1): [PageEntry]. The classic single-image
+        # fields describe the CURRENT page.
         self.pages = []
         self.current_page = 0
         self.margin_mm = 5.0
