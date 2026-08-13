@@ -23,7 +23,10 @@ from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPathItem
 
-_OUTER_COLOR = QColor(40, 170, 255)
+# Outer contours draw in the same red as the printed/exported output
+# (model.Style default #ff0000) so what you edit is what you get; the
+# old blue moved to the calibration line (canvas._calib_pen).
+_OUTER_COLOR = QColor(255, 0, 0)
 _HOLE_COLOR = QColor(255, 170, 40)
 _HANDLE_COLOR = QColor(255, 255, 255)
 _HANDLE_R = 4.0          # on-screen radius (device px, due to IgnoresTransform)

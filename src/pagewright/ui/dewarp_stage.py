@@ -182,7 +182,9 @@ class _AutoFitView(QGraphicsView):
     def _place_first_calib_point(self, scene_p1):
         self._calib_armed = False
         self._calib_p1 = QPointF(scene_p1)
-        pen = QPen(QColor("#ff5555"))
+        # calibration draws BLUE everywhere (trace canvas + these
+        # panes) so it cannot be confused with the red trace polygons
+        pen = QPen(QColor("#28aaff"))
         pen.setCosmetic(True)
         pen.setWidth(2)
         self._calib_line = self._scene.addLine(

@@ -250,7 +250,7 @@ class Canvas(QGraphicsView):
 
     def _add_marker(self, pt):
         r = 4.0
-        pen = QPen(QColor(255, 80, 80))
+        pen = QPen(QColor(40, 170, 255))
         pen.setCosmetic(True)
         pen.setWidth(2)
         item = self._scene.addEllipse(pt.x() - r, pt.y() - r, 2 * r, 2 * r, pen)
@@ -259,7 +259,7 @@ class Canvas(QGraphicsView):
 
     @staticmethod
     def _calib_pen():
-        pen = QPen(QColor(255, 80, 80))
+        pen = QPen(QColor(40, 170, 255))
         pen.setCosmetic(True)
         pen.setWidth(2)
         return pen
