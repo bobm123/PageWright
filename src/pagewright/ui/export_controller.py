@@ -180,6 +180,43 @@ class ExportController:
         self._w.statusBar().showMessage(
             "Wrote %d tile(s) to %s" % (len(tiles), out_dir), 6000)
 
+    def tiles_to_pages(self, parent=None):
+        """Derive job pages from the current tiling (M3 re-enqueue
+        loop): each sheet's image region becomes a new page, so a big
+        tiled sheet can be OCR'd or traced sheet by sheet."""
+        w = self._w
+        if w._loaded is None:
+            return
+        pre = self._resolved_tile_params("Add Tiles as Pages")
+        if pre is None:
+            return
+        p, mpp = pre
+        try:
+            rects = tiling.tile_crop_rects(
+                w.project,
+                (w._loaded.pixel_width, w._loaded.pixel_height),
+                page=p["page"], landscape=p["landscape"],
+                margin_mm=p["margin_mm"], overlap_mm=p["overlap_mm"],
+                mm_per_pixel=mpp, region_px=self._tile_region())
+        except (svg_export.ExportError, ValueError) as exc:
+            QMessageBox.warning(parent or w, "Add Tiles as Pages",
+                                str(exc))
+            return
+        if not rects:
+            QMessageBox.information(
+                parent or w, "Add Tiles as Pages",
+                "No tile shows any of the image.")
+            return
+        data = w._loaded.data
+        imgs = [data[y0:y1, x0:x1].copy()
+                for _n, (x0, y0, x1, y1) in rects]
+        names = [n for n, _r in rects]
+        stem = os.path.splitext(
+            os.path.basename(w._loaded.path or "tile"))[0] + "_tile"
+        entries = w.add_derived_pages(imgs, stem, names=names)
+        w.statusBar().showMessage(
+            "Added %d tile page(s) to the job." % len(entries), 6000)
+
     def _tile_page_mm(self):
         """The tiling page size in mm, orientation applied."""
         p = self._w.tiling_panel.params()
@@ -389,6 +426,12 @@ class _TilePreviewDialog(QDialog):
             b.clicked.connect(slot)
             row.addWidget(b)
         row.addStretch(1)
+        btn_pages = QPushButton("Add as Pages", self)
+        btn_pages.setAutoDefault(False)
+        btn_pages.setToolTip(
+            "Add each sheet's image region to the job as a new page "
+            "(for per-sheet OCR / tracing)")
+        btn_pages.clicked.connect(lambda: self._c.tiles_to_pages(self))
         btn_pdf = QPushButton("Save as PDF…", self)
         btn_pdf.setAutoDefault(False)
         btn_pdf.clicked.connect(self._save_pdf)
@@ -404,6 +447,7 @@ class _TilePreviewDialog(QDialog):
         btn_close = QPushButton("Close", self)
         btn_close.setAutoDefault(False)
         btn_close.clicked.connect(self.reject)
+        row.addWidget(btn_pages)
         row.addWidget(btn_pdf)
         row.addWidget(btn_print)
         row.addWidget(btn_close)

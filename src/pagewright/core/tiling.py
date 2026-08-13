@@ -205,6 +205,60 @@ def _tile_svg(content, plan, r, c, content_w, content_h):
     return "".join(out)
 
 
+def _page_crop_rect(plan, r, c, geom, img_w, img_h, bleed_mm):
+    """Image-px rect (x0, y0, x1, y1) that tile (r, c) shows.
+
+    The master-mm window of the page (with bleed) is mapped to image
+    pixels and clamped to both the image and the content bounding box,
+    so a crop never extends past the traced/selected content into
+    margins or blank pages. Shared by build_tiles (embedded photo
+    slices) and tile_crop_rects (derived pages, M3)."""
+    pw, ph = plan["page_w"], plan["page_h"]
+    margin = (pw - plan["printable_w"]) / 2.0
+    ox, oy, mpp = geom["ox"], geom["oy"], geom["mpp"]
+    x0m = c * plan["step_x"] - margin - bleed_mm
+    y0m = r * plan["step_y"] - margin - bleed_mm
+    x1m = x0m + pw + 2.0 * bleed_mm
+    y1m = y0m + ph + 2.0 * bleed_mm
+    bx0 = max(0.0, geom["bx0"])
+    by0 = max(0.0, geom["by0"])
+    bx1 = min(float(img_w), geom["bx1"])
+    by1 = min(float(img_h), geom["by1"])
+    cx0 = max(0, int(math.floor(max(x0m / mpp + ox, bx0))))
+    cy0 = max(0, int(math.floor(max(y0m / mpp + oy, by0))))
+    cx1 = min(img_w, int(math.ceil(min(x1m / mpp + ox, bx1))))
+    cy1 = min(img_h, int(math.ceil(min(y1m / mpp + oy, by1))))
+    return cx0, cy0, cx1, cy1
+
+
+def tile_crop_rects(project, img_wh, page="Letter", landscape=False,
+                    margin_mm=6.0, overlap_mm=10.0, mm_per_pixel=None,
+                    region_px=None, bleed_mm=0.0):
+    """Per-tile image crop rects for deriving pages from a tiling (M3).
+
+    Returns [("rXcY", (x0, y0, x1, y1)), ...] in image pixels, one per
+    non-empty tile, using EXACTLY the geometry build_tiles uses - so a
+    derived page shows the same image region its printed tile does.
+    """
+    img_w, img_h = img_wh
+    _content, content_w, content_h, geom = svg_export.build_content(
+        project, image_bgr=None, embed_photo=False,
+        downscale_max=None, filled=False, as_layers=False,
+        mm_per_pixel=mm_per_pixel, region_px=region_px,
+        allow_image_bbox=True, return_geometry=True)
+    plan = plan_tiles(content_w, content_h, page, landscape,
+                      margin_mm, overlap_mm)
+    out = []
+    for r in range(plan["nrows"]):
+        for c in range(plan["ncols"]):
+            cx0, cy0, cx1, cy1 = _page_crop_rect(
+                plan, r, c, geom, img_w, img_h, bleed_mm)
+            if cx1 > cx0 and cy1 > cy0:
+                out.append(("r%dc%d" % (r + 1, c + 1),
+                            (cx0, cy0, cx1, cy1)))
+    return out
+
+
 def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
                 margin_mm=6.0, overlap_mm=10.0, embed_photo=True,
                 downscale_max=None, filled=False, base_name="tile",
@@ -248,22 +302,8 @@ def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
         for c in range(plan["ncols"]):
             content = content_vec
             if embed:
-                # master-mm rect this page shows, with bleed
-                x0m = c * plan["step_x"] - margin - bleed_mm
-                y0m = r * plan["step_y"] - margin - bleed_mm
-                x1m = x0m + pw + 2.0 * bleed_mm
-                y1m = y0m + ph + 2.0 * bleed_mm
-                # -> image px, clamped to the image AND to the content
-                # bounding box (the embedded image never extends past the
-                # traced/selected content into margins or blank pages)
-                bx0 = max(0.0, geom["bx0"])
-                by0 = max(0.0, geom["by0"])
-                bx1 = min(float(img_w), geom["bx1"])
-                by1 = min(float(img_h), geom["by1"])
-                cx0 = max(0, int(math.floor(max(x0m / mpp + ox, bx0))))
-                cy0 = max(0, int(math.floor(max(y0m / mpp + oy, by0))))
-                cx1 = min(img_w, int(math.ceil(min(x1m / mpp + ox, bx1))))
-                cy1 = min(img_h, int(math.ceil(min(y1m / mpp + oy, by1))))
+                cx0, cy0, cx1, cy1 = _page_crop_rect(
+                    plan, r, c, geom, img_w, img_h, bleed_mm)
                 if cx1 > cx0 and cy1 > cy0:
                     sub = image_bgr[cy0:cy1, cx0:cx1]
                     tag = svg_export._photo_image_tag(

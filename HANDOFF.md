@@ -63,10 +63,26 @@ quality high.
 ### 3. M2: PDF import via PyMuPDF (`pip install pymupdf`) - page picker
    dialog (thumbnails, check pages, render DPI spin), rasterize to
    temp PNGs, enqueue as pages. Covers ideas.md #005.
-### 4. M3: derived pages + batch apply (outline propagation - seed each
-   page's outline from previous page's model, then refine; see PLAN
-   sec. 13 book-spline reuse note). Re-enqueue outputs (flatten
-   results, spread L/R pages, print tiles) as new pages.
+### 4. M3 DONE (2026-08-11): derived pages + batch apply.
+   - core/batch.py (GUI-free, tested): propagate_model (uniform
+     scale seed), seed_and_refine (text refinement, falls back to
+     the seed on any failure), flatten_with_model ([L, R] for
+     spreads, [page] otherwise).
+   - core/tiling.tile_crop_rects + shared _page_crop_rect: per-tile
+     image rects using EXACTLY build_tiles' geometry.
+   - MainWindow.add_derived_pages inserts temp-PNG pages after their
+     source; Flatten Apply now ADDS a derived page and switches to it
+     (original photo stays in the job) instead of resetting the
+     project; tile preview dialog gained 'Add as Pages'; Pages panel
+     gained 'Flatten Checked' -> MainWindow.batch_flatten with a
+     progress dialog, per-page error collection, and page-to-page
+     outline seeding.
+   - NOT included (follow-ups): per-page outline persistence in the
+     project file (refined models are transient during the batch
+     run); batch flatten for plain quad corners (needs a Book Page
+     outline as seed); Pages panel thumbnails.
+   - UI paths static-checked only - Robert must test-drive batch
+     flatten on a real book scan before trusting it.
 ### 5. M4 / P5: searchable PDF export (page images + OCR text layer;
    PyMuPDF can write the text layer).
 

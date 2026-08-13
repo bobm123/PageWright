@@ -988,6 +988,19 @@ class DewarpStageWidget(QWidget):
     def result_image(self):
         return self._result
 
+    def current_outline(self):
+        """The stage's confirmed outline model (PageModel or
+        SpreadModel), or None (quad mode / nothing set). Used as the
+        SEED for batch flatten (M3 outline propagation)."""
+        return self._source.model() if self._source is not None else None
+
+    def source_wh(self):
+        """(w, h) of the image the outline was fitted on, or None."""
+        if self._src is None:
+            return None
+        h, w = self._src.shape[:2]
+        return (w, h)
+
     def output_dpi(self):
         """The DPI the flattened output was rendered at. Since the output
         size is known in mm (Width/Height or auto/calibrated), this fixes

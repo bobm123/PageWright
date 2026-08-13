@@ -116,6 +116,7 @@ class MainWindow(QMainWindow):
         self.pages_panel.removeRequested.connect(self.remove_page)
         self.pages_panel.imageVisibilityToggled.connect(
             self.canvas.set_photo_visible)
+        self.pages_panel.batchFlattenRequested.connect(self.batch_flatten)
         layout.addWidget(self.pages_panel)
 
         self.objects_panel = ObjectsPanel(self.project.margin_mm, panel)
@@ -321,6 +322,110 @@ class MainWindow(QMainWindow):
             r = self.canvas.roi_rect()
             pg.roi = ([r.x(), r.y(), r.width(), r.height()]
                       if r is not None else None)
+
+    def add_derived_pages(self, images, stem, names=None, at_index=None,
+                          activate=False):
+        """Insert BGR images as new pages derived from an existing one
+        (M3): flatten results, spread L/R pages, tile regions. Written
+        to temp PNGs; inserted right after `at_index` (default: the
+        current page). Returns the new PageEntry list."""
+        import os
+        import tempfile
+        import cv2
+        if not images:
+            return []
+        self._store_current_page()
+        if at_index is None:
+            at_index = self.project.current_page
+        tmp_dir = tempfile.mkdtemp(prefix="pagewright_derived_")
+        entries = []
+        for k, img in enumerate(images):
+            tag = (names[k] if names and k < len(names)
+                   else ("%02d" % (k + 1) if len(images) > 1 else ""))
+            fname = ("%s_%s.png" % (stem, tag)) if tag else "%s.png" % stem
+            fp = os.path.join(tmp_dir, fname)
+            if cv2.imwrite(fp, img):
+                entries.append(PageEntry(source_path=fp))
+        for j, e in enumerate(entries):
+            self.project.pages.insert(at_index + 1 + j, e)
+        self._refresh_pages_panel()
+        if activate and entries:
+            self.activate_page(at_index + 1)
+        return entries
+
+    def batch_flatten(self):
+        """Pages panel 'Flatten Checked' (M3): apply the Flatten
+        tool's outline to every checked page. Each page's outline is
+        SEEDED from the previous page's (same binding, similar opening
+        angle -> similar curves) and refined against that page's own
+        text lines; results are inserted as derived pages after their
+        sources. Spread outlines yield two pages (L, R) each."""
+        import os
+        import cv2
+        from PySide6.QtWidgets import QApplication, QProgressDialog
+        from ..core import batch as batch_core
+        rows = self.pages_panel.checked_rows()
+        if not rows:
+            QMessageBox.information(
+                self, "Flatten Checked",
+                "Tick the checkbox on each page you want flattened, "
+                "then try again.")
+            return
+        model = self.dewarp_stage.current_outline()
+        src_wh = self.dewarp_stage.source_wh()
+        if model is None or src_wh is None:
+            QMessageBox.information(
+                self, "Flatten Checked",
+                "First set up a Book Page outline in the Flatten tool "
+                "(one- or two-page) - it becomes the seed that is "
+                "carried from page to page.")
+            return
+        self._store_current_page()
+        prog = QProgressDialog("Flattening pages...", "Cancel",
+                               0, len(rows), self)
+        prog.setWindowModality(Qt.WindowModal)
+        prog.setMinimumDuration(0)
+        prev_model, prev_wh = model, src_wh
+        done, errors, offset = 0, [], 0
+        for n, row in enumerate(rows):
+            prog.setValue(n)
+            QApplication.processEvents()
+            if prog.wasCanceled():
+                break
+            i = row + offset
+            pg = self.project.pages[i]
+            img = cv2.imread(pg.source_path, cv2.IMREAD_COLOR)
+            if img is None:
+                errors.append("%s: could not read image"
+                              % os.path.basename(pg.source_path or "?"))
+                continue
+            h, w = img.shape[:2]
+            seed = batch_core.propagate_model(prev_model, prev_wh, (w, h))
+            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            refined = batch_core.seed_and_refine(gray, seed)
+            try:
+                outs = batch_core.flatten_with_model(img, refined)
+            except Exception as exc:
+                errors.append("%s: %s"
+                              % (os.path.basename(pg.source_path or "?"),
+                                 exc))
+                continue
+            stem = os.path.splitext(
+                os.path.basename(pg.source_path or "page"))[0] + "_flat"
+            names = ["L", "R"] if len(outs) == 2 else None
+            entries = self.add_derived_pages(outs, stem, names=names,
+                                             at_index=i)
+            offset += len(entries)
+            # the refined model seeds the NEXT page
+            prev_model, prev_wh = refined, (w, h)
+            done += 1
+        prog.setValue(len(rows))
+        self._refresh_pages_panel()
+        msg = "Flattened %d page(s); results were added as new pages." \
+              % done
+        if errors:
+            msg += "\n\nProblems:\n" + "\n".join(errors[:8])
+        QMessageBox.information(self, "Flatten Checked", msg)
 
     def _restore_page_roi(self, pg):
         """Re-apply a page's saved Select Area (set_photo cleared it)."""
@@ -559,8 +664,15 @@ class MainWindow(QMainWindow):
                                  "Could not write the flattened image.")
             return
         self._leave_dewarp_stage()
-        # start_dewarp=False: this photo IS the dewarp result
-        self.projects.load_photo(out_path, start_dewarp=False)
+        if self.project.pages:
+            # M3: the flattened image becomes a DERIVED page after the
+            # source photo (which stays in the job), and we switch to it.
+            os.remove(out_path)     # add_derived_pages writes its own
+            self.add_derived_pages([result], stem + "_flat",
+                                   activate=True)
+        else:
+            # no job yet (should not happen in practice): legacy path
+            self.projects.load_photo(out_path, start_dewarp=False)
         # The dewarp stage rendered at a known DPI with a known mm size,
         # so the adopted image's real-world scale is already determined -
         # carry it into the project calibration (fixes 'not calibrated'
@@ -569,6 +681,7 @@ class MainWindow(QMainWindow):
         if dpi and self._loaded is not None:
             self.project.calibration.mm_per_pixel = 25.4 / float(dpi)
             self._refresh_scale_readout()
+            self._update_tile_grid()
         self.statusBar().showMessage(
             "Flattened image is now the working image; scale calibrated "
             "from the dewarp output (%d DPI). Temporary file - use "

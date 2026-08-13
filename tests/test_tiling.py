@@ -213,3 +213,32 @@ def test_embedded_photo_is_cropped_per_tile():
     for _name, svg in tiles:
         assert svg.count("<image") == 1          # exactly its own slice
         assert len(svg) < full_embed * 0.7       # bounded, not the whole
+
+
+def test_tile_crop_rects_cover_image():
+    # 1 px = 1 mm: a 400 x 300 mm sheet on Letter portrait
+    from pagewright.core.tiling import tile_crop_rects
+    p = Project()
+    p.pixel_width, p.pixel_height = 400, 300
+    rects = tile_crop_rects(p, (400, 300), page="Letter",
+                            margin_mm=6.0, overlap_mm=10.0,
+                            mm_per_pixel=1.0)
+    assert len(rects) >= 4                     # multiple sheets needed
+    xs0 = min(r[1][0] for r in rects); ys0 = min(r[1][1] for r in rects)
+    xs1 = max(r[1][2] for r in rects); ys1 = max(r[1][3] for r in rects)
+    assert (xs0, ys0) == (0, 0)                # union covers the image
+    assert xs1 == 400 and ys1 == 300
+    for _name, (x0, y0, x1, y1) in rects:
+        assert 0 <= x0 < x1 <= 400 and 0 <= y0 < y1 <= 300
+    assert rects[0][0] == "r1c1"
+
+
+def test_tile_crop_rects_match_build_tiles_grid():
+    from pagewright.core.tiling import tile_crop_rects, plan_tiles
+    p = Project()
+    p.pixel_width, p.pixel_height = 500, 200
+    rects = tile_crop_rects(p, (500, 200), page="A4", landscape=True,
+                            margin_mm=8.0, overlap_mm=5.0,
+                            mm_per_pixel=1.0)
+    plan = plan_tiles(500, 200, "A4", True, 8.0, 5.0)
+    assert len(rects) == plan["nrows"] * plan["ncols"]

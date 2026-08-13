@@ -452,5 +452,7 @@ per-page post-processing (some OCR, some tracing).
   project file (single-page tools untouched).
 - **M2** PDF import (PyMuPDF) with page picker + render-DPI choice.
 - **M3** Derived pages (re-enqueue flatten/spread/tile outputs) +
-  batch apply with outline propagation.
+  batch apply with outline propagation. DONE 2026-08-11 (core/batch.py,
+  tiling.tile_crop_rects, Flatten Checked, Add as Pages; outline
+  persistence + quad-seed batch + thumbnails deferred).
 - **M4** Searchable-PDF output (P5 complete).

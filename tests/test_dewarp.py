@@ -527,3 +527,36 @@ def test_refine_spread_no_lines_unrefined():
     m = dw.default_spread_model(800, 400)
     m2, refined = dw.refine_spread_with_text(gray, m)
     assert refined is False
+
+
+# ---------------------------------------------------------------------------
+# batch propagation (M3)
+
+def test_propagate_model_scales_anchors():
+    from pagewright.core import batch
+    gray = _synthetic_page()
+    m = dw.detect_page(gray)
+    h, w = gray.shape
+    m2 = batch.propagate_model(m, (w, h), (2 * w, 2 * h))
+    assert m2.anchors["tl"] == pytest.approx(
+        [2 * m.anchors["tl"][0], 2 * m.anchors["tl"][1]])
+    assert m2.anchors["br"] == pytest.approx(
+        [2 * m.anchors["br"][0], 2 * m.anchors["br"][1]])
+
+
+def test_seed_and_refine_survives_blank_page():
+    from pagewright.core import batch
+    m = dw.detect_page(_synthetic_page())
+    blank = np.full((460, 640), 128, np.uint8)
+    out = batch.seed_and_refine(blank, m)      # no text lines anywhere
+    assert out is not None                     # falls back, never raises
+
+
+def test_flatten_with_model_returns_one_page():
+    from pagewright.core import batch
+    gray = _synthetic_page()
+    m = dw.detect_page(gray)
+    bgr = np.dstack([gray] * 3)
+    outs = batch.flatten_with_model(bgr, m)
+    assert len(outs) == 1 and outs[0].ndim == 3
+    assert outs[0].shape[0] > 50 and outs[0].shape[1] > 50

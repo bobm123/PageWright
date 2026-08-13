@@ -47,6 +47,7 @@ class PagesPanel(QGroupBox):
     addImagesRequested = Signal()
     addFolderRequested = Signal()
     removeRequested = Signal(int)
+    batchFlattenRequested = Signal()
 
     def __init__(self, parent=None):
         super().__init__("Pages", parent)
@@ -76,9 +77,20 @@ class PagesPanel(QGroupBox):
         for b in (btn_imgs, btn_dir, btn_rm):
             row.addWidget(b)
 
+        btn_flat = QPushButton("Flatten Checked", self)
+        btn_flat.setToolTip(
+            "Apply the Flatten tool's outline to every checked page - "
+            "each page's outline is seeded from the previous one and "
+            "refined against its own text lines")
+        btn_flat.clicked.connect(self.batchFlattenRequested)
+        row2 = QHBoxLayout()
+        row2.addWidget(btn_flat)
+        row2.addStretch(1)
+
         lay = QVBoxLayout(self)
         lay.addWidget(self._list)
         lay.addLayout(row)
+        lay.addLayout(row2)
 
     # ----- view state -------------------------------------------------------
     def set_pages(self, paths, current):
