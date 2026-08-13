@@ -257,8 +257,16 @@ def show_canvas_menu(w, global_pos):
     menu.addAction(w.act_mode_edit)
     if w.canvas.roi_rect() is not None:
         menu.addAction(w.act_clear_roi)
+    # editing: delete a marquee-selected group of points without
+    # reaching for the keyboard
+    from .canvas import MODE_EDIT, MODE_SEED_BG, MODE_SEED_FG
+    if w.canvas._mode == MODE_EDIT:
+        n = len(w.canvas.scene_obj().selectedItems())
+        if n:
+            a = menu.addAction("Delete %d Selected Point%s"
+                               % (n, "" if n == 1 else "s"))
+            a.triggered.connect(w.delete_selected_vertices)
     # brush size only matters while seeding
-    from .canvas import MODE_SEED_BG, MODE_SEED_FG
     if w.canvas._mode in (MODE_SEED_FG, MODE_SEED_BG):
         brush_menu = menu.addMenu("Brush Size")
         cur = int(round(w.canvas.brush_radius()))
