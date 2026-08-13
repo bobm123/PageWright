@@ -67,7 +67,7 @@ def test_outer_path_and_style():
     p = _project_with_square()
     svg = svg_export.build_svg(p, embed_photo=False)
     assert 'fill-rule="evenodd"' in svg
-    assert 'stroke="#000000"' in svg
+    assert 'stroke="#ff0000"' in svg   # default trace color is red
     assert svg.count("<path") == 1
     assert "Z" in svg
     # outline mode -> no fill

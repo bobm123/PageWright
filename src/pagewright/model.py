@@ -70,7 +70,7 @@ class Contour:
 class Style:
     """Stroke / fill settings for a traced object."""
 
-    def __init__(self, stroke="#000000", stroke_width_mm=0.5,
+    def __init__(self, stroke="#ff0000", stroke_width_mm=0.5,
                  fill="none"):
         self.stroke = stroke
         self.stroke_width_mm = stroke_width_mm
