@@ -4,9 +4,10 @@ A desktop GUI tool for tracing the outlines of objects in photographs and export
 **true-scale SVG** files, with ruler-based calibration and tiled large-format printing.
 
 > PageWright began as **TraceImage** and was rebranded to become a unified
-> capture-to-OCR studio (dewarp -> scale -> OCR/trace). The trace + SVG +
-> tiling features below are inherited from that work; the dewarp and OCR
-> stages are being ported in next.
+> capture-to-OCR studio. Today the hub has four first-class tools over one
+> working image - **Trace**, **Flatten** (quad + one/two-page book dewarp),
+> **Scale**, and **OCR** - plus tiled true-scale printing, multi-page jobs
+> (folders of scans, PDF import, derived pages, batch flatten).
 
 See [`PLAN.md`](PLAN.md) for the full design and rationale, and
 [`PORTING.md`](PORTING.md) for the anticipated C++/Qt port.
@@ -137,6 +138,49 @@ Notes / current rough edges:
   robustly in a later phase).
 - Deleting a contour's only contour leaves the object empty in the Objects
   panel; remove it there if you don't want it (export ignores empty objects).
+
+## Web app / iPhone
+
+PageWright's desktop UI (PySide6) does not run in a browser or on a
+phone. The browser story is the **Pyodide web app in the sibling
+`dewarp` repo** (`feature/webapp` branch, `webapp/index.html`): it runs
+the same single-page spline dewarp core, unmodified, in the browser via
+WebAssembly (numpy + OpenCV wasm). Per PLAN sec. 13 decision 4, it
+stays a thin separate front-end over the shared core. Status: it was
+mid-debug (Pyodide/opencv version matrix) when parked - test on desktop
+Safari/Chrome first.
+
+To use it from an iPhone:
+
+1. **Quick LAN test** (no install on the phone): on the PC, from the
+   dewarp repo:
+
+       git checkout feature/webapp
+       python -m http.server 8000
+
+   then on the iPhone (same Wi-Fi) open Safari to
+   `http://<pc-ip>:8000/webapp/`. Find the PC's IP with `ipconfig`
+   (Windows). First load downloads the Python/OpenCV wasm runtime
+   (tens of MB) - be on Wi-Fi and be patient; it is cached after that.
+
+2. **Real deployment - GitHub Pages** (free static hosting; the web
+   app is pure static files): push the `webapp/` folder to a
+   `gh-pages` branch (or enable Pages on the repo, folder `/webapp`),
+   then open `https://<user>.github.io/dewarp/webapp/` in Safari.
+   HTTPS matters: iOS only allows **camera capture**
+   (`getUserMedia` / `<input capture>`) on secure origins, so
+   photographing a page straight from the phone needs Pages (or any
+   HTTPS host), not the LAN server.
+
+3. **Home-screen app**: in Safari, Share -> **Add to Home Screen**.
+   The page opens full-screen with its own icon like a native app.
+   (A `manifest.json` + apple-touch-icon in `webapp/` would polish
+   this - not yet done.)
+
+iOS caveats worth knowing: Safari gives a wasm page limited memory, so
+very large photos may fail where the desktop succeeds (the app's
+downscale path helps); and iOS clears cached wasm for rarely-used
+sites, re-downloading the runtime on next visit.
 
 ## Tests
 
