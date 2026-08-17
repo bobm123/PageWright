@@ -16,19 +16,6 @@ See [`PLAN.md`](PLAN.md) for the full design and rationale, and
 capture-to-OCR studio, absorbing the sibling `dewarp` and `BookScan`
 tools as pipeline stages. See [`PLAN.md` section 13](PLAN.md#13-roadmap-unified-capture-to-ocr-studio-mirrored-from-dewarpclaudemd-2026-07-13) for the roadmap.
 
-## Status
-
-- **Phase 0 — Scaffold:** ✅ app skeleton that loads a photo with zoom/pan.
-- **Phase 1 — Calibration:** ✅ two-point measurement, unit selection, live scale + real-size readout.
-- **Phase 2 — Segmentation:** ✅ foreground/background seed painting, GrabCut, contour extraction with holes, editable polygons (move/add/delete vertices), re-seed/re-run refine loop.
-- **Phase 3 — Object model:** ✅ multiple objects (each with outer + holes + disjoint loops) via the Objects panel (new/delete/rename/select), margin control, bounding-box preview, real-size readout.
-- **Phase 4 — SVG export:** ✅ mm-scaled `<svg>` with matching viewBox, optional base64-embedded (downscalable) photo layer, one compound `<path>` per object with `fill-rule="evenodd"`, outline or filled. Plain (browser-friendly) or **Inkscape** flavor (named layers + mm document units) so nodes can be fine-tuned in Inkscape.
-- **Phase 5 — Tiled printing:** ✅ split the drawing across Letter/A4/Legal/A3 pages (portrait/landscape) at true 1:1, with per-tile live-area rectangle, R#-C# label, and diamond registration marks that coincide across overlapping sheets; photo on/off.
-- **Phase 6 — Polish (in progress):** ✅ save/load project as JSON (File → Save/Open Project; calibration, margin, units, traced polygons, source-image reference); ✅ undo/redo command stack for vertex edits (move/add/delete) and object delete; ✅ marquee (rubber-band) multi-vertex selection in Edit Vertices mode with **Delete** to group-delete (one undo step); if a delete would leave a contour with fewer than 3 vertices the whole contour is removed (and restored on undo), since a sub-3 contour is not a polygon. Ctrl+Z/Y dispatch by context — while seeding they undo/redo seed strokes, otherwise the edit command stack. Still to come: folding object-create/trace into the undo history. (Bézier smoothing deprioritized in favor of the Inkscape export flavor.)
-- **Phase 7 — Port readiness:** ✅ audited the core for Python-only idioms (none — only library bindings need C++ equivalents) and sketched the C++/Qt structure in [`PORTING.md`](PORTING.md).
-
-Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** import photo, **Ctrl+E** export SVG, **Ctrl+Z/Ctrl+Y** undo/redo (seed strokes while seeding; vertex/object edits otherwise).
-
 ## Install
 
 Python 3.10+ recommended.
@@ -191,6 +178,19 @@ NumPy + OpenCV and are skipped if those aren't installed.
 ```bash
 python -m pytest tests/
 ```
+
+## Status
+
+- **Phase 0 — Scaffold:** ✅ app skeleton that loads a photo with zoom/pan.
+- **Phase 1 — Calibration:** ✅ two-point measurement, unit selection, live scale + real-size readout.
+- **Phase 2 — Segmentation:** ✅ foreground/background seed painting, GrabCut, contour extraction with holes, editable polygons (move/add/delete vertices), re-seed/re-run refine loop.
+- **Phase 3 — Object model:** ✅ multiple objects (each with outer + holes + disjoint loops) via the Objects panel (new/delete/rename/select), margin control, bounding-box preview, real-size readout.
+- **Phase 4 — SVG export:** ✅ mm-scaled `<svg>` with matching viewBox, optional base64-embedded (downscalable) photo layer, one compound `<path>` per object with `fill-rule="evenodd"`, outline or filled. Plain (browser-friendly) or **Inkscape** flavor (named layers + mm document units) so nodes can be fine-tuned in Inkscape.
+- **Phase 5 — Tiled printing:** ✅ split the drawing across Letter/A4/Legal/A3 pages (portrait/landscape) at true 1:1, with per-tile live-area rectangle, R#-C# label, and diamond registration marks that coincide across overlapping sheets; photo on/off.
+- **Phase 6 — Polish (in progress):** ✅ save/load project as JSON (File → Save/Open Project; calibration, margin, units, traced polygons, source-image reference); ✅ undo/redo command stack for vertex edits (move/add/delete) and object delete; ✅ marquee (rubber-band) multi-vertex selection in Edit Vertices mode with **Delete** to group-delete (one undo step); if a delete would leave a contour with fewer than 3 vertices the whole contour is removed (and restored on undo), since a sub-3 contour is not a polygon. Ctrl+Z/Y dispatch by context — while seeding they undo/redo seed strokes, otherwise the edit command stack. Still to come: folding object-create/trace into the undo history. (Bézier smoothing deprioritized in favor of the Inkscape export flavor.)
+- **Phase 7 — Port readiness:** ✅ audited the core for Python-only idioms (none — only library bindings need C++ equivalents) and sketched the C++/Qt structure in [`PORTING.md`](PORTING.md).
+
+Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** import photo, **Ctrl+E** export SVG, **Ctrl+Z/Ctrl+Y** undo/redo (seed strokes while seeding; vertex/object edits otherwise).
 
 ## Layout
 
