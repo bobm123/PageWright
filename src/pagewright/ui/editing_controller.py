@@ -50,6 +50,27 @@ class EditingController:
                                            for (x, y) in pts)
                      for (label, pts, _r) in raw_strokes)
         if not inside:
+            has_fg = any(label == "fg" for (label, _p, _r) in raw_strokes)
+            if has_fg:
+                # The marks exist but the Select Area does not contain
+                # them. Classic trap since areas persist per page (and
+                # restore from the project file): the area was drawn for
+                # a PREVIOUS object, and the user is now marking a new
+                # object elsewhere. Offer one-click recovery instead of
+                # a dead-end error.
+                resp = QMessageBox.question(
+                    w, "Trace Poly",
+                    "Your foreground marks are outside the selected "
+                    "trace area (the dashed rectangle - it may have "
+                    "been restored from the project file).\n\n"
+                    "Clear the area and trace using your marks?",
+                    QMessageBox.Yes | QMessageBox.Cancel)
+                if resp != QMessageBox.Yes:
+                    return None
+                w.clear_roi()
+                strokes = [seg.Stroke(l, pts, r)
+                           for (l, pts, r) in raw_strokes]
+                return img, strokes, 0, 0
             QMessageBox.warning(
                 w, "Trace Poly",
                 "Mark some foreground inside the selected trace area first.")
