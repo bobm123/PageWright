@@ -168,9 +168,11 @@ class MainWindow(QMainWindow):
 
     def open_preferences(self):
         """File -> Preferences: app settings (currently brush size)."""
-        dlg = PreferencesDialog(self.canvas.brush_radius(), self)
+        dlg = PreferencesDialog(self.canvas.brush_radius(),
+                                self.canvas.brush_auto(), self)
         if dlg.exec() == QDialog.Accepted:
             self.canvas.set_brush_radius(dlg.brush_radius())
+            self.canvas.set_brush_auto(dlg.brush_auto())
 
     def open_photo(self):
         self.projects.open_photo()

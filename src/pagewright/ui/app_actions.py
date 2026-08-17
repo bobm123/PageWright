@@ -8,7 +8,7 @@ this here leaves main_window as a coordinator rather than a wall of setup.
 from PySide6.QtGui import QAction, QActionGroup, QKeySequence
 from PySide6.QtWidgets import QMenu
 
-_BRUSH_PRESETS = (10, 20, 40, 80, 120)
+_BRUSH_PRESETS = (6, 12, 20, 32, 48)   # screen px
 
 
 def build_actions(w):

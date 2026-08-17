@@ -166,9 +166,9 @@ class TilingDialog(QDialog):
 
 
 class PreferencesDialog(QDialog):
-    """Application preferences (currently just the seed brush size)."""
+    """Application preferences (currently the seed brush size)."""
 
-    def __init__(self, brush_radius, parent=None):
+    def __init__(self, brush_radius, brush_auto=True, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
 
@@ -185,6 +185,15 @@ class PreferencesDialog(QDialog):
             "the cursor previews this size while marking.")
         form.addRow("Brush size:", self._brush)
 
+        self._brush_auto = QCheckBox("Auto (screen size, follows zoom)",
+                                     self)
+        self._brush_auto.setChecked(bool(brush_auto))
+        self._brush_auto.setToolTip(
+            "Auto: the size is in screen pixels - zoom in for fine "
+            "marks, out for broad ones, on any size document.\n"
+            "Unchecked: the size is fixed in image pixels.")
+        form.addRow("", self._brush_auto)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
@@ -193,3 +202,6 @@ class PreferencesDialog(QDialog):
 
     def brush_radius(self):
         return self._brush.value()
+
+    def brush_auto(self):
+        return self._brush_auto.isChecked()

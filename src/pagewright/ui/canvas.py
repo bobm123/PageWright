@@ -86,7 +86,14 @@ class Canvas(QGraphicsView):
         self._calib_line = None
 
         # Seed painting.
-        self._brush_radius = 40.0
+        # Brush size is set in SCREEN pixels and converted to image
+        # pixels at the current zoom when a stroke starts - so the brush
+        # covers the same fraction of what you SEE regardless of the
+        # document's pixel size or zoom level (a 40 image-px brush was
+        # comically fat on a small flattened page, and too fine on an
+        # 18 MP photo).
+        self._brush_radius = 12.0   # screen px when auto, image px fixed
+        self._brush_auto = True     # Preferences: Auto follows zoom
         self._seed_strokes = []      # list of dict(label, points, path, item)
         self._redo_strokes = []      # strokes removed by undo, for redo
         self._active_stroke = None
@@ -272,7 +279,24 @@ class Canvas(QGraphicsView):
     # ----- seed painting ---------------------------------------------------
 
     def set_brush_radius(self, radius_px):
+        """Brush radius in SCREEN pixels (see __init__ note)."""
         self._brush_radius = float(radius_px)
+
+    def set_brush_auto(self, on):
+        """Auto: the size is SCREEN px, so the brush covers the same
+        fraction of what you see at any zoom / document size. Fixed:
+        the size is IMAGE px (the pre-M3 behavior)."""
+        self._brush_auto = bool(on)
+
+    def brush_auto(self):
+        return self._brush_auto
+
+    def _brush_scene_radius(self):
+        """The brush footprint in image pixels."""
+        if not self._brush_auto:
+            return max(1.5, self._brush_radius)
+        scale = self.transform().m11() or 1.0
+        return max(1.5, self._brush_radius / scale)
 
     def brush_radius(self):
         return self._brush_radius
@@ -295,14 +319,19 @@ class Canvas(QGraphicsView):
         return len(self._seed_strokes) > 0
 
     def seed_strokes(self):
-        """Return seeds as a list of (label, [(x, y), ...], radius_px)."""
-        return [(s["label"], list(s["points"]), self._brush_radius)
+        """Return seeds as a list of (label, [(x, y), ...], radius_px).
+
+        radius_px is in IMAGE pixels, captured per stroke at paint time
+        (strokes drawn at different zoom levels have different radii)."""
+        return [(s["label"], list(s["points"]),
+                 s.get("r", self._brush_radius))
                 for s in self._seed_strokes]
 
     def _begin_stroke(self, label, pt):
         color = _FG_COLOR if label == "fg" else _BG_COLOR
+        r_img = self._brush_scene_radius()
         pen = QPen(color)
-        pen.setWidthF(2.0 * self._brush_radius)  # scene units, matches seed
+        pen.setWidthF(2.0 * r_img)      # scene units, matches seed
         pen.setCapStyle(Qt.RoundCap)
         pen.setJoinStyle(Qt.RoundJoin)
         path = QPainterPath()
@@ -313,7 +342,7 @@ class Canvas(QGraphicsView):
         self._redo_strokes = []
         self._active_stroke = {
             "label": label, "points": [(pt.x(), pt.y())],
-            "path": path, "item": item}
+            "path": path, "item": item, "r": r_img}
         self._seed_strokes.append(self._active_stroke)
 
     def _extend_stroke(self, pt):
@@ -355,7 +384,11 @@ class Canvas(QGraphicsView):
         """Show/move the brush-footprint ring at the cursor (seed modes)."""
         label_fg = self._mode == MODE_SEED_FG
         color = QColor(0, 200, 0) if label_fg else QColor(220, 40, 40)
-        r = self._brush_radius
+        r = self._brush_scene_radius()
+        if (self._brush_cursor is not None
+                and abs(self._brush_cursor.rect().width() - 2 * r) > 0.1):
+            self._scene.removeItem(self._brush_cursor)
+            self._brush_cursor = None
         if self._brush_cursor is None:
             pen = QPen(color)
             pen.setCosmetic(True)
