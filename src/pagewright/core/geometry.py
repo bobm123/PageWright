@@ -7,6 +7,8 @@ ports cleanly to C/C++.
 Coordinate convention: origin top-left, y increases downward.
 """
 
+import math
+
 
 class BBox:
     """An axis-aligned bounding box in pixel coordinates."""
@@ -101,3 +103,21 @@ def point_px_to_mm(point_px, mm_per_pixel, origin_px=(0.0, 0.0)):
     x = (point_px[0] - origin_px[0]) * mm_per_pixel
     y = (point_px[1] - origin_px[1]) * mm_per_pixel
     return (x, y)
+
+
+def snap_angle(p0, p1, step_deg=45.0):
+    """Snap p1 so the segment p0->p1 lies on the nearest multiple of
+    `step_deg` degrees, preserving its length.
+
+    Used by the Calibrate and Measure gestures while Ctrl is held: with
+    the default 45-degree step the line locks to horizontal, vertical
+    or the diagonals - measuring along a ruler's edge without drift.
+    """
+    dx = p1[0] - p0[0]
+    dy = p1[1] - p0[1]
+    d = math.hypot(dx, dy)
+    if d < 1e-9:
+        return (p1[0], p1[1])
+    step = math.radians(step_deg)
+    ang = round(math.atan2(dy, dx) / step) * step
+    return (p0[0] + d * math.cos(ang), p0[1] + d * math.sin(ang))

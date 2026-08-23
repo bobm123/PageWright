@@ -18,6 +18,7 @@ from PySide6.QtCore import Qt, QPoint, QPointF, QRectF, Signal
 from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen
 from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
+from ..core import geometry
 from . import zoom
 from .editable import VertexHandle
 
@@ -28,6 +29,7 @@ MODE_SEED_FG = "seed_fg"
 MODE_SEED_BG = "seed_bg"
 MODE_EDIT = "edit"
 MODE_ROI = "roi"          # drag a trace-area rectangle
+MODE_MEASURE = "measure"  # two-click on-canvas ruler
 
 _ZOOM_STEP = 1.25
 _MIN_SCALE = 0.02
@@ -132,6 +134,11 @@ class Canvas(QGraphicsView):
         self._calib_points = []
         self._calib_markers = []
         self._calib_line = None
+        self._measure_p0 = None      # first ruler point (in progress)
+        self._measure_line = None
+        self._measure_label = None
+        self._measure_items = []     # finished rulers (kept until cleared)
+        self._measure_fmt = None     # px -> display text (window supplies)
         self._seed_strokes = []
         self._redo_strokes = []
         self._active_stroke = None
@@ -227,7 +234,7 @@ class Canvas(QGraphicsView):
         """
         vp = self.viewport()
         if self._mode in (MODE_SEED_FG, MODE_SEED_BG, MODE_CALIBRATE,
-                          MODE_ROI):
+                          MODE_ROI, MODE_MEASURE):
             vp.setCursor(Qt.CrossCursor)
         elif self._mode == MODE_PAN:
             vp.setCursor(Qt.OpenHandCursor)
@@ -246,6 +253,101 @@ class Canvas(QGraphicsView):
 
     def cancel_calibration(self):
         self.enter_pan_mode()
+
+    # ----- measure (on-canvas ruler) ---------------------------------------
+
+    def set_measure_formatter(self, fn):
+        """fn(length_px) -> display string (window supplies units)."""
+        self._measure_fmt = fn
+
+    def start_measure(self):
+        """Two-click ruler: like Calibrate, but it DRAWS the distance.
+        Stays armed for repeated measurements; right-click exits."""
+        self._measure_p0 = None
+        self._mode = MODE_MEASURE
+        self.setDragMode(QGraphicsView.NoDrag)
+        self.viewport().setCursor(Qt.CrossCursor)
+        self._hide_brush_cursor()
+
+    def has_measurements(self):
+        return len(self._measure_items) > 0
+
+    def clear_measurements(self):
+        for it in self._measure_items:
+            self._scene.removeItem(it)
+        self._measure_items = []
+        self._drop_measure_preview()
+
+    def _drop_measure_preview(self):
+        for it in (self._measure_line, self._measure_label):
+            if it is not None:
+                self._scene.removeItem(it)
+        self._measure_line = None
+        self._measure_label = None
+        self._measure_p0 = None
+
+    @staticmethod
+    def _measure_pen():
+        pen = QPen(QColor(0, 210, 210))     # teal: not trace red, not
+        pen.setCosmetic(True)               # calibrate blue
+        pen.setWidth(2)
+        return pen
+
+    def _measure_text(self, p0, p1):
+        import math
+        d = math.hypot(p1.x() - p0.x(), p1.y() - p0.y())
+        if self._measure_fmt is not None:
+            return self._measure_fmt(d)
+        return "%.0f px" % d
+
+    def _make_measure_label(self, text, p0, p1):
+        label = self._scene.addSimpleText(text)
+        label.setBrush(QBrush(QColor(0, 210, 210)))
+        label.setFlag(label.GraphicsItemFlag.ItemIgnoresTransformations)
+        label.setZValue(31)
+        label.setPos((p0.x() + p1.x()) / 2.0, (p0.y() + p1.y()) / 2.0)
+        return label
+
+    def _update_measure_preview(self, p1):
+        p0 = self._measure_p0
+        if self._measure_line is None:
+            self._measure_line = self._scene.addLine(
+                p0.x(), p0.y(), p1.x(), p1.y(), self._measure_pen())
+            self._measure_line.setZValue(30)
+        else:
+            self._measure_line.setLine(p0.x(), p0.y(), p1.x(), p1.y())
+        text = self._measure_text(p0, p1)
+        if self._measure_label is None:
+            self._measure_label = self._make_measure_label(text, p0, p1)
+        else:
+            self._measure_label.setText(text)
+            self._measure_label.setPos((p0.x() + p1.x()) / 2.0,
+                                       (p0.y() + p1.y()) / 2.0)
+
+    def _finish_measure(self, p1):
+        """Second click: keep the ruler; stay armed for the next one."""
+        p0 = self._measure_p0
+        line = self._scene.addLine(p0.x(), p0.y(), p1.x(), p1.y(),
+                                   self._measure_pen())
+        line.setZValue(30)
+        ends = []
+        for pt in (p0, p1):
+            r = 3.0
+            e = self._scene.addEllipse(pt.x() - r, pt.y() - r, 2 * r, 2 * r,
+                                       self._measure_pen())
+            e.setZValue(30)
+            ends.append(e)
+        label = self._make_measure_label(self._measure_text(p0, p1), p0, p1)
+        self._measure_items += [line, label] + ends
+        self._drop_measure_preview()
+
+    @staticmethod
+    def _ctrl_snap(p0, pt, modifiers):
+        """Ctrl locks the segment to horizontal/vertical/45 degrees."""
+        if not (modifiers & Qt.ControlModifier):
+            return pt
+        x, y = geometry.snap_angle((p0.x(), p0.y()), (pt.x(), pt.y()))
+        return QPointF(x, y)
 
     def _clear_calibration_overlay(self):
         for item in self._calib_markers:
@@ -568,12 +670,18 @@ class Canvas(QGraphicsView):
             # Calibration: stretch a preview line from the first point.
             if (self._mode == MODE_CALIBRATE
                     and len(self._calib_points) == 1):
+                pt = self._ctrl_snap(self._calib_points[0], scene_pt,
+                                     event.modifiers())
                 if self._calib_line is not None:
                     self._scene.removeItem(self._calib_line)
                 self._calib_line = self._scene.addLine(
                     self._calib_points[0].x(), self._calib_points[0].y(),
-                    scene_pt.x(), scene_pt.y(), self._calib_pen())
+                    pt.x(), pt.y(), self._calib_pen())
                 self._calib_line.setZValue(30)
+            if self._mode == MODE_MEASURE and self._measure_p0 is not None:
+                self._update_measure_preview(
+                    self._ctrl_snap(self._measure_p0, scene_pt,
+                                    event.modifiers()))
             # Resizing the trace area by its edges (any mode).
             if (self._roi_edit is not None
                     and (event.buttons() & Qt.LeftButton)):
@@ -627,8 +735,21 @@ class Canvas(QGraphicsView):
             self.set_roi(QRectF(self._roi_origin, self._roi_origin))
             return
 
+        if self._mode == MODE_MEASURE and event.button() == Qt.LeftButton:
+            pt = self.mapToScene(event.position().toPoint())
+            if self._measure_p0 is None:
+                self._measure_p0 = pt
+            else:
+                self._finish_measure(
+                    self._ctrl_snap(self._measure_p0, pt,
+                                    event.modifiers()))
+            return
+
         if self._mode == MODE_CALIBRATE and event.button() == Qt.LeftButton:
             pt = self.mapToScene(event.position().toPoint())
+            if len(self._calib_points) == 1:
+                pt = self._ctrl_snap(self._calib_points[0], pt,
+                                     event.modifiers())
             self._calib_points.append(pt)
             self._add_marker(pt)
             if len(self._calib_points) == 2:
@@ -701,6 +822,14 @@ class Canvas(QGraphicsView):
 
     def contextMenuEvent(self, event):
         if self._photo_item is None:
+            return
+        if self._mode == MODE_MEASURE:
+            # first right-click abandons an in-progress ruler; the next
+            # one leaves measure mode (finished rulers stay drawn)
+            if self._measure_p0 is not None:
+                self._drop_measure_preview()
+            else:
+                self.enter_pan_mode()
             return
         # In edit mode, a right-click directly on a vertex handle deletes
         # that vertex; anywhere else (any mode) shows the quick-action menu.

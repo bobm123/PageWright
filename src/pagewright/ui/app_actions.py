@@ -104,6 +104,17 @@ def build_actions(w):
     w.act_calibrate = QAction("&Calibrate Scale…", w)
     w.act_calibrate.triggered.connect(w.start_calibration)
 
+    w.act_measure = QAction("&Measure…", w)
+    w.act_measure.setToolTip(
+        "Two-click ruler: click both ends, the distance is drawn in the "
+        "current units. Hold Ctrl to lock to 0/45/90 degrees; "
+        "right-click to finish.")
+    w.act_measure.triggered.connect(w.start_measure)
+
+    w.act_clear_measure = QAction("Clear Measurements", w)
+    w.act_clear_measure.triggered.connect(
+        lambda: w.canvas.clear_measurements())
+
     w.act_dewarp = QAction("&Flatten Page (Dewarp)…", w)
     w.act_dewarp.setToolTip("Perspective-flatten a photographed page; the "
                             "result becomes the working image")
@@ -205,6 +216,7 @@ def build_menus(w):
     m_tools.addSeparator()
     m_tools.addAction(w.act_dewarp)
     m_tools.addAction(w.act_calibrate)
+    m_tools.addAction(w.act_measure)
     m_tools.addSeparator()
     m_tools.addAction(w.act_mode_pan)
     m_tools.addAction(w.act_mode_roi)
@@ -279,6 +291,9 @@ def show_canvas_menu(w, global_pos):
         menu.addAction(w.act_clear_seeds)
     menu.addSeparator()
     menu.addAction(w.act_calibrate)
+    menu.addAction(w.act_measure)
+    if w.canvas.has_measurements():
+        menu.addAction(w.act_clear_measure)
     menu.addAction(w.act_fit)
     menu.addSeparator()
     menu.addAction(w.act_tool_flatten)   # jump to the other tools

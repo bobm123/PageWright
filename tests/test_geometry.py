@@ -53,3 +53,19 @@ def test_mm_to_px_uncalibrated_raises():
 def test_point_px_to_mm_with_origin():
     pt = geo.point_px_to_mm((30, 50), 0.5, origin_px=(10, 10))
     assert pt == pytest.approx((10.0, 20.0))
+
+
+def test_snap_angle_locks_to_horizontal_and_diagonal():
+    from pagewright.core.geometry import snap_angle
+    import math
+    # 10 degrees off horizontal -> horizontal, length preserved
+    p = snap_angle((0, 0), (10 * math.cos(0.17), 10 * math.sin(0.17)))
+    assert abs(p[1]) < 1e-9 and abs(p[0] - 10.0) < 1e-9
+    # near 45 degrees -> exactly 45
+    p = snap_angle((0, 0), (10.0, 9.0))
+    assert abs(p[0] - p[1]) < 1e-9
+    # zero-length: unchanged, no division blowup
+    assert snap_angle((5, 5), (5, 5)) == (5, 5)
+    # direction preserved (points left stay left)
+    p = snap_angle((0, 0), (-10.0, 0.5))
+    assert p[0] < 0

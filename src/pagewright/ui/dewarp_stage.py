@@ -63,6 +63,7 @@ from PySide6.QtWidgets import (QCheckBox, QComboBox, QDoubleSpinBox,
 
 from ..core import calibration as calib_core
 from ..core import dewarp as dw
+from ..core import geometry
 from . import zoom
 from .display import (DISPLAY_MAX, display_downscale,   # noqa: F401
                       ndarray_to_qimage, ndarray_to_qpixmap)
@@ -266,6 +267,7 @@ class _AutoFitView(QGraphicsView):
                     self._place_first_calib_point(sp)       # first click
                 else:
                     p1 = QPointF(self._calib_p1)            # second click
+                    sp = self._calib_snap(sp, event.modifiers())
                     if self._calib_line is not None:
                         self._scene.removeItem(self._calib_line)
                     self._end_calibration()
@@ -280,9 +282,19 @@ class _AutoFitView(QGraphicsView):
             return
         super().mousePressEvent(event)
 
+    def _calib_snap(self, p2, modifiers):
+        """Ctrl locks the measuring line to 0/45/90 degrees."""
+        if not (modifiers & Qt.ControlModifier):
+            return p2
+        x, y = geometry.snap_angle((self._calib_p1.x(), self._calib_p1.y()),
+                                   (p2.x(), p2.y()))
+        return QPointF(x, y)
+
     def mouseMoveEvent(self, event):
         if self._calib_p1 is not None and self._calib_line is not None:
-            p2 = self.mapToScene(event.position().toPoint())
+            p2 = self._calib_snap(
+                self.mapToScene(event.position().toPoint()),
+                event.modifiers())
             self._calib_line.setLine(self._calib_p1.x(), self._calib_p1.y(),
                                      p2.x(), p2.y())
             event.accept()

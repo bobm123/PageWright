@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self.canvas.roiSelected.connect(self._on_roi_selected)
         self.canvas.roiCleared.connect(self.clear_roi)
         self.canvas.roiEdited.connect(self._on_roi_edited)
+        self.canvas.set_measure_formatter(self._format_measure)
 
         self.projects = ProjectController(self)
         self.exports = ExportController(self)
@@ -148,7 +149,8 @@ class MainWindow(QMainWindow):
 
     def _set_tools_enabled(self, enabled):
         for a in (self.act_zoom_in, self.act_zoom_out, self.act_fit,
-                  self.act_calibrate, self.act_mode_pan, self.act_mode_fg,
+                  self.act_calibrate, self.act_measure,
+                  self.act_mode_pan, self.act_mode_fg,
                   self.act_mode_bg, self.act_mode_edit, self.act_run_seg,
                   self.act_clear_seeds, self.act_export,
                   self.act_export_tiles, self.act_show_bbox,
@@ -750,6 +752,23 @@ class MainWindow(QMainWindow):
                                 if not layer.is_empty()]
 
     # ----- calibration -----------------------------------------------------
+
+    def start_measure(self):
+        """Tools -> Measure: a two-click on-canvas ruler."""
+        self.switch_tool("trace")
+        self.canvas.start_measure()
+        self.statusBar().showMessage(
+            "Measure: click both ends of a distance (Ctrl locks to "
+            "0/45/90 degrees, wheel zooms). Right-click to finish; "
+            "rulers stay until Clear Measurements.", 8000)
+
+    def _format_measure(self, length_px):
+        """Ruler label text: current units when calibrated, else px."""
+        mpp = self.project.calibration.mm_per_pixel
+        if not mpp:
+            return "%.0f px" % length_px
+        return calib.format_length(length_px * mpp,
+                                   self.project.calibration.display_unit)
 
     def start_calibration(self):
         if not self.canvas.has_photo():
