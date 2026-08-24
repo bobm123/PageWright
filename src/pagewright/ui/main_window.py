@@ -276,7 +276,13 @@ class MainWindow(QMainWindow):
         self.ocr_stage.set_source_image(self._loaded.data, region)
         self._stack.setCurrentWidget(self.ocr_stage)
         self._set_tools_enabled(False)
-        self._dock_was_visible = self._dock.isVisible()
+        # Record the dock state only when leaving the TRACE view. When
+        # hopping between two non-trace tools (Trace -> OCR -> Flatten,
+        # ...) the dock is ALREADY hidden here, and recording that would
+        # latch the flag False - returning to Trace then never brought
+        # the Objects/Pages/Tiling panes back.
+        if self._stack.currentWidget() is self.canvas:
+            self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
 
     def enter_scale(self):
@@ -294,7 +300,13 @@ class MainWindow(QMainWindow):
         self._set_tools_enabled(False)
         # printing/preview stay available - they are the point here
         self.act_print_tiles.setEnabled(True)
-        self._dock_was_visible = self._dock.isVisible()
+        # Record the dock state only when leaving the TRACE view. When
+        # hopping between two non-trace tools (Trace -> OCR -> Flatten,
+        # ...) the dock is ALREADY hidden here, and recording that would
+        # latch the flag False - returning to Trace then never brought
+        # the Objects/Pages/Tiling panes back.
+        if self._stack.currentWidget() is self.canvas:
+            self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
 
     def _on_scale_set(self, mpp):
@@ -624,7 +636,13 @@ class MainWindow(QMainWindow):
         # trace-view tools act on the hidden canvas; disable while staged,
         # and hide the Objects/Tiling dock (it belongs to the trace view)
         self._set_tools_enabled(False)
-        self._dock_was_visible = self._dock.isVisible()
+        # Record the dock state only when leaving the TRACE view. When
+        # hopping between two non-trace tools (Trace -> OCR -> Flatten,
+        # ...) the dock is ALREADY hidden here, and recording that would
+        # latch the flag False - returning to Trace then never brought
+        # the Objects/Pages/Tiling panes back.
+        if self._stack.currentWidget() is self.canvas:
+            self._dock_was_visible = self._dock.isVisible()
         self._dock.hide()
         self._sync_tool_checks("flatten")
         self.statusBar().showMessage(
