@@ -170,13 +170,25 @@ class MainWindow(QMainWindow):
         """Open a photo or .json project by path (command-line arg)."""
         self.projects.open_path(path)
 
+    def preferred_unit(self):
+        """The Preferences default unit for NEW jobs (QSettings)."""
+        from PySide6.QtCore import QSettings
+        u = QSettings("PageWright", "PageWright").value("preferred_unit")
+        return u if u in ("mm", "cm", "in") else "mm"
+
     def open_preferences(self):
-        """File -> Preferences: app settings (currently brush size)."""
+        """File -> Preferences: app settings (brush, preferred units)."""
         dlg = PreferencesDialog(self.canvas.brush_radius(),
-                                self.canvas.brush_auto(), self)
+                                self.canvas.brush_auto(),
+                                self.preferred_unit(), self)
         if dlg.exec() == QDialog.Accepted:
             self.canvas.set_brush_radius(dlg.brush_radius())
             self.canvas.set_brush_auto(dlg.brush_auto())
+            from PySide6.QtCore import QSettings
+            QSettings("PageWright", "PageWright").setValue(
+                "preferred_unit", dlg.preferred_unit())
+            # apply to the open job too - least surprising
+            self.set_unit(dlg.preferred_unit())
 
     def open_photo(self):
         self.projects.open_photo()

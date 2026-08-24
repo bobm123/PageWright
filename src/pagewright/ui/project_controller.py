@@ -78,6 +78,7 @@ class ProjectController:
         w._leave_dewarp_stage()   # no-op when already on the trace view
 
         w.project = Project()
+        w.project.calibration.display_unit = w.preferred_unit()
         w.project.set_source_image(loaded)
         w._loaded = loaded
         w._objects = []          # scene.clear() in set_photo drops the items

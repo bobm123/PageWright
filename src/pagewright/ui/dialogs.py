@@ -168,7 +168,8 @@ class TilingDialog(QDialog):
 class PreferencesDialog(QDialog):
     """Application preferences (currently the seed brush size)."""
 
-    def __init__(self, brush_radius, brush_auto=True, parent=None):
+    def __init__(self, brush_radius, brush_auto=True,
+                 preferred_unit="mm", parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
 
@@ -194,6 +195,16 @@ class PreferencesDialog(QDialog):
             "Unchecked: the size is fixed in image pixels.")
         form.addRow("", self._brush_auto)
 
+        self._units = QComboBox(self)
+        self._units.addItems(["mm", "cm", "in"])
+        i = self._units.findText(preferred_unit)
+        self._units.setCurrentIndex(i if i >= 0 else 0)
+        self._units.setToolTip(
+            "Default display unit for new jobs (readouts, Measure, "
+            "size fields). A project keeps its own unit once saved; "
+            "View > Units still switches per project.")
+        form.addRow("Preferred units:", self._units)
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
@@ -205,3 +216,6 @@ class PreferencesDialog(QDialog):
 
     def brush_auto(self):
         return self._brush_auto.isChecked()
+
+    def preferred_unit(self):
+        return self._units.currentText()
