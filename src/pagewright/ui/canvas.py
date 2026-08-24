@@ -137,7 +137,7 @@ class Canvas(QGraphicsView):
         self._measure_p0 = None      # first ruler point (in progress)
         self._measure_line = None
         self._measure_label = None
-        self._measure_items = []     # finished rulers (kept until cleared)
+        self._measurements = []      # [{"p0","p1","items"}] finished rulers
         self._measure_fmt = None     # px -> display text (window supplies)
         self._seed_strokes = []
         self._redo_strokes = []
@@ -178,7 +178,7 @@ class Canvas(QGraphicsView):
         self._measure_p0 = None
         self._measure_line = None
         self._measure_label = None
-        self._measure_items = []
+        self._measurements = []
         self._seed_strokes = []
         self._redo_strokes = []
         self._active_stroke = None
@@ -293,13 +293,59 @@ class Canvas(QGraphicsView):
         self._hide_brush_cursor()
 
     def has_measurements(self):
-        return len(self._measure_items) > 0
+        return len(self._measurements) > 0
+
+    def measurements(self):
+        """Endpoint pairs [(x0, y0, x1, y1), ...] in IMAGE px - what
+        the project file stores. Labels are re-derived on restore, so
+        they follow the CURRENT unit preference."""
+        return [[m["p0"][0], m["p0"][1], m["p1"][0], m["p1"][1]]
+                for m in self._measurements]
+
+    def set_measurements(self, quads):
+        """Rebuild rulers from stored endpoint pairs (project load /
+        page switch)."""
+        self.clear_measurements()
+        for q in quads or []:
+            self._build_measurement(QPointF(q[0], q[1]),
+                                    QPointF(q[2], q[3]))
 
     def clear_measurements(self):
-        for it in self._measure_items:
-            self._scene.removeItem(it)
-        self._measure_items = []
+        for m in self._measurements:
+            for it in m["items"]:
+                self._scene.removeItem(it)
+        self._measurements = []
         self._drop_measure_preview()
+
+    def remove_measurement(self, index):
+        if 0 <= index < len(self._measurements):
+            for it in self._measurements[index]["items"]:
+                self._scene.removeItem(it)
+            del self._measurements[index]
+
+    def measurement_hit(self, global_pos, tol_view_px=6.0):
+        """Index of the ruler whose line passes near the (global)
+        cursor position, or None - for the context menu's delete."""
+        import math
+        vp = self.viewport().mapFromGlobal(global_pos)
+        pt = self.mapToScene(vp)
+        scale = self.transform().m11() or 1.0
+        tol = tol_view_px / scale
+        for i, m in enumerate(self._measurements):
+            x0, y0 = m["p0"]
+            x1, y1 = m["p1"]
+            dx, dy = x1 - x0, y1 - y0
+            L2 = dx * dx + dy * dy
+            if L2 < 1e-12:
+                d = math.hypot(pt.x() - x0, pt.y() - y0)
+            else:
+                t = ((pt.x() - x0) * dx + (pt.y() - y0) * dy) / L2
+                t = max(0.0, min(1.0, t))
+                d = math.hypot(pt.x() - (x0 + t * dx),
+                               pt.y() - (y0 + t * dy))
+            if d <= tol:
+                return i
+        return None
 
     def _drop_measure_preview(self):
         for it in (self._measure_line, self._measure_label):
@@ -347,9 +393,7 @@ class Canvas(QGraphicsView):
             self._measure_label.setPos((p0.x() + p1.x()) / 2.0,
                                        (p0.y() + p1.y()) / 2.0)
 
-    def _finish_measure(self, p1):
-        """Second click: keep the ruler; stay armed for the next one."""
-        p0 = self._measure_p0
+    def _build_measurement(self, p0, p1):
         line = self._scene.addLine(p0.x(), p0.y(), p1.x(), p1.y(),
                                    self._measure_pen())
         line.setZValue(30)
@@ -361,7 +405,13 @@ class Canvas(QGraphicsView):
             e.setZValue(30)
             ends.append(e)
         label = self._make_measure_label(self._measure_text(p0, p1), p0, p1)
-        self._measure_items += [line, label] + ends
+        self._measurements.append({
+            "p0": (p0.x(), p0.y()), "p1": (p1.x(), p1.y()),
+            "items": [line, label] + ends})
+
+    def _finish_measure(self, p1):
+        """Second click: keep the ruler; stay armed for the next one."""
+        self._build_measurement(self._measure_p0, p1)
         self._drop_measure_preview()
 
     @staticmethod

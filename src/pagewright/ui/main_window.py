@@ -352,6 +352,7 @@ class MainWindow(QMainWindow):
             r = self.canvas.roi_rect()
             pg.roi = ([r.x(), r.y(), r.width(), r.height()]
                       if r is not None else None)
+            pg.measurements = self.canvas.measurements()
 
     def add_derived_pages(self, images, stem, names=None, at_index=None,
                           activate=False):
@@ -458,11 +459,13 @@ class MainWindow(QMainWindow):
         QMessageBox.information(self, "Flatten Checked", msg)
 
     def _restore_page_roi(self, pg):
-        """Re-apply a page's saved Select Area (set_photo cleared it)."""
+        """Re-apply a page's saved Select Area and rulers (set_photo
+        cleared them). Ruler labels re-format in the CURRENT units."""
         roi = pg.roi
         if roi:
             from PySide6.QtCore import QRectF
             self.canvas.set_roi(QRectF(*roi))
+        self.canvas.set_measurements(pg.measurements)
 
     def activate_page(self, index):
         """Switch the working image to page `index`, preserving the

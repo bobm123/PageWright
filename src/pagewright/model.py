@@ -34,21 +34,27 @@ class PageEntry:
     hydrated into TracedObject instances. `roi` is the page's Select
     Area as [x, y, w, h] in image pixels, or None."""
 
-    def __init__(self, source_path="", objects=None, roi=None):
+    def __init__(self, source_path="", objects=None, roi=None,
+                 measurements=None):
         self.source_path = source_path or ""
         self.objects = list(objects) if objects else []
         self.roi = list(roi) if roi is not None else None
+        # [[x0, y0, x1, y1], ...] image px; labels re-derive from the
+        # calibration/units at load time
+        self.measurements = list(measurements) if measurements else []
 
     def to_dict(self):
         return {"source_path": self.source_path,
                 "objects": list(self.objects),
-                "roi": (list(self.roi) if self.roi is not None else None)}
+                "roi": (list(self.roi) if self.roi is not None else None),
+                "measurements": [list(q) for q in self.measurements]}
 
     @classmethod
     def from_dict(cls, d):
         return cls(source_path=d.get("source_path"),
                    objects=d.get("objects"),
-                   roi=d.get("roi"))
+                   roi=d.get("roi"),
+                   measurements=d.get("measurements"))
 
 
 class Contour:

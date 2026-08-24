@@ -154,3 +154,15 @@ def test_page_roi_round_trips():
     p2 = pio.project_from_dict(pio.project_to_dict(p))
     assert p2.pages[0].roi == [10.0, 20.0, 300.0, 400.0]
     assert p2.pages[1].roi is None
+
+
+def test_page_measurements_round_trip():
+    p = _sample_project()
+    p.pages = [PageEntry("a.png",
+                         measurements=[[0.0, 0.0, 100.0, 50.0],
+                                       [10.0, 10.0, 10.0, 90.0]]),
+               PageEntry("b.png")]
+    p2 = pio.project_from_dict(pio.project_to_dict(p))
+    assert p2.pages[0].measurements == [[0.0, 0.0, 100.0, 50.0],
+                                        [10.0, 10.0, 10.0, 90.0]]
+    assert p2.pages[1].measurements == []
