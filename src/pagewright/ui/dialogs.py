@@ -76,6 +76,16 @@ class ExportSvgDialog(QDialog):
         self._filled = QCheckBox("Fill objects (otherwise outline only)", self)
         form.addRow(self._filled)
 
+        self._annotations = QCheckBox(
+            "Include annotations layer (rulers, select area, tile grid)",
+            self)
+        self._annotations.setChecked(True)
+        self._annotations.setToolTip(
+            "Exports the on-screen overlays - measurement rulers, the "
+            "Select Area rectangle, and the tile grid when its overlay "
+            "is shown - on their own layer, easy to hide or delete.")
+        form.addRow(self._annotations)
+
         self._inkscape = QCheckBox(
             "Inkscape format (named layers, mm document units)", self)
         self._inkscape.setToolTip(
@@ -99,13 +109,15 @@ class ExportSvgDialog(QDialog):
             self._embed.isChecked() and self._downscale.isChecked())
 
     def values(self):
-        """Return (embed_photo, downscale_max_or_None, filled, inkscape)."""
+        """(embed_photo, downscale_max_or_None, filled, inkscape,
+        annotations)."""
         embed = self._embed.isChecked()
         downscale_max = None
         if embed and self._downscale.isChecked():
             downscale_max = self._max_edge.value()
         return (embed, downscale_max, self._filled.isChecked(),
-                self._inkscape.isChecked())
+                self._inkscape.isChecked(),
+                self._annotations.isChecked())
 
 
 class TilingDialog(QDialog):

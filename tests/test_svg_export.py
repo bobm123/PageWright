@@ -112,3 +112,22 @@ def test_inkscape_flavor_separates_photo_and_trace_layers():
     assert ('id="trace" inkscape:groupmode="layer" '
             'inkscape:label="Trace"') in svg
     assert svg.index('id="photo"') < svg.index('id="trace"')
+
+
+def test_annotations_layer_exports_overlays():
+    # Rulers + Select Area + tile grid ride their own group/layer,
+    # labelled in the project's display unit; absent -> no group at all.
+    p = _project_with_square(mpp=1.0)      # 1 px = 1 mm
+    anno = {"measurements": [[0.0, 0.0, 100.0, 0.0]],
+            "roi": [10.0, 20.0, 50.0, 40.0],
+            "grid_mm": ([0.0, 50.0, 100.0], [0.0, 100.0])}
+    svg = svg_export.build_svg(p, embed_photo=False, inkscape=True,
+                               annotations=anno)
+    assert ('id="annotations" inkscape:groupmode="layer" '
+            'inkscape:label="Annotations"') in svg
+    assert "100.00 mm" in svg              # ruler label, display units
+    assert 'stroke="#22cc66"' in svg       # select-area rect
+    assert svg.count('stroke="#ff00ff"') == 5   # 3 vertical + 2 horizontal
+    # no annotations -> no group
+    svg2 = svg_export.build_svg(p, embed_photo=False, inkscape=True)
+    assert 'id="annotations"' not in svg2

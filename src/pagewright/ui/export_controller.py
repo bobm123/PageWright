@@ -36,7 +36,10 @@ class ExportController:
         dlg = ExportSvgDialog(w)
         if dlg.exec() != QDialog.Accepted:
             return
-        embed, downscale_max, filled, inkscape = dlg.values()
+        (embed, downscale_max, filled, inkscape,
+         include_annotations) = dlg.values()
+        annotations = self._gather_annotations() if include_annotations \
+            else None
 
         base = os.path.splitext(os.path.basename(w._loaded.path or "trace"))[0]
         default_path = os.path.join(os.getcwd(), base + ".svg")
@@ -54,7 +57,8 @@ class ExportController:
                     embed_photo=embed,
                     downscale_max=downscale_max,
                     filled=filled,
-                    inkscape=inkscape)
+                    inkscape=inkscape,
+                    annotations=annotations)
             finally:
                 QApplication.restoreOverrideCursor()
             with open(path, "w", encoding="utf-8") as fh:
@@ -216,6 +220,36 @@ class ExportController:
         entries = w.add_derived_pages(imgs, stem, names=names)
         w.statusBar().showMessage(
             "Added %d tile page(s) to the job." % len(entries), 6000)
+
+    def _gather_annotations(self):
+        """What's on the screen, for the SVG Annotations layer: rulers,
+        the Select Area, and - when its overlay is showing - the tile
+        grid at the current tiling settings."""
+        w = self._w
+        anno = {}
+        m = w.canvas.measurements()
+        if m:
+            anno["measurements"] = m
+        r = w.canvas.roi_rect()
+        if r is not None:
+            anno["roi"] = [r.x(), r.y(), r.width(), r.height()]
+        if w.act_view_tiles.isChecked():
+            pre = self._resolved_tile_params("Export SVG")
+            if pre is not None:
+                p, mpp = pre
+                try:
+                    _c, cw, ch, _g = svg_export.build_content(
+                        w.project, image_bgr=None, embed_photo=False,
+                        as_layers=False, mm_per_pixel=mpp,
+                        region_px=self._tile_region(),
+                        allow_image_bbox=True, return_geometry=True)
+                    plan = tiling.plan_tiles(
+                        cw, ch, p["page"], p["landscape"],
+                        p["margin_mm"], p["overlap_mm"])
+                    anno["grid_mm"] = tiling.grid_lines_mm(plan, cw, ch)
+                except (svg_export.ExportError, ValueError):
+                    pass          # no grid annotation if it cannot plan
+        return anno or None
 
     def _tile_page_mm(self):
         """The tiling page size in mm, orientation applied."""

@@ -121,12 +121,17 @@ def _photo_image_tag(img, off_x, off_y, w_px, h_px, ox, oy, mpp,
 
 def build_content(project, image_bgr=None, embed_photo=True,
                   downscale_max=None, filled=False, as_layers=False,
+                  annotations=None,
                   mm_per_pixel=None, crop_photo=False, region_px=None,
                   allow_image_bbox=False, return_geometry=False):
     """Build the inner photo+trace fragment and return (content, w_mm, h_mm).
 
     Coordinates use master mm space with origin (0, 0) at the top-left of the
     margin box. `as_layers` adds Inkscape layer attributes to the groups.
+    `annotations` is an optional dict of on-screen overlays to export on
+    their own layer: "measurements" [[x0, y0, x1, y1] image px, ...],
+    "roi" [x, y, w, h] image px (the Select Area), and "grid_mm"
+    (xs, ys) master-mm tile-grid line positions.
 
     `mm_per_pixel` overrides the project's calibration (used by tiling to apply
     a scale factor or an uncalibrated default). `crop_photo` embeds only the
@@ -177,9 +182,12 @@ def build_content(project, image_bgr=None, embed_photo=True,
         photo_attrs = (' inkscape:groupmode="layer" inkscape:label="Photo"'
                        ' sodipodi:insensitive="true"')
         trace_attrs = (' inkscape:groupmode="layer" inkscape:label="Trace"')
+        anno_attrs = (' inkscape:groupmode="layer"'
+                      ' inkscape:label="Annotations"')
     else:
         photo_attrs = ""
         trace_attrs = ""
+        anno_attrs = ""
 
     out = []
     if embed_photo:
@@ -212,6 +220,10 @@ def build_content(project, image_bgr=None, embed_photo=True,
         if path:
             out.append(path + "\n")
     out.append('  </g>\n')
+    anno = _annotations_group(project, annotations, ox, oy, mpp,
+                              anno_attrs)
+    if anno:
+        out.append(anno)
     if return_geometry:
         # ox/oy: image-px position of the content origin; with mpp they
         # map master mm <-> image px. bx*/by*: the content bounding box
@@ -224,8 +236,65 @@ def build_content(project, image_bgr=None, embed_photo=True,
     return "".join(out), w_mm, h_mm
 
 
+def _annotations_group(project, annotations, ox, oy, mpp, attrs):
+    """On-screen overlays as their own SVG group/layer: rulers (teal,
+    labelled in the project's display unit), the Select Area (dashed
+    green) and the tile grid (dashed magenta). Empty -> no group."""
+    if not annotations:
+        return ""
+    from . import calibration as _calib
+    unit = project.calibration.display_unit or "mm"
+
+    def M(x, y):        # image px -> master mm
+        return (x - ox) * mpp, (y - oy) * mpp
+
+    body = []
+    for q in annotations.get("measurements") or []:
+        (x0, y0), (x1, y1) = M(q[0], q[1]), M(q[2], q[3])
+        length_mm = ((x1 - x0) ** 2 + (y1 - y0) ** 2) ** 0.5
+        body.append(
+            '    <line x1="%s" y1="%s" x2="%s" y2="%s" stroke="#00d2d2" '
+            'stroke-width="0.4" />\n'
+            % (_num(x0), _num(y0), _num(x1), _num(y1)))
+        body.append(
+            '    <text x="%s" y="%s" font-family="sans-serif" '
+            'font-size="4" fill="#00d2d2">%s</text>\n'
+            % (_num((x0 + x1) / 2.0), _num((y0 + y1) / 2.0 - 1.0),
+               _calib.format_length(length_mm, unit)))
+    roi = annotations.get("roi")
+    if roi:
+        (rx, ry), (rw, rh) = M(roi[0], roi[1]), (roi[2] * mpp, roi[3] * mpp)
+        body.append(
+            '    <rect x="%s" y="%s" width="%s" height="%s" fill="none" '
+            'stroke="#22cc66" stroke-width="0.4" '
+            'stroke-dasharray="3,2" />\n'
+            % (_num(rx), _num(ry), _num(rw), _num(rh)))
+    grid = annotations.get("grid_mm")
+    if grid:
+        xs, ys = grid
+        x_lo, x_hi = min(xs), max(xs)
+        y_lo, y_hi = min(ys), max(ys)
+        for x in xs:
+            body.append(
+                '    <line x1="%s" y1="%s" x2="%s" y2="%s" '
+                'stroke="#ff00ff" stroke-width="0.3" '
+                'stroke-dasharray="2,2" />\n'
+                % (_num(x), _num(y_lo), _num(x), _num(y_hi)))
+        for y in ys:
+            body.append(
+                '    <line x1="%s" y1="%s" x2="%s" y2="%s" '
+                'stroke="#ff00ff" stroke-width="0.3" '
+                'stroke-dasharray="2,2" />\n'
+                % (_num(x_lo), _num(y), _num(x_hi), _num(y)))
+    if not body:
+        return ""
+    return ('  <g id="annotations"%s>\n' % attrs) + "".join(body) \
+        + '  </g>\n'
+
+
 def build_svg(project, image_bgr=None, embed_photo=True,
               downscale_max=None, filled=False, inkscape=False,
+              annotations=None,
               crop_photo=False):
     """Build and return the full SVG document text for `project`.
 
@@ -234,6 +303,7 @@ def build_svg(project, image_bgr=None, embed_photo=True,
     content, w_mm, h_mm = build_content(
         project, image_bgr=image_bgr, embed_photo=embed_photo,
         downscale_max=downscale_max, filled=filled, as_layers=inkscape,
+        annotations=annotations,
         crop_photo=crop_photo)
 
     out = []
