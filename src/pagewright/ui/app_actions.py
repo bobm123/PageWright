@@ -13,13 +13,22 @@ _BRUSH_PRESETS = (6, 12, 20, 32, 48)   # screen px
 
 def build_actions(w):
     """Create every QAction on the window `w`."""
+    w.act_new_project = QAction("&New Project", w)
+    w.act_new_project.triggered.connect(w.new_project)
+
     w.act_open_project = QAction("&Open Project…", w)
     w.act_open_project.setShortcut(QKeySequence.Open)        # Ctrl+O
     w.act_open_project.triggered.connect(w.open_project_file)
 
-    w.act_save_project = QAction("&Save Project…", w)
+    w.act_save_project = QAction("&Save Project", w)
     w.act_save_project.setShortcut(QKeySequence.Save)        # Ctrl+S
+    w.act_save_project.setToolTip(
+        "Save to the project's file (asks for a name the first time)")
     w.act_save_project.triggered.connect(w.save_project_file)
+
+    w.act_save_project_as = QAction("Save Project &As…", w)
+    w.act_save_project_as.setShortcut("Ctrl+Shift+S")
+    w.act_save_project_as.triggered.connect(w.save_project_file_as)
 
     w.act_paste = QAction("&Paste Image", w)
     w.act_paste.setShortcut(QKeySequence.Paste)
@@ -176,8 +185,13 @@ def build_menus(w):
     mb = w.menuBar()
 
     m_file = mb.addMenu("&File")
+    m_file.addAction(w.act_new_project)
     m_file.addAction(w.act_open_project)
+    w.menu_recent = m_file.addMenu("Open &Recent")
+    w.menu_recent.aboutToShow.connect(
+        lambda: w.projects.populate_recent_menu(w.menu_recent))
     m_file.addAction(w.act_save_project)
+    m_file.addAction(w.act_save_project_as)
     m_file.addSeparator()
     m_file.addAction(w.act_open)
     m_file.addAction(w.act_paste)

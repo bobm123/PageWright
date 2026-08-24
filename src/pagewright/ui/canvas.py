@@ -167,6 +167,29 @@ class Canvas(QGraphicsView):
         self.fit_to_view()
         self.seedsChanged.emit()
 
+    def clear_all(self):
+        """Remove the photo and every overlay (File > New Project)."""
+        self._scene.clear()
+        self._photo_item = None
+        self._image_rect = QRectF()
+        self._calib_points = []
+        self._calib_markers = []
+        self._calib_line = None
+        self._measure_p0 = None
+        self._measure_line = None
+        self._measure_label = None
+        self._measure_items = []
+        self._seed_strokes = []
+        self._redo_strokes = []
+        self._active_stroke = None
+        self._bbox_item = None
+        self._tile_items = []
+        self._brush_cursor = None
+        self._roi_rect = None
+        self._roi_item = None
+        self._roi_origin = None
+        self._scene.setSceneRect(QRectF())
+
     def has_photo(self):
         return self._photo_item is not None
 

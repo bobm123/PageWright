@@ -48,6 +48,7 @@ class MainWindow(QMainWindow):
         self.resize(1440, 860)
 
         self.project = Project()
+        self._project_path = None      # the project's file, once saved/opened
         self._loaded = None            # image_io.LoadedImage (BGR array source)
         self._objects = []             # list[ObjectLayer]
         self._active_index = -1
@@ -155,7 +156,8 @@ class MainWindow(QMainWindow):
                   self.act_clear_seeds, self.act_export,
                   self.act_export_tiles, self.act_show_bbox,
                   self.act_view_tiles,
-                  self.act_save_project, self.act_new_object,
+                  self.act_save_project, self.act_save_project_as,
+                  self.act_new_object,
                   self.act_mode_roi, self.act_clear_roi,
                   self.act_dewarp, self.act_print_tiles,
                   self.act_rotate_cw,
@@ -708,6 +710,35 @@ class MainWindow(QMainWindow):
             "Flattened image is now the working image; scale calibrated "
             "from the dewarp output (%d DPI). Temporary file - use "
             "Save/Export to keep it." % dpi, 8000)
+
+    def new_project(self):
+        """File > New Project: back to an empty workspace."""
+        resp = QMessageBox.question(
+            self, "New Project",
+            "Start a new empty project?\nUnsaved changes will be lost.",
+            QMessageBox.Yes | QMessageBox.Cancel)
+        if resp != QMessageBox.Yes:
+            return
+        self._leave_dewarp_stage()
+        self.project = Project()
+        self._project_path = None
+        self._loaded = None
+        self._objects = []
+        self._active_index = -1
+        self._polygon_counter = 0
+        self.undo_stack.clear()
+        self.canvas.clear_all()
+        self._set_tools_enabled(False)
+        self._refresh_object_list()
+        self._refresh_pages_panel()
+        self._refresh_scale_readout()
+        self._update_bbox()
+        self.setWindowTitle("PageWright")
+        self.statusBar().showMessage(
+            "New project - load or paste an image to begin.", 6000)
+
+    def save_project_file_as(self):
+        self.projects.save_project_as()
 
     def save_project_file(self):
         self.projects.save_project()

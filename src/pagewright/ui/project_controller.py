@@ -94,6 +94,7 @@ class ProjectController:
         w._refresh_object_list()
         w.set_unit(w.project.calibration.display_unit)
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
+        w._project_path = None      # a fresh job has no project file yet
         w._refresh_scale_readout()
         # a freshly loaded image starts a one-page job (M1)
         w.project.pages = [PageEntry(source_path=loaded.path)]
@@ -147,6 +148,8 @@ class ProjectController:
         w._update_bbox()
         w._refresh_pages_panel()
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
+        w._project_path = path
+        self._add_recent(path)
 
         if saved_w and (saved_w != loaded.pixel_width
                         or saved_h != loaded.pixel_height):
@@ -157,25 +160,90 @@ class ProjectController:
         w.statusBar().showMessage("Opened project %s" % path, 6000)
 
     def save_project(self):
+        """Ctrl+S: save to the project's known file, silently, once it
+        has one (set by Save As or Open). First save asks for a name."""
         w = self._w
         if w._loaded is None:
             return
-        w._store_current_page()   # pages[] carries every page's traces
-        w.project.tiling = w.tiling_panel.to_dict()
-        base = os.path.splitext(
-            os.path.basename(w._loaded.path or "project"))[0]
-        default_path = os.path.join(os.getcwd(), base + ".tiproj.json")
+        if not w._project_path:
+            self.save_project_as()
+            return
+        self._write_project(w._project_path)
+
+    def save_project_as(self):
+        """File > Save Project As: pick name and folder; both are
+        remembered - the project keeps the USER'S name (SumpArea.json)
+        rather than one derived from the source image."""
+        w = self._w
+        if w._loaded is None:
+            return
+        if w._project_path:
+            default_path = w._project_path
+        else:
+            base = os.path.splitext(
+                os.path.basename(w._loaded.path or "project"))[0]
+            default_path = os.path.join(os.getcwd(),
+                                        base + ".tiproj.json")
         path, _ = QFileDialog.getSaveFileName(
-            w, "Save Project", default_path, PROJECT_FILTER)
+            w, "Save Project As", default_path, PROJECT_FILTER)
         if not path:
             return
+        self._write_project(path)
+
+    def _write_project(self, path):
+        w = self._w
+        w._store_current_page()   # pages[] carries every page's traces
+        w.project.tiling = w.tiling_panel.to_dict()
         try:
             project_io.save_project(w.project, path)
         except Exception as exc:
             QMessageBox.critical(w, "Save Project",
                                  "Could not save: %s" % (exc,))
             return
+        w._project_path = path
+        w.setWindowTitle("PageWright — %s" % os.path.basename(path))
+        self._add_recent(path)
         w.statusBar().showMessage("Saved project %s" % path, 6000)
+
+    # ----- recent projects --------------------------------------------------
+
+    _MAX_RECENT = 8
+
+    def _settings(self):
+        from PySide6.QtCore import QSettings
+        return QSettings("PageWright", "PageWright")
+
+    def recent_projects(self):
+        val = self._settings().value("recent_projects") or []
+        if isinstance(val, str):
+            val = [val]
+        return list(val)[: self._MAX_RECENT]
+
+    def _add_recent(self, path):
+        lst = [p for p in self.recent_projects()
+               if os.path.normcase(p) != os.path.normcase(path)]
+        lst.insert(0, path)
+        self._settings().setValue("recent_projects",
+                                  lst[: self._MAX_RECENT])
+
+    def clear_recent(self):
+        self._settings().setValue("recent_projects", [])
+
+    def populate_recent_menu(self, menu):
+        """Fill File > Open Recent on demand (aboutToShow)."""
+        menu.clear()
+        entries = [p for p in self.recent_projects() if os.path.isfile(p)]
+        if not entries:
+            a = menu.addAction("(no recent projects)")
+            a.setEnabled(False)
+            return
+        for path in entries:
+            a = menu.addAction("%s   (%s)" % (os.path.basename(path),
+                                              os.path.dirname(path)))
+            a.triggered.connect(
+                lambda _=False, p=path: self.load_project(p))
+        menu.addSeparator()
+        menu.addAction("Clear List").triggered.connect(self.clear_recent)
 
     # ----- helpers ---------------------------------------------------------
 
