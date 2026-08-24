@@ -97,3 +97,18 @@ def test_filled_mode_sets_fill():
     # filled mode uses a non-"none" fill on the path
     path = re.search(r'<path [^>]*/>', svg).group(0)
     assert 'fill="none"' not in path
+
+
+def test_inkscape_flavor_separates_photo_and_trace_layers():
+    # The photo must be its own LOCKED Inkscape layer under a separate
+    # Trace layer, so node editing cannot disturb the image.
+    np = pytest.importorskip("numpy")
+    p = _project_with_square()
+    img = np.full((p.pixel_height, p.pixel_width, 3), 128, np.uint8)
+    svg = svg_export.build_svg(p, image_bgr=img, embed_photo=True,
+                               inkscape=True)
+    assert ('id="photo" inkscape:groupmode="layer" '
+            'inkscape:label="Photo" sodipodi:insensitive="true"') in svg
+    assert ('id="trace" inkscape:groupmode="layer" '
+            'inkscape:label="Trace"') in svg
+    assert svg.index('id="photo"') < svg.index('id="trace"')
