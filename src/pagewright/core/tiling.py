@@ -29,7 +29,9 @@ PAGE_SIZES_MM = {
     "A3": (297.0, 420.0),
 }
 
-_DIAMOND_MM = 2.5          # half-diagonal: 5 mm point-to-point diamonds
+_DIAMOND_MM = 2.5
+MARK_COLOR = "#ff00ff"     # factory default for tile marks (outline,
+MARK_OPACITY = 0.45        # label, diamonds); Preferences can override          # half-diagonal: 5 mm point-to-point diamonds
 _EPS = 1e-6
 
 
@@ -117,7 +119,7 @@ def grid_lines_mm(plan, content_w, content_h):
     return sorted(xs), sorted(ys)
 
 
-def _diamond(cx, cy):
+def _diamond(cx, cy, color, opacity):
     """A small filled diamond (rotated square) centred at (cx, cy), in mm."""
     d = _DIAMOND_MM
     pts = [(cx, cy - d), (cx + d, cy), (cx, cy + d), (cx - d, cy)]
@@ -126,11 +128,12 @@ def _diamond(cx, cy):
         for i, (x, y) in enumerate(pts))
     # Same color as the dashed live-area outline, and translucent so
     # pattern lines under a diamond stay visible when aligning sheets.
-    return ('    <path d="%s Z" fill="#ff00ff" fill-opacity="0.45" '
-            'stroke="none" />\n' % body)
+    return ('    <path d="%s Z" fill="%s" fill-opacity="%s" '
+            'stroke="none" />\n' % (body, color, _num(opacity)))
 
 
-def _registration_marks(margin, live_w, live_h):
+def _registration_marks(margin, live_w, live_h, color=MARK_COLOR,
+                        opacity=MARK_OPACITY):
     """5 mm filled diamonds at the CORNERS and edge MIDPOINTS of the
     tile's live area (the overlap frame).
 
@@ -146,15 +149,20 @@ def _registration_marks(margin, live_w, live_h):
     cx = margin + live_w / 2.0
     cy = margin + live_h / 2.0
     marks = [
-        _diamond(x0, y0), _diamond(x1, y0),     # top corners
-        _diamond(x0, y1), _diamond(x1, y1),     # bottom corners
-        _diamond(cx, y0), _diamond(cx, y1),     # top/bottom midpoints
-        _diamond(x0, cy), _diamond(x1, cy),     # left/right midpoints
+        _diamond(x0, y0, color, opacity),       # corners
+        _diamond(x1, y0, color, opacity),
+        _diamond(x0, y1, color, opacity),
+        _diamond(x1, y1, color, opacity),
+        _diamond(cx, y0, color, opacity),       # edge midpoints
+        _diamond(cx, y1, color, opacity),
+        _diamond(x0, cy, color, opacity),
+        _diamond(x1, cy, color, opacity),
     ]
     return "".join(marks)
 
 
-def _tile_svg(content, plan, r, c, content_w, content_h):
+def _tile_svg(content, plan, r, c, content_w, content_h,
+              mark_color=MARK_COLOR, mark_opacity=MARK_OPACITY):
     pw, ph = plan["page_w"], plan["page_h"]
     printable_w, printable_h = plan["printable_w"], plan["printable_h"]
     step_x, step_y = plan["step_x"], plan["step_y"]
@@ -192,17 +200,20 @@ def _tile_svg(content, plan, r, c, content_w, content_h):
     # Live (non-overlap) area outline.
     out.append(
         '  <rect x="%s" y="%s" width="%s" height="%s" fill="none" '
-        'stroke="#ff00ff" stroke-width="0.2" stroke-dasharray="2,2" />\n'
-        % (_num(margin), _num(margin), _num(live_w), _num(live_h)))
+        'stroke="%s" stroke-width="0.2" stroke-dasharray="2,2" />\n'
+        % (_num(margin), _num(margin), _num(live_w), _num(live_h),
+           mark_color))
 
     # Registration diamonds at the midpoint of each live-area edge.
-    out.append(_registration_marks(margin, live_w, live_h))
+    out.append(_registration_marks(margin, live_w, live_h,
+                                   mark_color, mark_opacity))
 
     # Grid label.
     out.append(
         '  <text x="%s" y="%s" font-family="sans-serif" font-size="4" '
-        'fill="#ff00ff">R%d-C%d</text>\n'
-        % (_num(margin + 1.5), _num(margin + 5.0), r + 1, c + 1))
+        'fill="%s">R%d-C%d</text>\n'
+        % (_num(margin + 1.5), _num(margin + 5.0), mark_color,
+           r + 1, c + 1))
 
     out.append('</svg>\n')
     return "".join(out)
@@ -282,6 +293,13 @@ def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
     jobs balloon to hundreds of MB and hang print preview/rendering.
     """
     embed = embed_photo and image_bgr is not None
+    # Optional per-project mark styling (Preferences color picker);
+    # None on the project -> factory defaults, so old files are
+    # unaffected and 'no colors in file' keeps whatever is current.
+    mark_color = getattr(project, "mark_color", None) or MARK_COLOR
+    mark_opacity = getattr(project, "mark_opacity", None)
+    if mark_opacity is None:
+        mark_opacity = MARK_OPACITY
     # Vector-only master content (traces); photo slices are added per
     # tile below. allow_image_bbox keeps the image-only case working.
     content_vec, content_w, content_h, geom = svg_export.build_content(
@@ -316,5 +334,6 @@ def build_tiles(project, image_bgr=None, page="Letter", landscape=False,
                                ) + content_vec
             name = "%s-r%dc%d.svg" % (base_name, r + 1, c + 1)
             tiles.append((name, _tile_svg(content, plan, r, c,
-                                          content_w, content_h)))
+                                          content_w, content_h,
+                                          mark_color, mark_opacity)))
     return tiles

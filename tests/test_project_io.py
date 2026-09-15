@@ -166,3 +166,15 @@ def test_page_measurements_round_trip():
     assert p2.pages[0].measurements == [[0.0, 0.0, 100.0, 50.0],
                                         [10.0, 10.0, 10.0, 90.0]]
     assert p2.pages[1].measurements == []
+
+
+def test_mark_style_round_trip_and_absent():
+    p = _sample_project()
+    p.mark_color, p.mark_opacity = "#123456", 0.7
+    p2 = pio.project_from_dict(pio.project_to_dict(p))
+    assert p2.mark_color == "#123456" and p2.mark_opacity == 0.7
+    # unchanged style -> nothing written; loading leaves current alone
+    q = _sample_project()
+    d = pio.project_to_dict(q)
+    assert "marks" not in d
+    assert pio.project_from_dict(d).mark_color is None

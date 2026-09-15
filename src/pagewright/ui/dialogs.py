@@ -181,7 +181,8 @@ class PreferencesDialog(QDialog):
     """Application preferences (currently the seed brush size)."""
 
     def __init__(self, brush_radius, brush_auto=True,
-                 preferred_unit="mm", parent=None):
+                 preferred_unit="mm", mark_color="#ff00ff",
+                 mark_opacity=0.45, parent=None):
         super().__init__(parent)
         self.setWindowTitle("Preferences")
 
@@ -217,6 +218,30 @@ class PreferencesDialog(QDialog):
             "View > Units still switches per project.")
         form.addRow("Preferred units:", self._units)
 
+        from PySide6.QtGui import QColor
+        from PySide6.QtWidgets import QHBoxLayout, QPushButton, QWidget
+        self._mark_color = QColor(mark_color)
+        self._mark_color.setAlphaF(float(mark_opacity))
+        self._mark_btn = QPushButton(self)
+        self._mark_btn.setFixedSize(48, 22)
+        self._mark_btn.setToolTip(
+            "Color of the printed tile marks: the dashed live-area "
+            "outline, the R-C label, and the registration diamonds. "
+            "The opacity (alpha) applies to the diamond FILL so the "
+            "pattern under a diamond stays visible.")
+        self._mark_btn.clicked.connect(self._pick_mark_color)
+        btn_reset = QPushButton("Reset to default", self)
+        btn_reset.clicked.connect(self._reset_mark_color)
+        row = QHBoxLayout()
+        row.setContentsMargins(0, 0, 0, 0)
+        row.addWidget(self._mark_btn)
+        row.addWidget(btn_reset)
+        row.addStretch(1)
+        host = QWidget(self)
+        host.setLayout(row)
+        form.addRow("Tile marks:", host)
+        self._update_mark_swatch()
+
         buttons = QDialogButtonBox(
             QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
         buttons.accepted.connect(self.accept)
@@ -231,3 +256,30 @@ class PreferencesDialog(QDialog):
 
     def preferred_unit(self):
         return self._units.currentText()
+
+    def _update_mark_swatch(self):
+        c = self._mark_color
+        self._mark_btn.setStyleSheet(
+            "background-color: rgba(%d,%d,%d,%d); border: 1px solid #888;"
+            % (c.red(), c.green(), c.blue(), c.alpha()))
+
+    def _pick_mark_color(self):
+        from PySide6.QtWidgets import QColorDialog
+        c = QColorDialog.getColor(
+            self._mark_color, self, "Tile mark color",
+            QColorDialog.ShowAlphaChannel)
+        if c.isValid():
+            self._mark_color = c
+            self._update_mark_swatch()
+
+    def _reset_mark_color(self):
+        from PySide6.QtGui import QColor
+        from ..core.tiling import MARK_COLOR, MARK_OPACITY
+        self._mark_color = QColor(MARK_COLOR)
+        self._mark_color.setAlphaF(MARK_OPACITY)
+        self._update_mark_swatch()
+
+    def mark_values(self):
+        """("#rrggbb", opacity 0..1)."""
+        c = self._mark_color
+        return (c.name(), round(c.alphaF(), 3))

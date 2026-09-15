@@ -170,6 +170,33 @@ class MainWindow(QMainWindow):
         """Open a photo or .json project by path (command-line arg)."""
         self.projects.open_path(path)
 
+    def current_marks(self):
+        """Session tile-mark style ("#rrggbb", opacity) - the CURRENT
+        colors. Factory defaults unless changed in Preferences or
+        overridden by opening a project that carries colors."""
+        from PySide6.QtCore import QSettings
+        from ..core.tiling import MARK_COLOR, MARK_OPACITY
+        st = QSettings("PageWright", "PageWright")
+        color = st.value("mark_color") or MARK_COLOR
+        try:
+            opacity = float(st.value("mark_opacity"))
+        except (TypeError, ValueError):
+            opacity = MARK_OPACITY
+        return color, opacity
+
+    def set_current_marks(self, color, opacity):
+        """Update the session style (persists across restarts) and the
+        open project so the very next print/preview uses it."""
+        from PySide6.QtCore import QSettings
+        from ..core.tiling import MARK_COLOR, MARK_OPACITY
+        st = QSettings("PageWright", "PageWright")
+        st.setValue("mark_color", color)
+        st.setValue("mark_opacity", opacity)
+        default = (color.lower() == MARK_COLOR
+                   and abs(opacity - MARK_OPACITY) < 1e-6)
+        self.project.mark_color = None if default else color
+        self.project.mark_opacity = None if default else opacity
+
     def preferred_unit(self):
         """The Preferences default unit for NEW jobs (QSettings)."""
         from PySide6.QtCore import QSettings
@@ -178,12 +205,14 @@ class MainWindow(QMainWindow):
 
     def open_preferences(self):
         """File -> Preferences: app settings (brush, preferred units)."""
+        mc, mo = self.current_marks()
         dlg = PreferencesDialog(self.canvas.brush_radius(),
                                 self.canvas.brush_auto(),
-                                self.preferred_unit(), self)
+                                self.preferred_unit(), mc, mo, self)
         if dlg.exec() == QDialog.Accepted:
             self.canvas.set_brush_radius(dlg.brush_radius())
             self.canvas.set_brush_auto(dlg.brush_auto())
+            self.set_current_marks(*dlg.mark_values())
             from PySide6.QtCore import QSettings
             QSettings("PageWright", "PageWright").setValue(
                 "preferred_unit", dlg.preferred_unit())

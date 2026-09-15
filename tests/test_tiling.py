@@ -242,3 +242,21 @@ def test_tile_crop_rects_match_build_tiles_grid():
                             mm_per_pixel=1.0)
     plan = plan_tiles(500, 200, "A4", True, 8.0, 5.0)
     assert len(rects) == plan["nrows"] * plan["ncols"]
+
+
+def test_mark_style_defaults_and_override():
+    from pagewright.core.tiling import MARK_COLOR, build_tiles
+    from pagewright.model import Contour, TracedObject
+    p = Project()
+    p.pixel_width, p.pixel_height = 300, 200
+    p.calibration.mm_per_pixel = 1.0
+    o = TracedObject(name="sq")
+    o.contours.append(Contour(points=[(0, 0), (300, 0), (300, 200),
+                                      (0, 200)]))
+    p.objects = [o]
+    _name, svg = build_tiles(p, page="A3", landscape=True)[0]
+    assert MARK_COLOR in svg                       # factory default
+    p.mark_color, p.mark_opacity = "#0080ff", 0.3  # custom (project file)
+    _name, svg = build_tiles(p, page="A3", landscape=True)[0]
+    assert '#0080ff' in svg and 'fill-opacity="0.3"' in svg
+    assert MARK_COLOR not in svg

@@ -121,6 +121,11 @@ class Project:
         self.margin_mm = 5.0
         self.objects = []   # [TracedObject]
         self.tiling = default_tiling()   # tiled-printing settings
+        # Tile-mark styling override (None = app factory defaults).
+        # Set from the CURRENT session style at save time only when it
+        # differs from factory, so unchanged projects stay colorless.
+        self.mark_color = None       # "#rrggbb" or None
+        self.mark_opacity = None     # 0..1 diamond fill opacity, or None
 
     def set_source_image(self, loaded_image):
         """Record the loaded image's path and pixel dimensions."""

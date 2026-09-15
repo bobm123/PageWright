@@ -79,6 +79,11 @@ class ProjectController:
 
         w.project = Project()
         w.project.calibration.display_unit = w.preferred_unit()
+        _c, _o = w.current_marks()
+        from ..core.tiling import MARK_COLOR, MARK_OPACITY
+        if not (_c.lower() == MARK_COLOR
+                and abs(_o - MARK_OPACITY) < 1e-6):
+            w.project.mark_color, w.project.mark_opacity = _c, _o
         w.project.set_source_image(loaded)
         w._loaded = loaded
         w._objects = []          # scene.clear() in set_photo drops the items
@@ -151,6 +156,12 @@ class ProjectController:
         w.setWindowTitle("PageWright — %s" % os.path.basename(path))
         w._project_path = path
         self._add_recent(path)
+        if project.mark_color:
+            # a project WITH colors overrides and becomes current
+            w.set_current_marks(project.mark_color,
+                                project.mark_opacity
+                                if project.mark_opacity is not None
+                                else 0.45)
 
         if saved_w and (saved_w != loaded.pixel_width
                         or saved_h != loaded.pixel_height):
@@ -194,6 +205,14 @@ class ProjectController:
     def _write_project(self, path):
         w = self._w
         w._store_current_page()   # pages[] carries every page's traces
+        # colors go into the file only when customized (rule: a file
+        # without colors leaves the CURRENT style alone on load)
+        from ..core.tiling import MARK_COLOR, MARK_OPACITY
+        color, opacity = w.current_marks()
+        default = (color.lower() == MARK_COLOR
+                   and abs(opacity - MARK_OPACITY) < 1e-6)
+        w.project.mark_color = None if default else color
+        w.project.mark_opacity = None if default else opacity
         w.project.tiling = w.tiling_panel.to_dict()
         try:
             project_io.save_project(w.project, path)

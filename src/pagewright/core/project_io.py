@@ -67,7 +67,7 @@ def objects_from_list(lst):
 
 def project_to_dict(project):
     """Serialise a Project to a JSON-ready dict."""
-    return {
+    d = {
         "version": FORMAT_VERSION,
         "source_image": project.source_image_path,
         "pixel_width": project.pixel_width,
@@ -88,6 +88,11 @@ def project_to_dict(project):
                                for o in project.objects]).to_dict()]),
         "current_page": int(getattr(project, "current_page", 0)),
     }
+    # optional tile-mark styling: written only when customized
+    if getattr(project, "mark_color", None):
+        d["marks"] = {"color": project.mark_color,
+                      "opacity": project.mark_opacity}
+    return d
 
 
 # ----- dict -> model --------------------------------------------------------
@@ -143,6 +148,11 @@ def project_from_dict(d):
     project.tiling = tiling
 
     project.objects = [_object_from_dict(o) for o in d.get("objects", [])]
+    marks = d.get("marks")
+    if marks:
+        project.mark_color = marks.get("color")
+        project.mark_opacity = marks.get("opacity")
+
     pages = d.get("pages")
     if pages:
         project.pages = [PageEntry.from_dict(pg) for pg in pages]
