@@ -391,6 +391,16 @@ studio" and the "Session Handoff" section below it) and
   submenu or QColorDialog wired to the active TracedObject, refresh
   canvas + SVG export picks it up for free. (Robert, 2026-08-11)
 
+- Themes vs mark colors (noted 2026-09-15): today, opening a project
+  that carries custom tile-mark colors silently overrides the current
+  session style (Robert approved; Preferences > Reset to default is
+  the way back). IF the app ever grows THEMES (light / dark / follow
+  system), that silent override starts fighting the theme - so at
+  that point, replace it with a small "Load custom color scheme?"
+  dialog shown only when opening a project WOULD change the current
+  color selections (offer: use the project's colors / keep mine).
+  Until themes exist, the silent override is the right simplicity.
+
 ## 15. Multi-page jobs (design sketch, not yet built)
 
 Scenarios to support: a directory of book/magazine scan images; a
