@@ -82,7 +82,7 @@ def test_tiles_have_labels_and_filled_marks():
     assert "clipPath" in svg
     # registration diamonds are filled closed paths
     assert svg.count("Z") >= 1
-    assert 'fill="#000000" stroke="none"' in svg
+    assert 'fill="#ff00ff" fill-opacity="0.45" stroke="none"' in svg
 
 
 def test_grid_lines_mm():

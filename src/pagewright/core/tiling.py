@@ -124,7 +124,10 @@ def _diamond(cx, cy):
     body = " ".join(
         "%s %s %s" % ("M" if i == 0 else "L", _num(x), _num(y))
         for i, (x, y) in enumerate(pts))
-    return ('    <path d="%s Z" fill="#000000" stroke="none" />\n' % body)
+    # Same color as the dashed live-area outline, and translucent so
+    # pattern lines under a diamond stay visible when aligning sheets.
+    return ('    <path d="%s Z" fill="#ff00ff" fill-opacity="0.45" '
+            'stroke="none" />\n' % body)
 
 
 def _registration_marks(margin, live_w, live_h):
