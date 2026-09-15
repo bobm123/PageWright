@@ -115,6 +115,11 @@ class Canvas(QGraphicsView):
 
         # Trace area (region of interest) in scene/pixel coords.
         self._roi_rect = None      # QRectF or None
+        self._measure_p0 = None    # first ruler point (in progress)
+        self._measure_line = None
+        self._measure_label = None
+        self._measurements = []    # [{"p0","p1","items"}] finished rulers
+        self._measure_fmt = None   # px -> display text (window supplies)
         self._roi_item = None      # persistent dashed rectangle
         self._roi_origin = None    # drag anchor while selecting
         self._roi_edit = None      # ("l"/"r","t"/"b" combo) while resizing
@@ -134,11 +139,10 @@ class Canvas(QGraphicsView):
         self._calib_points = []
         self._calib_markers = []
         self._calib_line = None
-        self._measure_p0 = None      # first ruler point (in progress)
+        self._measure_p0 = None
         self._measure_line = None
         self._measure_label = None
-        self._measurements = []      # [{"p0","p1","items"}] finished rulers
-        self._measure_fmt = None     # px -> display text (window supplies)
+        self._measurements = []
         self._seed_strokes = []
         self._redo_strokes = []
         self._active_stroke = None
