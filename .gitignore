@@ -2,6 +2,12 @@
 output/
 *.svg
 
+# Saved .tiproj.json jobs: local working files. They reference
+# source images by absolute path (and derived/imported pages still
+# point into the temp dir), so they are not portable between
+# machines and do not belong in the repo.
+projects/
+
 # Python
 __pycache__/
 *.py[cod]
