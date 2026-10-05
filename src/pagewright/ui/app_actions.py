@@ -59,6 +59,12 @@ def build_actions(w):
     w.act_open.setShortcut("Ctrl+Shift+O")
     w.act_open.triggered.connect(w.open_photo)
 
+    w.act_open_svg = QAction("Open S&VG…", w)
+    w.act_open_svg.setToolTip(
+        "Import existing vector art (Inkscape or any SVG) to print tiled "
+        "at its true size")
+    w.act_open_svg.triggered.connect(w.open_svg)
+
     w.act_export = QAction("&Export SVG…", w)
     w.act_export.setShortcut("Ctrl+E")
     w.act_export.triggered.connect(w.export_svg)
@@ -194,6 +200,7 @@ def build_menus(w):
     m_file.addAction(w.act_save_project_as)
     m_file.addSeparator()
     m_file.addAction(w.act_open)
+    m_file.addAction(w.act_open_svg)
     m_file.addAction(w.act_paste)
     m_file.addAction(w.act_export)
     m_file.addAction(w.act_export_tiles)

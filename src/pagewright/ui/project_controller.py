@@ -19,9 +19,18 @@ from ..model import PageEntry, Project
 from .display import display_downscale, ndarray_to_qpixmap
 
 IMAGE_FILTER = (
-    "Images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.pdf);;"
+    "Images and drawings "
+    "(*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.pdf *.svg);;"
     "All files (*)")
 PROJECT_FILTER = "PageWright project (*.tiproj.json *.json);;All files (*)"
+
+# Pages are RASTER sources: a page is a decoded image the trace/flatten
+# tools work on. SVG is deliberately absent - vector art comes in via
+# File > Open SVG as objects, not as a page bitmap (see
+# MainWindow.open_svg).
+PAGE_FILTER = (
+    "Page images (*.png *.jpg *.jpeg *.bmp *.tif *.tiff *.webp *.pdf);;"
+    "All files (*)")
 
 
 class ProjectController:
@@ -43,6 +52,8 @@ class ProjectController:
             self.load_project(path)
         elif path.lower().endswith(".pdf"):
             self._w.import_pdf(path)
+        elif path.lower().endswith(".svg"):
+            self._w.open_svg(path)
         else:
             self.load_photo(path)
 
@@ -71,6 +82,11 @@ class ProjectController:
         if path.lower().endswith(".pdf"):
             # Load Image accepts PDFs too: hand off to the page picker
             w.import_pdf(path)
+            return
+        if path.lower().endswith(".svg"):
+            # ...and SVGs: vector art has no pixels to trace, so it goes
+            # straight in as objects (true size already known)
+            w.open_svg(path)
             return
         loaded, pixmap = self._read_image(path, "Load Image")
         if loaded is None:

@@ -207,6 +207,22 @@ class Canvas(QGraphicsView):
         self._roi_origin = None
         self._scene.setSceneRect(QRectF())
 
+    def show_blank(self, width_px, height_px):
+        """Show an empty white sheet of the given pixel size.
+
+        For vector-only jobs (imported SVG art): there is no photograph,
+        but the rest of the canvas - overlays, ROI, mouse handling, the
+        fit/zoom helpers - keys off a background item existing, so a
+        blank one is handed to the normal set_photo path rather than
+        special-casing "no photo" in a dozen places. A small proxy is
+        scaled up to the full size, so a 4 m drawing costs no memory.
+        """
+        from PySide6.QtGui import QPixmap
+        proxy = QPixmap(64, 64)
+        proxy.fill(QColor(255, 255, 255))
+        self.set_photo(proxy, (max(1, int(width_px)),
+                               max(1, int(height_px))))
+
     def has_photo(self):
         return self._photo_item is not None
 

@@ -535,6 +535,15 @@ class MainWindow(QMainWindow):
 
     def _append_pages(self, paths):
         added = [p for p in paths if p]
+        # Pages are raster sources. An SVG has no pixels to trace, so it
+        # is imported as objects instead - say so rather than failing
+        # later with "could not read image".
+        vectors = [p for p in added if p.lower().endswith(".svg")]
+        if vectors:
+            added = [p for p in added if not p.lower().endswith(".svg")]
+            self.statusBar().showMessage(
+                "Skipped %d SVG file(s): use File > Open SVG to import "
+                "vector art." % len(vectors), 8000)
         if not added:
             return
         first_job_page = not self.project.pages and self._loaded is None
@@ -549,9 +558,9 @@ class MainWindow(QMainWindow):
 
     def add_page_images(self):
         from PySide6.QtWidgets import QFileDialog
-        from .project_controller import IMAGE_FILTER
+        from .project_controller import PAGE_FILTER
         paths, _ = QFileDialog.getOpenFileNames(
-            self, "Add Images", "", IMAGE_FILTER)
+            self, "Add Images", "", PAGE_FILTER)
         self._append_pages(paths)
 
     def add_page_folder(self):
@@ -640,6 +649,117 @@ class MainWindow(QMainWindow):
             "Imported %d PDF page(s) at %d DPI - true size known, so the "
             "scale is calibrated. Temporary files; use Save/Export to "
             "keep results." % (len(out), dpi), 8000)
+
+    # A vector job's stand-in bitmap is capped on its longest side: at
+    # PX_PER_MM=10 a 2 m banner would otherwise be 20000 px (1.2 GB).
+    # The cap only coarsens the blank backdrop - geometry is vector and
+    # the calibration is rescaled to match, so printed size is exact.
+    SVG_SHEET_MAX_PX = 4000
+
+    def _blank_working_image(self, path):
+        """A white LoadedImage the size of the imported artwork.
+
+        Rescales the project calibration when the sheet is capped, so
+        mm_per_pixel * pixel_width still equals the true width."""
+        import numpy as np
+        from ..core.image_io import LoadedImage
+        w_px = max(1, int(self.project.pixel_width))
+        h_px = max(1, int(self.project.pixel_height))
+        longest = max(w_px, h_px)
+        if longest > self.SVG_SHEET_MAX_PX:
+            k = float(self.SVG_SHEET_MAX_PX) / float(longest)
+            new_w = max(1, int(round(w_px * k)))
+            new_h = max(1, int(round(h_px * k)))
+            # keep real-world size: fewer pixels => more mm per pixel
+            mpp = self.project.calibration.mm_per_pixel or 1.0
+            self.project.calibration.mm_per_pixel = mpp * (float(w_px)
+                                                           / float(new_w))
+            for obj in self.project.objects:
+                for c in obj.contours:
+                    c.points = [(x * k, y * k) for (x, y) in c.points]
+            w_px, h_px = new_w, new_h
+        data = np.full((h_px, w_px, 3), 255, np.uint8)
+        return LoadedImage(path=path, data=data)
+
+    def open_svg(self, path=None):
+        """File -> Open SVG: import existing vector art as a job.
+
+        An SVG already carries its real-world size, so this needs no
+        photo and no calibration gesture - the document's width/height
+        (or viewBox) sets mm_per_pixel directly and tiled printing works
+        at 1:1 immediately. Curves are flattened to polylines, which is
+        the model's only geometry (see core/svg_import)."""
+        import os
+        from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
+        from ..core import svg_import
+        if not path:
+            path, _ = QFileDialog.getOpenFileName(
+                self, "Open SVG", "", "SVG drawing (*.svg);;All files (*)")
+        if not path:
+            return
+        QApplication.setOverrideCursor(Qt.WaitCursor)
+        try:
+            objects, size_mm, mpp = svg_import.import_svg(path)
+        except svg_import.SvgImportError as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.warning(self, "Open SVG", str(exc))
+            return
+        except (IOError, OSError) as exc:
+            QApplication.restoreOverrideCursor()
+            QMessageBox.critical(self, "Open SVG", str(exc))
+            return
+        finally:
+            if QApplication.overrideCursor() is not None:
+                QApplication.restoreOverrideCursor()
+
+        self._leave_dewarp_stage()
+        self.switch_tool("trace")
+        # A vector job has no photo: the canvas shows an empty scene the
+        # size of the artwork, and the traces are the content.
+        self.project = Project()
+        self.project.calibration.display_unit = self.preferred_unit()
+        self.project.calibration.mm_per_pixel = mpp
+        self.project.pixel_width = max(1, int(round(size_mm[0] / mpp)))
+        self.project.pixel_height = max(1, int(round(size_mm[1] / mpp)))
+        self.project.source_image_path = path
+        self.project.objects = objects
+        # A vector job still needs a LoadedImage-shaped working image:
+        # the export/tiling controllers key off _loaded for the base
+        # filename, the page size and the optional embedded bitmap, and
+        # bail out entirely when it is None. A white sheet the size of
+        # the artwork satisfies all of that and prints as blank paper
+        # (the traces are the content). Allocated once, lazily small
+        # drawings stay cheap; huge ones are capped by SVG_SHEET_MAX_PX.
+        self._loaded = self._blank_working_image(path)
+        self.project.pixel_width = self._loaded.pixel_width
+        self.project.pixel_height = self._loaded.pixel_height
+        self._objects = []
+        self._active_index = -1
+        self._polygon_counter = 0
+        self.undo_stack.clear()
+        self.canvas.show_blank(self.project.pixel_width,
+                               self.project.pixel_height)
+        self._load_layers_from_project()
+        self._polygon_counter = self._max_polygon_number()
+        self.project.pages = [PageEntry(source_path=path)]
+        self.project.current_page = 0
+        self._refresh_pages_panel()
+        self._set_tools_enabled(True)
+        self.act_mode_pan.setChecked(True)
+        self._mode_pan()
+        self._refresh_object_list()
+        self.set_unit(self.project.calibration.display_unit)
+        self._refresh_scale_readout()
+        self._update_bbox()
+        self._update_tile_grid()
+        self._project_path = None
+        self.setWindowTitle("PageWright - %s" % os.path.basename(path))
+        n_c = sum(len(o.contours) for o in objects)
+        self.statusBar().showMessage(
+            "Imported %s: %d object(s), %d shape(s), %.1f x %.1f mm - "
+            "already to scale, so Print Tiles is ready."
+            % (os.path.basename(path), len(objects), n_c,
+               size_mm[0], size_mm[1]), 10000)
 
     def paste_image(self):
         """Edit -> Paste Image (Ctrl+V): start from a screenshot or any
