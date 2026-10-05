@@ -20,7 +20,7 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsView
 
 from ..core import geometry
 from . import zoom
-from .editable import VertexHandle
+from .editable import RulerBody, RulerHandle, VertexHandle
 
 # Interaction modes.
 MODE_PAN = "pan"
@@ -30,6 +30,11 @@ MODE_SEED_BG = "seed_bg"
 MODE_EDIT = "edit"
 MODE_ROI = "roi"          # drag a trace-area rectangle
 MODE_MEASURE = "measure"  # two-click on-canvas ruler
+
+# Modes where a finished ruler stays editable (draggable handles and
+# body). Excludes the point-placing modes -- there a click on a ruler
+# must paint a seed / place a calibration point, not grab the ruler.
+_MEASURE_EDIT_MODES = (MODE_MEASURE, MODE_PAN, MODE_EDIT)
 
 _ZOOM_STEP = 1.25
 _MIN_SCALE = 0.02
@@ -61,6 +66,11 @@ class Canvas(QGraphicsView):
     roiCleared = Signal()
     # Emitted after an edge-drag resize of the existing area (no zoom).
     roiEdited = Signal(QRectF)
+
+    # A ruler was edited (endpoint moved or whole ruler dragged). Args:
+    # index, old (x0,y0,x1,y1), new (x0,y0,x1,y1) - the window records
+    # the undo command and re-stores the page.
+    measurementEdited = Signal(int, object, object)
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -120,6 +130,7 @@ class Canvas(QGraphicsView):
         self._measure_label = None
         self._measurements = []    # [{"p0","p1","items"}] finished rulers
         self._measure_fmt = None   # px -> display text (window supplies)
+        self._suspend_handle_sync = False   # guard handle<->ruler sync
         self._roi_item = None      # persistent dashed rectangle
         self._roi_origin = None    # drag anchor while selecting
         self._roi_edit = None      # ("l"/"r","t"/"b" combo) while resizing
@@ -143,6 +154,7 @@ class Canvas(QGraphicsView):
         self._measure_line = None
         self._measure_label = None
         self._measurements = []
+        self._suspend_handle_sync = False
         self._seed_strokes = []
         self._redo_strokes = []
         self._active_stroke = None
@@ -183,6 +195,7 @@ class Canvas(QGraphicsView):
         self._measure_line = None
         self._measure_label = None
         self._measurements = []
+        self._suspend_handle_sync = False
         self._seed_strokes = []
         self._redo_strokes = []
         self._active_stroke = None
@@ -232,8 +245,17 @@ class Canvas(QGraphicsView):
 
     # ----- mode switching --------------------------------------------------
 
+    def _set_mode(self, mode):
+        """Single place every mode transition goes through, so ruler
+        handles can appear/disappear with measure mode without each
+        caller having to remember to refresh them."""
+        if self._mode == mode:
+            return
+        self._mode = mode
+        self._refresh_measure_handles()
+
     def enter_pan_mode(self):
-        self._mode = MODE_PAN
+        self._set_mode(MODE_PAN)
         self.setDragMode(QGraphicsView.ScrollHandDrag)
         self._apply_mode_cursor()
         self._hide_brush_cursor()
@@ -241,14 +263,14 @@ class Canvas(QGraphicsView):
     def enter_edit_mode(self):
         # RubberBandDrag lets the user marquee-select vertices on empty
         # canvas while still dragging individual handles.
-        self._mode = MODE_EDIT
+        self._set_mode(MODE_EDIT)
         self.setDragMode(QGraphicsView.RubberBandDrag)
         self._apply_mode_cursor()
         self._hide_brush_cursor()
 
     def start_roi_mode(self):
         """Drag out a rectangle to restrict tracing (and zoom to it)."""
-        self._mode = MODE_ROI
+        self._set_mode(MODE_ROI)
         self.setDragMode(QGraphicsView.NoDrag)
         self._apply_mode_cursor()
         self._hide_brush_cursor()
@@ -273,7 +295,7 @@ class Canvas(QGraphicsView):
     def start_calibration(self):
         self._clear_calibration_overlay()
         self._calib_points = []
-        self._mode = MODE_CALIBRATE
+        self._set_mode(MODE_CALIBRATE)
         self.setDragMode(QGraphicsView.NoDrag)
         self.viewport().setCursor(Qt.CrossCursor)
         self._hide_brush_cursor()
@@ -291,7 +313,7 @@ class Canvas(QGraphicsView):
         """Two-click ruler: like Calibrate, but it DRAWS the distance.
         Stays armed for repeated measurements; right-click exits."""
         self._measure_p0 = None
-        self._mode = MODE_MEASURE
+        self._set_mode(MODE_MEASURE)
         self.setDragMode(QGraphicsView.NoDrag)
         self.viewport().setCursor(Qt.CrossCursor)
         self._hide_brush_cursor()
@@ -315,6 +337,7 @@ class Canvas(QGraphicsView):
                                     QPointF(q[2], q[3]))
 
     def clear_measurements(self):
+        self._clear_measure_handles()
         for m in self._measurements:
             for it in m["items"]:
                 self._scene.removeItem(it)
@@ -326,6 +349,50 @@ class Canvas(QGraphicsView):
             for it in self._measurements[index]["items"]:
                 self._scene.removeItem(it)
             del self._measurements[index]
+            self._refresh_measure_handles()
+
+    def insert_measurement(self, index, quad):
+        """Re-create a ruler at `index` (undo of a delete)."""
+        self._build_measurement(QPointF(quad[0], quad[1]),
+                                QPointF(quad[2], quad[3]))
+        m = self._measurements.pop()
+        index = max(0, min(int(index), len(self._measurements)))
+        self._measurements.insert(index, m)
+        self._refresh_measure_handles()
+
+    def set_measurement(self, index, quad):
+        """Move ruler `index` to new endpoints and relabel it. Used by
+        interactive drags and by undo/redo (which call it directly, so
+        they never re-record)."""
+        if not (0 <= index < len(self._measurements)):
+            return
+        m = self._measurements[index]
+        p0 = QPointF(quad[0], quad[1])
+        p1 = QPointF(quad[2], quad[3])
+        m["p0"] = (p0.x(), p0.y())
+        m["p1"] = (p1.x(), p1.y())
+        line, label = m["items"][0], m["items"][1]
+        line.setLine(p0.x(), p0.y(), p1.x(), p1.y())
+        label.setText(self._measure_text(p0, p1))
+        label.setPos((p0.x() + p1.x()) / 2.0, (p0.y() + p1.y()) / 2.0)
+        for e, pt in zip(m["items"][2:4], (p0, p1)):
+            r = 3.0
+            e.setRect(pt.x() - r, pt.y() - r, 2 * r, 2 * r)
+        self._position_handles_for(m)
+
+    def measurement_at(self, index):
+        """Endpoints (x0, y0, x1, y1) of ruler `index`, or None."""
+        if not (0 <= index < len(self._measurements)):
+            return None
+        m = self._measurements[index]
+        return (m["p0"][0], m["p0"][1], m["p1"][0], m["p1"][1])
+
+    def refresh_measure_labels(self):
+        """Re-format every ruler label (unit preference changed)."""
+        for m in self._measurements:
+            p0 = QPointF(m["p0"][0], m["p0"][1])
+            p1 = QPointF(m["p1"][0], m["p1"][1])
+            m["items"][1].setText(self._measure_text(p0, p1))
 
     def measurement_hit(self, global_pos, tol_view_px=6.0):
         """Index of the ruler whose line passes near the (global)
@@ -398,9 +465,12 @@ class Canvas(QGraphicsView):
                                        (p0.y() + p1.y()) / 2.0)
 
     def _build_measurement(self, p0, p1):
-        line = self._scene.addLine(p0.x(), p0.y(), p1.x(), p1.y(),
-                                   self._measure_pen())
-        line.setZValue(30)
+        # The line is a RulerBody (draggable in measure mode) rather
+        # than a plain addLine item; index is fixed up by
+        # _refresh_measure_handles once the list order is settled.
+        line = RulerBody(self, len(self._measurements))
+        line.setLine(p0.x(), p0.y(), p1.x(), p1.y())
+        self._scene.addItem(line)
         ends = []
         for pt in (p0, p1):
             r = 3.0
@@ -411,7 +481,73 @@ class Canvas(QGraphicsView):
         label = self._make_measure_label(self._measure_text(p0, p1), p0, p1)
         self._measurements.append({
             "p0": (p0.x(), p0.y()), "p1": (p1.x(), p1.y()),
-            "items": [line, label] + ends})
+            "items": [line, label] + ends, "handles": []})
+        self._refresh_measure_handles()
+
+    # ----- ruler editing (drag endpoints / drag the whole ruler) -----------
+
+    def _clear_measure_handles(self):
+        for m in self._measurements:
+            for h in m.get("handles") or []:
+                self._scene.removeItem(h)
+            m["handles"] = []
+
+    def _refresh_measure_handles(self):
+        """Show endpoint handles in the modes where rulers stay editable,
+        and keep every ruler item's stored index in step with the list
+        order (indices shift whenever a ruler is deleted or
+        re-inserted)."""
+        editable = self._mode in _MEASURE_EDIT_MODES
+        self._clear_measure_handles()
+        for i, m in enumerate(self._measurements):
+            body = m["items"][0]
+            if isinstance(body, RulerBody):
+                body.index = i
+                body.setFlag(body.GraphicsItemFlag.ItemIsMovable, False)
+                body.setAcceptedMouseButtons(
+                    Qt.LeftButton if editable else Qt.NoButton)
+            if not editable:
+                continue
+            for which, key in ((0, "p0"), (1, "p1")):
+                pt = QPointF(m[key][0], m[key][1])
+                h = RulerHandle(self, i, which, pt)
+                self._scene.addItem(h)
+                m["handles"].append(h)
+
+    def _position_handles_for(self, m):
+        """Move a ruler's handles onto its endpoints without letting
+        their own position-change signal re-enter the drag logic."""
+        for h, key in zip(m.get("handles") or [], ("p0", "p1")):
+            self._suspend_handle_sync = True
+            try:
+                h.setPos(QPointF(m[key][0], m[key][1]))
+            finally:
+                self._suspend_handle_sync = False
+
+    def _ruler_handle_hit(self, vp_pt, tol_px=8.0):
+        """The RulerHandle near a viewport point, or None.
+
+        Handles ignore the view transform, so their scene bounding rect
+        is meaningless for hit testing - compare in VIEWPORT space."""
+        for m in self._measurements:
+            for h in m.get("handles") or []:
+                hp = self.mapFromScene(h.pos())
+                if (abs(hp.x() - vp_pt.x()) <= tol_px
+                        and abs(hp.y() - vp_pt.y()) <= tol_px):
+                    return h
+        return None
+
+    def _on_ruler_handle_moved(self, handle):
+        """Live endpoint drag: rewrite that end and relabel."""
+        if self._suspend_handle_sync:
+            return
+        q = self.measurement_at(handle.index)
+        if q is None:
+            return
+        p = handle.pos()
+        new = ((p.x(), p.y(), q[2], q[3]) if handle.which == 0
+               else (q[0], q[1], p.x(), p.y()))
+        self.set_measurement(handle.index, new)
 
     def _finish_measure(self, p1):
         """Second click: keep the ruler; stay armed for the next one."""
@@ -482,7 +618,7 @@ class Canvas(QGraphicsView):
 
     def start_seed_mode(self, label):
         """label: 'fg' (inside) or 'bg' (outside)."""
-        self._mode = MODE_SEED_FG if label == "fg" else MODE_SEED_BG
+        self._set_mode(MODE_SEED_FG if label == "fg" else MODE_SEED_BG)
         self.setDragMode(QGraphicsView.NoDrag)
         self.viewport().setCursor(Qt.CrossCursor)
 
@@ -797,6 +933,20 @@ class Canvas(QGraphicsView):
             event.accept()
             return
 
+        # A press on a finished ruler edits it rather than panning. Pan
+        # mode is ScrollHandDrag, which would otherwise swallow the drag
+        # before the item ever sees it; measure mode has its own branch
+        # below (it must also handle starting a NEW ruler).
+        if (event.button() == Qt.LeftButton
+                and self._mode in _MEASURE_EDIT_MODES
+                and self._mode != MODE_MEASURE):
+            vp_pt = event.position().toPoint()
+            gp = self.viewport().mapToGlobal(vp_pt)
+            if (self._ruler_handle_hit(vp_pt) is not None
+                    or self.measurement_hit(gp) is not None):
+                super().mousePressEvent(event)
+                return
+
         # Grab a trace-area edge to resize it (pan or area mode).
         if (event.button() == Qt.LeftButton
                 and self._mode in (MODE_PAN, MODE_ROI)):
@@ -813,6 +963,19 @@ class Canvas(QGraphicsView):
             return
 
         if self._mode == MODE_MEASURE and event.button() == Qt.LeftButton:
+            # A press on an existing ruler (its end dot or its line) is
+            # an EDIT, not the start of a new measurement - let the item
+            # handle it. Only clicks on empty canvas draw a new ruler.
+            # Uses the geometric hit test rather than itemAt(): the
+            # label item overlaps the line and would shadow it, and
+            # handles use ItemIgnoresTransformations.
+            if self._measure_p0 is None:
+                vp_pt = event.position().toPoint()
+                gp = self.viewport().mapToGlobal(vp_pt)
+                if (self._ruler_handle_hit(vp_pt) is not None
+                        or self.measurement_hit(gp) is not None):
+                    super().mousePressEvent(event)
+                    return
             pt = self.mapToScene(event.position().toPoint())
             if self._measure_p0 is None:
                 self._measure_p0 = pt

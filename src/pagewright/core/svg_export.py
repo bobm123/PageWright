@@ -184,10 +184,13 @@ def build_content(project, image_bgr=None, embed_photo=True,
         trace_attrs = (' inkscape:groupmode="layer" inkscape:label="Trace"')
         anno_attrs = (' inkscape:groupmode="layer"'
                       ' inkscape:label="Annotations"')
+        meas_attrs = (' inkscape:groupmode="layer"'
+                      ' inkscape:label="Measurements"')
     else:
         photo_attrs = ""
         trace_attrs = ""
         anno_attrs = ""
+        meas_attrs = ""
 
     out = []
     if embed_photo:
@@ -220,6 +223,10 @@ def build_content(project, image_bgr=None, embed_photo=True,
         if path:
             out.append(path + "\n")
     out.append('  </g>\n')
+    meas = _measurements_group(project, annotations, ox, oy, mpp,
+                               meas_attrs)
+    if meas:
+        out.append(meas)
     anno = _annotations_group(project, annotations, ox, oy, mpp,
                               anno_attrs)
     if anno:
@@ -236,10 +243,13 @@ def build_content(project, image_bgr=None, embed_photo=True,
     return "".join(out), w_mm, h_mm
 
 
-def _annotations_group(project, annotations, ox, oy, mpp, attrs):
-    """On-screen overlays as their own SVG group/layer: rulers (teal,
-    labelled in the project's display unit), the Select Area (dashed
-    green) and the tile grid (dashed magenta). Empty -> no group."""
+def _measurements_group(project, annotations, ox, oy, mpp, attrs):
+    """Measurement rulers as their OWN SVG group/layer (teal, labelled
+    in the project's display unit).
+
+    Separate from _annotations_group so a consumer can toggle rulers
+    independently of the Select Area and tile grid - in Inkscape they
+    are two layers, not one. Empty -> no group."""
     if not annotations:
         return ""
     from . import calibration as _calib
@@ -261,6 +271,23 @@ def _annotations_group(project, annotations, ox, oy, mpp, attrs):
             'font-size="4" fill="#00d2d2">%s</text>\n'
             % (_num((x0 + x1) / 2.0), _num((y0 + y1) / 2.0 - 1.0),
                _calib.format_length(length_mm, unit)))
+    if not body:
+        return ""
+    return ('  <g id="measurements"%s>\n' % attrs) + "".join(body) \
+        + '  </g>\n'
+
+
+def _annotations_group(project, annotations, ox, oy, mpp, attrs):
+    """On-screen overlays as their own SVG group/layer: the Select Area
+    (dashed green) and the tile grid (dashed magenta). Rulers live in
+    their own layer (see _measurements_group). Empty -> no group."""
+    if not annotations:
+        return ""
+
+    def M(x, y):        # image px -> master mm
+        return (x - ox) * mpp, (y - oy) * mpp
+
+    body = []
     roi = annotations.get("roi")
     if roi:
         (rx, ry), (rw, rh) = M(roi[0], roi[1]), (roi[2] * mpp, roi[3] * mpp)

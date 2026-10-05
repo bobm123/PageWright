@@ -86,6 +86,7 @@ class MainWindow(QMainWindow):
         self.canvas.roiSelected.connect(self._on_roi_selected)
         self.canvas.roiCleared.connect(self.clear_roi)
         self.canvas.roiEdited.connect(self._on_roi_edited)
+        self.canvas.measurementEdited.connect(self._on_measurement_edited)
         self.canvas.set_measure_formatter(self._format_measure)
 
         self.projects = ProjectController(self)
@@ -852,8 +853,9 @@ class MainWindow(QMainWindow):
         self.canvas.start_measure()
         self.statusBar().showMessage(
             "Measure: click both ends of a distance (Ctrl locks to "
-            "0/45/90 degrees, wheel zooms). Right-click to finish; "
-            "rulers stay until Clear Measurements.", 8000)
+            "0/45/90 degrees, wheel zooms). Drag an end dot to change a "
+            "ruler, or drag its line to move it; right-click a ruler to "
+            "delete it. Right-click elsewhere to finish.", 10000)
 
     def _format_measure(self, length_px):
         """Ruler label text: current units when calibrated, else px."""
@@ -1014,6 +1016,41 @@ class MainWindow(QMainWindow):
             undo=lambda: contour.insert_vertex_at(index, xy[0], xy[1]),
             redo=lambda: contour.delete_vertex(index)))
 
+    def _restore_measurement(self, fn, *args):
+        """Run a ruler mutation and re-store the page.
+
+        Undo/redo must write the page entry back too: rulers live only
+        on the canvas, so an undone edit that is not re-stored would be
+        resurrected by the next page switch or save."""
+        fn(*args)
+        self._store_current_page()
+
+    def _on_measurement_edited(self, index, before, after):
+        """A ruler endpoint was dragged, or the whole ruler moved.
+
+        The canvas has ALREADY applied the change (the drag was live),
+        so this only records the undo step and re-stores the page."""
+        set_m = self.canvas.set_measurement
+        self.undo_stack.push(undo.FnCommand(
+            "move measurement",
+            undo=lambda: self._restore_measurement(set_m, index, before),
+            redo=lambda: self._restore_measurement(set_m, index, after)))
+        self._store_current_page()
+
+    def delete_measurement(self, index):
+        """Right-click 'Delete This Measurement', as an undoable step."""
+        quad = self.canvas.measurement_at(index)
+        if quad is None:
+            return
+        self.canvas.remove_measurement(index)
+        self.undo_stack.push(undo.FnCommand(
+            "delete measurement",
+            undo=lambda: self._restore_measurement(
+                self.canvas.insert_measurement, index, quad),
+            redo=lambda: self._restore_measurement(
+                self.canvas.remove_measurement, index)))
+        self._store_current_page()
+
     # ----- object management -----------------------------------------------
 
     def add_polygon(self):
@@ -1122,6 +1159,7 @@ class MainWindow(QMainWindow):
         self.project.calibration.display_unit = unit
         for u, action in self.act_units.items():
             action.setChecked(u == unit)
+        self.canvas.refresh_measure_labels()   # rulers follow the unit
         self._refresh_scale_readout()
 
     def _refresh_scale_readout(self):

@@ -310,7 +310,7 @@ def show_canvas_menu(w, global_pos):
     if hit is not None:
         a = menu.addAction("Delete This Measurement")
         a.triggered.connect(
-            lambda _=False, i=hit: w.canvas.remove_measurement(i))
+            lambda _=False, i=hit: w.delete_measurement(i))
     if w.canvas.has_measurements():
         menu.addAction(w.act_clear_measure)
     menu.addAction(w.act_fit)

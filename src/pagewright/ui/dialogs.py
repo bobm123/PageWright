@@ -77,13 +77,15 @@ class ExportSvgDialog(QDialog):
         form.addRow(self._filled)
 
         self._annotations = QCheckBox(
-            "Include annotations layer (rulers, select area, tile grid)",
+            "Include annotation layers (rulers, select area, tile grid)",
             self)
         self._annotations.setChecked(True)
         self._annotations.setToolTip(
-            "Exports the on-screen overlays - measurement rulers, the "
-            "Select Area rectangle, and the tile grid when its overlay "
-            "is shown - on their own layer, easy to hide or delete.")
+            "Exports the on-screen overlays on their own layers: "
+            "measurement rulers go to a 'Measurements' layer, and the "
+            "Select Area rectangle plus the tile grid (when its overlay "
+            "is shown) to an 'Annotations' layer - so rulers can be "
+            "hidden separately in Inkscape.")
         form.addRow(self._annotations)
 
         self._inkscape = QCheckBox(

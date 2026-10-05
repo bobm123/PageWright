@@ -21,7 +21,8 @@ never re-record.
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import QColor, QPainterPath, QPen
-from PySide6.QtWidgets import QGraphicsEllipseItem, QGraphicsPathItem
+from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsLineItem,
+                               QGraphicsPathItem)
 
 # Outer contours draw in the same red as the printed/exported output
 # (model.Style default #ff0000) so what you edit is what you get; the
@@ -98,6 +99,108 @@ class VertexHandle(QGraphicsEllipseItem):
 
     def owner_contour(self):
         return self._owner
+
+
+_RULER_COLOR = QColor(0, 210, 210)      # teal, matching canvas._measure_pen
+
+
+class RulerHandle(QGraphicsEllipseItem):
+    """A draggable dot on one end of a measurement ruler.
+
+    Mirrors VertexHandle: the drag is live (the canvas relabels the
+    ruler on every move) and the press/release pair reports one
+    before/after pair so the window can record a single undo step for
+    the whole drag rather than one per mouse-move.
+
+    `which` is 0 or 1 - the endpoint this handle owns."""
+
+    def __init__(self, canvas, index, which, scene_point):
+        r = _HANDLE_R
+        super().__init__(QRectF(-r, -r, 2 * r, 2 * r))
+        self._canvas = canvas
+        self.index = index
+        self.which = which
+        self._press_quad = None
+        self.setPos(scene_point)
+        self.setZValue(32)          # above the ruler line/label (30, 31)
+        self.setBrush(_RULER_COLOR)
+        pen = QPen(QColor(0, 0, 0))
+        pen.setCosmetic(True)
+        self.setPen(pen)
+        self.setFlag(QGraphicsEllipseItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsEllipseItem.ItemSendsScenePositionChanges, True)
+        self.setFlag(QGraphicsEllipseItem.ItemIgnoresTransformations, True)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def itemChange(self, change, value):
+        if change == QGraphicsEllipseItem.ItemScenePositionHasChanged:
+            self._canvas._on_ruler_handle_moved(self)
+        return super().itemChange(change, value)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_quad = self._canvas.measurement_at(self.index)
+        super().mousePressEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._press_quad is not None:
+            before, self._press_quad = self._press_quad, None
+            after = self._canvas.measurement_at(self.index)
+            if after is not None and tuple(after) != tuple(before):
+                self._canvas.measurementEdited.emit(self.index, before, after)
+        super().mouseReleaseEvent(event)
+
+
+class RulerBody(QGraphicsLineItem):
+    """The ruler's line, draggable to reposition the whole measurement.
+
+    Dragging moves BOTH endpoints by the same delta, so the measured
+    length (and therefore the label) does not change - only where the
+    ruler sits. That is the point of moving a ruler rather than
+    re-drawing it."""
+
+    def __init__(self, canvas, index):
+        super().__init__()
+        self._canvas = canvas
+        self.index = index
+        self._press_quad = None
+        self._press_scene = None
+        pen = QPen(_RULER_COLOR)
+        pen.setCosmetic(True)
+        pen.setWidth(2)
+        self.setPen(pen)
+        self.setZValue(30)
+        self.setCursor(Qt.SizeAllCursor)
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            self._press_quad = self._canvas.measurement_at(self.index)
+            self._press_scene = event.scenePos()
+            event.accept()
+            return
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._press_quad is not None:
+            dx = event.scenePos().x() - self._press_scene.x()
+            dy = event.scenePos().y() - self._press_scene.y()
+            q = self._press_quad
+            self._canvas.set_measurement(
+                self.index, (q[0] + dx, q[1] + dy, q[2] + dx, q[3] + dy))
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if event.button() == Qt.LeftButton and self._press_quad is not None:
+            before, self._press_quad = self._press_quad, None
+            self._press_scene = None
+            after = self._canvas.measurement_at(self.index)
+            if after is not None and tuple(after) != tuple(before):
+                self._canvas.measurementEdited.emit(self.index, before, after)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class _OutlineItem(QGraphicsPathItem):

@@ -114,9 +114,16 @@ def test_inkscape_flavor_separates_photo_and_trace_layers():
     assert svg.index('id="photo"') < svg.index('id="trace"')
 
 
+def _group_body(svg, gid):
+    """Return the inner text of the <g id="gid"> ... </g> block."""
+    start = svg.index('<g id="%s"' % gid)
+    start = svg.index(">", start) + 1
+    return svg[start:svg.index("</g>", start)]
+
+
 def test_annotations_layer_exports_overlays():
-    # Rulers + Select Area + tile grid ride their own group/layer,
-    # labelled in the project's display unit; absent -> no group at all.
+    # Select Area + tile grid ride their own group/layer; rulers get a
+    # layer of their own (see the measurements test below).
     p = _project_with_square(mpp=1.0)      # 1 px = 1 mm
     anno = {"measurements": [[0.0, 0.0, 100.0, 0.0]],
             "roi": [10.0, 20.0, 50.0, 40.0],
@@ -125,9 +132,44 @@ def test_annotations_layer_exports_overlays():
                                annotations=anno)
     assert ('id="annotations" inkscape:groupmode="layer" '
             'inkscape:label="Annotations"') in svg
-    assert "100.00 mm" in svg              # ruler label, display units
     assert 'stroke="#22cc66"' in svg       # select-area rect
     assert svg.count('stroke="#ff00ff"') == 5   # 3 vertical + 2 horizontal
     # no annotations -> no group
     svg2 = svg_export.build_svg(p, embed_photo=False, inkscape=True)
     assert 'id="annotations"' not in svg2
+
+
+def test_measurements_have_their_own_layer():
+    # Rulers export to a SEPARATE "Measurements" layer so they can be
+    # toggled in Inkscape without hiding the Select Area / tile grid.
+    p = _project_with_square(mpp=1.0)      # 1 px = 1 mm
+    anno = {"measurements": [[0.0, 0.0, 100.0, 0.0]],
+            "roi": [10.0, 20.0, 50.0, 40.0]}
+    svg = svg_export.build_svg(p, embed_photo=False, inkscape=True,
+                               annotations=anno)
+    assert ('id="measurements" inkscape:groupmode="layer" '
+            'inkscape:label="Measurements"') in svg
+    meas = _group_body(svg, "measurements")
+    anno_body = _group_body(svg, "annotations")
+    # the ruler and its label belong to Measurements only
+    assert "100.00 mm" in meas and "100.00 mm" not in anno_body
+    assert 'stroke="#00d2d2"' in meas and 'stroke="#00d2d2"' not in anno_body
+    # the select area belongs to Annotations only
+    assert 'stroke="#22cc66"' in anno_body
+    assert 'stroke="#22cc66"' not in meas
+
+
+def test_measurement_and_annotation_layers_are_independent():
+    # Each layer appears only when it has content of its own.
+    p = _project_with_square(mpp=1.0)
+    only_rulers = svg_export.build_svg(
+        p, embed_photo=False, inkscape=True,
+        annotations={"measurements": [[0.0, 0.0, 10.0, 0.0]]})
+    assert 'id="measurements"' in only_rulers
+    assert 'id="annotations"' not in only_rulers
+
+    only_roi = svg_export.build_svg(
+        p, embed_photo=False, inkscape=True,
+        annotations={"roi": [1.0, 2.0, 3.0, 4.0]})
+    assert 'id="measurements"' not in only_roi
+    assert 'id="annotations"' in only_roi
