@@ -20,9 +20,12 @@ class ObjectsPanel(QWidget):
     renameRequested = Signal()
     rowChanged = Signal(int)
     marginChanged = Signal(float)
+    traceToleranceChanged = Signal(float)      # mm
+    traceKeepLargestChanged = Signal(bool)
     visibilityToggled = Signal(object, bool)   # (ObjectLayer, visible)
 
-    def __init__(self, margin_mm=5.0, parent=None):
+    def __init__(self, margin_mm=5.0, trace_tol_mm=0.35,
+                 keep_largest=True, parent=None):
         super().__init__(parent)
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
@@ -54,6 +57,39 @@ class ObjectsPanel(QWidget):
         self._margin_spin.valueChanged.connect(self.marginChanged)
         margin_row.addWidget(self._margin_spin)
         layout.addLayout(margin_row)
+
+        # Trace detail: the simplification tolerance in real-world mm.
+        # Shown as a length rather than a "quality" number because that
+        # is what it is - how far a vertex may move.
+        tol_row = QHBoxLayout()
+        tol_row.addWidget(QLabel("Trace detail:"))
+        self._tol_spin = QDoubleSpinBox(self)
+        self._tol_spin.setRange(0.02, 5.0)
+        self._tol_spin.setDecimals(2)
+        self._tol_spin.setSingleStep(0.05)
+        self._tol_spin.setValue(trace_tol_mm)
+        self._tol_spin.setSuffix(" mm")
+        self._tol_spin.setToolTip(
+            "How far a traced vertex may move when the outline is "
+            "simplified.\n"
+            "Smaller = more points and more detail; "
+            "larger = fewer, smoother points.\n"
+            "In millimetres, so the "
+            "same setting behaves the same at any scan resolution.")
+        self._tol_spin.valueChanged.connect(self.traceToleranceChanged)
+        tol_row.addWidget(self._tol_spin)
+        layout.addLayout(tol_row)
+
+        self._keep_largest = QCheckBox("Trace one shape only", self)
+        self._keep_largest.setChecked(keep_largest)
+        self._keep_largest.setToolTip(
+            "Keep only the largest shape found in the trace area (with "
+            "its holes).\n"
+            "Turn off to trace several separate shapes at "
+            "once - on a busy drawing sheet that also picks up bits of "
+            "neighbouring parts.")
+        self._keep_largest.toggled.connect(self.traceKeepLargestChanged)
+        layout.addWidget(self._keep_largest)
 
         self._size_label = QLabel("", self)
         self._size_label.setWordWrap(True)

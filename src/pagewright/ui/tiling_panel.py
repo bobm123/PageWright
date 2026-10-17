@@ -85,6 +85,7 @@ class TilingPanel(QGroupBox):
         self._sync_layout_mode()
 
         self._embed_check = QCheckBox("Include image", self)
+        self._embed_check.setChecked(True)
         self._embed_check.setToolTip(
             "Embed the image on the tiles (always cropped to the traced/"
             "selected bounding box).")
@@ -184,7 +185,7 @@ class TilingPanel(QGroupBox):
         self._cols_spin.setValue(int(t.get("grid_cols", 2)))
         self._rows_spin.setValue(int(t.get("grid_rows", 2)))
         self._scale_spin.setValue(int(t.get("scale_percent", 100)))
-        self._embed_check.setChecked(bool(t.get("embed_photo", False)))
+        self._embed_check.setChecked(bool(t.get("embed_photo", True)))
         self._filled_check.setChecked(bool(t.get("filled", False)))
         for w in widgets:
             w.blockSignals(False)

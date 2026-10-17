@@ -122,12 +122,18 @@ class MainWindow(QMainWindow):
         self.pages_panel.batchFlattenRequested.connect(self.batch_flatten)
         layout.addWidget(self.pages_panel)
 
-        self.objects_panel = ObjectsPanel(self.project.margin_mm, panel)
+        self.objects_panel = ObjectsPanel(
+            self.project.margin_mm, self.trace_tolerance_mm(),
+            self.trace_keep_largest(), panel)
         self.objects_panel.newRequested.connect(self.add_polygon)
         self.objects_panel.deleteRequested.connect(self.delete_active_object)
         self.objects_panel.renameRequested.connect(self.rename_active_object)
         self.objects_panel.rowChanged.connect(self._on_object_row_changed)
         self.objects_panel.marginChanged.connect(self._on_margin_changed)
+        self.objects_panel.traceToleranceChanged.connect(
+            self.set_trace_tolerance_mm)
+        self.objects_panel.traceKeepLargestChanged.connect(
+            self.set_trace_keep_largest)
         self.objects_panel.visibilityToggled.connect(self._on_visibility_toggled)
         layout.addWidget(self.objects_panel)
 
@@ -203,6 +209,54 @@ class MainWindow(QMainWindow):
         from PySide6.QtCore import QSettings
         u = QSettings("PageWright", "PageWright").value("preferred_unit")
         return u if u in ("mm", "cm", "in") else "mm"
+
+    def trace_tolerance_mm(self):
+        """Trace simplification tolerance, in millimetres.
+
+        How far a vertex may move when the traced outline is
+        simplified: the real-world meaning of "Coarse..Fine". Kept in
+        mm rather than pixels so the same setting gives the same
+        result at any scan resolution."""
+        from ..core.contours import TRACE_TOLERANCE_MM
+        value = getattr(self, "_trace_tol_mm", None)
+        if value is None:
+            from PySide6.QtCore import QSettings
+            raw = QSettings("PageWright", "PageWright").value(
+                "trace_tolerance_mm")
+            try:
+                value = float(raw)
+            except (TypeError, ValueError):
+                value = TRACE_TOLERANCE_MM
+            self._trace_tol_mm = value
+        return value
+
+    def set_trace_tolerance_mm(self, value_mm):
+        from PySide6.QtCore import QSettings
+        self._trace_tol_mm = max(0.02, float(value_mm))
+        QSettings("PageWright", "PageWright").setValue(
+            "trace_tolerance_mm", self._trace_tol_mm)
+
+    def trace_keep_largest(self):
+        """True when a trace keeps only the biggest shape it found.
+
+        On a drawing sheet the trace area almost always clips parts of
+        neighbouring objects; keeping one shape is what the user meant
+        by seeding one object. Turn it off to trace several at once."""
+        value = getattr(self, "_trace_keep_largest", None)
+        if value is None:
+            from PySide6.QtCore import QSettings
+            raw = QSettings("PageWright", "PageWright").value(
+                "trace_keep_largest")
+            value = True if raw is None else str(raw).lower() in (
+                "1", "true", "yes")
+            self._trace_keep_largest = value
+        return value
+
+    def set_trace_keep_largest(self, on):
+        from PySide6.QtCore import QSettings
+        self._trace_keep_largest = bool(on)
+        QSettings("PageWright", "PageWright").setValue(
+            "trace_keep_largest", self._trace_keep_largest)
 
     def open_preferences(self):
         """File -> Preferences: app settings (brush, preferred units)."""

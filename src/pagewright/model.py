@@ -20,7 +20,7 @@ def default_tiling():
         "grid_cols": 2,
         "grid_rows": 2,
         "scale_percent": 100,
-        "embed_photo": False,
+        "embed_photo": True,
         "crop_photo": False,
         "filled": False,
     }

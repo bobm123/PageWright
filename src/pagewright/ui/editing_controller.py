@@ -102,23 +102,21 @@ class EditingController:
                                  "Segmentation failed: %s" % (exc,))
             return
 
-        # Scale simplification + speckle thresholds to the region actually
-        # segmented -- using the whole image here would filter out everything
-        # inside a small trace area.
+        # Simplification tolerance is a REAL-WORLD length, not a fraction
+        # of the region: the old region-size rule bottomed out at 1.5 px
+        # on small areas and returned hundreds of vertices (227 on a
+        # model-aircraft former a hand trace draws with ~64). The speckle
+        # floor is relative for the same reason an absolute one failed -
+        # a drawing sheet holds hundreds of unrelated ink fragments, and
+        # any inside the trace area came back as extra polygons.
         region_h, region_w = image.shape[:2]
-        long_edge = max(region_w, region_h)
-        # TODO(ui): expose a "Trace complexity / number of points" control.
-        # epsilon_px is the approxPolyDP tolerance that decides how many
-        # vertices the traced polygon keeps: larger -> simpler (fewer
-        # points), smaller -> more detailed (more points). It is currently
-        # auto-derived from the region size (factor 0.0012). Plan: add a
-        # toolbar/right-click slider (e.g. Coarse..Fine) or a point-count
-        # target that scales this factor, so the user can trade smoothness
-        # against fidelity per object without re-seeding.
-        epsilon_px = max(1.5, long_edge * 0.0012)
+        epsilon_px = cont.tolerance_mm_to_px(
+            w.trace_tolerance_mm(), w.project.calibration.mm_per_pixel)
         min_area_px = max(50.0, 0.0005 * region_w * region_h)
         results = cont.extract_contours(
-            mask, epsilon_px=epsilon_px, min_area_px=min_area_px)
+            mask, epsilon_px=epsilon_px, min_area_px=min_area_px,
+            min_area_frac=cont.MIN_AREA_FRACTION,
+            keep_largest=w.trace_keep_largest())
         if not results:
             QMessageBox.information(
                 w, "Run Segmentation",
@@ -141,11 +139,15 @@ class EditingController:
         w.act_mode_edit.setChecked(True)
         w._mode_edit()
         n_holes = sum(1 for _, role in results if role == cont.ROLE_HOLE)
+        n_pts = sum(len(pts) for pts, _ in results)
         scope = " in the trace area" if w.canvas.roi_rect() is not None else ""
+        # Report the vertex count: it is what the Trace detail control
+        # moves, so the user can see the effect without counting handles.
         w.statusBar().showMessage(
-            "Found %d contour(s) (%d hole(s)) for '%s'%s. Refine, or re-seed "
-            "and run again." % (len(results), n_holes,
-                                w._objects[w._active_index].name, scope), 6000)
+            "Found %d contour(s) (%d hole(s), %d points at %.2f mm detail) "
+            "for '%s'%s. Refine, or adjust Trace detail and run again."
+            % (len(results), n_holes, n_pts, w.trace_tolerance_mm(),
+               w._objects[w._active_index].name, scope), 8000)
 
     # ----- marquee group delete --------------------------------------------
 

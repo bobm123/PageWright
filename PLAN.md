@@ -466,3 +466,79 @@ per-page post-processing (some OCR, some tracing).
   tiling.tile_crop_rects, Flatten Checked, Add as Pages; outline
   persistence + quad-seed batch + thumbnails deferred).
 - **M4** Searchable-PDF output (P5 complete).
+
+---
+
+## 16. CLI tiers and the VectorCraft comparison (2026-10-16)
+
+Two related findings, pinned here so they survive the session.
+
+### 16.1 Tiered plan for command-line coverage
+
+Prompted by ArtCraft exposing every GUI action on the command line.
+The obstacle in PageWright was never Qt coupling - `core/` has zero Qt
+imports and a full job (SVG import -> tile -> export -> save) runs with
+no Qt modules loaded. The obstacle is that MainWindow methods fuse
+validate / ask-options / ask-path / compute into one method. Of ~90
+MainWindow methods only 10 touch a dialog.
+
+- **Tier 1 - job layer + subcommands. DONE 2026-10-15** (prototype,
+  uncommitted): `core/jobs.py` (Qt-free by contract, asserted by a test
+  in a clean interpreter) plus `cli.py` with `info` and `tile`.
+  `main.py` dispatches before importing PySide6. Scale for raster
+  inputs comes from `--dpi` / `--mm-per-px` / `--width` / `--height`;
+  SVG and PDF carry their own. Remaining: `export-svg`, `flatten`,
+  `ocr`, `import-svg` - mostly argparse wiring against the same
+  `load_source`.
+- **Tier 2 - GUI calls the same job layer** (~2-3 days). Refactor the
+  10 dialog-bound methods into gather-params -> call-job. This is the
+  property worth having: one code path, two front ends. It would have
+  caught the `_loaded is None` bug that made Print Tiles silently
+  produce nothing for vector jobs.
+- **Tier 3 - full action registry with introspection** (~1 week+).
+  NOT RECOMMENDED. Covering all 39 QActions mostly exposes mode
+  toggles that are meaningless without a canvas, and it contradicts
+  sec. 6's "no plugin registry for four concrete tools, one author".
+
+Qt-only capabilities that cannot go headless: printing (QPrinter) and
+preview rasterizing (QSvgRenderer). Genuinely human-only: seed
+painting, vertex dragging, two-point calibration, quad corner drags.
+The automatic equivalents (`dewarp.detect_page`,
+`segmentation.grabcut_mask` over a prepared mask) are batch-usable.
+
+### 16.2 VectorCraft overlap (checked against their docs, 2026-10-16)
+
+VectorCraft (getartcraft.com, storytold/vectorcraft, Rust, alpha,
+~65% "ready for real work") covers more of this workflow than
+expected, INCLUDING tiled printing.
+
+| Workflow step | VectorCraft | Note |
+|---|---|---|
+| Place photo | `file.place` | yes |
+| 4-point flatten (flat quad) | Free Transform tool, modes `free` / `perspective` / `distort` via `tool.setOption` | yes, by hand |
+| Spline flatten (book curl) | nothing equivalent | **ours alone** |
+| Calibrate mm/px from a photo | Dimension tool; document units | different model |
+| Trace outline | Image Trace, 13 presets, Create Strokes | auto, not seeded |
+| Edit vertices | Pen / Direct Selection, real Beziers | **better than ours** |
+| Measure | Dimension tool: lengths, angles, radii that FOLLOW the art | **better than ours** |
+| True-scale SVG/PDF export | first-class | yes |
+| Tiled printing | Print Tiling, listed done | yes |
+
+What stays uniquely ours: the spline book flatten with text-line
+refinement and batch outline propagation; interactive GrabCut tracing
+of one object out of a cluttered photo; the single-scalar
+mm_per_pixel calibration model built around photographing real
+objects.
+
+Worth stealing later (see "better than ours" above):
+- **Live dimensions** - measurements that re-measure when the art
+  moves, rather than the static rulers added 2026-09-17.
+- **Bezier contours** - `Contour` is polyline-only, which is why SVG
+  import must flatten curves (sec. 16.3 of svg_import's docstring).
+  This is the deepest model change on the list.
+
+Their agent story is Tier 3 done properly: a JSON control channel
+(`--control 7979`) plus an MCP server where every menu item, tool
+gesture, panel and dialog is drivable. If that holds up, a plausible
+future is PageWright as the headless FLATTENER feeding VectorCraft -
+our spline dewarp and calibration, their editing and tiling.

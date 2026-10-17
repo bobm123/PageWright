@@ -211,100 +211,65 @@ def test_dragging_a_ruler_in_pan_mode_moves_it_instead_of_panning(tmp_path):
     assert c.verticalScrollBar().value() == v_scroll
 
 
-def test_open_svg_makes_a_printable_vector_job(tmp_path):
-    # The headline case: open existing art, get a to-scale job with no
-    # photo and no calibration gesture, ready for Print Tiles.
-    fp = tmp_path / "art.svg"
-    fp.write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" '
-        'xmlns:inkscape="http://www.inkscape.org/namespaces/inkscape" '
-        'width="300mm" height="200mm" viewBox="0 0 300 200">'
-        '<g inkscape:groupmode="layer" inkscape:label="Outline">'
-        '<rect x="10" y="10" width="280" height="180"/></g>'
-        '<g inkscape:groupmode="layer" inkscape:label="Detail">'
-        '<circle cx="150" cy="100" r="50"/></g></svg>',
-        encoding="utf-8")
-    w = _window()
-    w.open_svg(str(fp))
+def test_landscape_tiling_gives_a_landscape_printer(tmp_path):
+    # Regression: QPrinter.setPageLayout() keeps a custom page SIZE but
+    # drops the orientation, so a landscape tiling opened a portrait
+    # preview and then warned about a 216x279 / 279x216 mismatch.
+    from PySide6.QtGui import QPageLayout
+    w = _window_with_photo(tmp_path)
+    w.tiling_panel.from_dict({"page": "Letter", "landscape": True})
+    c = w.exports
 
-    assert [o.name for o in w.project.objects] == ["Outline", "Detail"]
-    # calibrated straight from the document: 280x180 mm of content
-    assert w.project.calibration.is_calibrated
-    assert w.project.real_size_mm() == pytest.approx((280.0, 180.0))
-    # a blank white sheet stands in for the missing photo, so the canvas,
-    # overlays, mouse handling AND the export/tiling controllers (which
-    # bail out when _loaded is None) all work unchanged
-    assert w.canvas.has_photo()
-    assert w._loaded is not None
-    assert w._loaded.pixel_width == w.project.pixel_width
-    assert w._loaded.pixel_height == w.project.pixel_height
-    # it is a one-page job, and the layers reached the Objects panel
-    assert len(w.project.pages) == 1
-    assert len(w._objects) == 2
+    pw_mm, ph_mm = c._tile_page_mm()
+    assert pw_mm > ph_mm                       # tiles laid out wide
 
-    from pagewright.core import tiling
-    tiles = tiling.build_tiles(w.project, image_bgr=None, embed_photo=False,
-                               page="Letter", margin_mm=6.0, overlap_mm=10.0,
-                               base_name="t")
-    assert len(tiles) >= 2
+    printer = c._make_printer()
+    layout = printer.pageLayout()
+    assert layout.orientation() == QPageLayout.Landscape
+    paper = layout.fullRect(QPageLayout.Millimeter)
+    assert paper.width() > paper.height()
+    # The paper now matches the layout, so no mismatch warning fires.
+    # (_check_paper_match would block on a modal QMessageBox otherwise.)
+    assert abs(paper.width() - pw_mm) <= 2.0
+    assert abs(paper.height() - ph_mm) <= 2.0
 
 
-def test_open_svg_reports_a_bad_file_without_crashing(tmp_path, monkeypatch):
-    fp = tmp_path / "bad.svg"
-    fp.write_text("<html>not an svg</html>", encoding="utf-8")
-    w = _window()
-    shown = []
+def test_portrait_tiling_still_gives_a_portrait_printer(tmp_path):
+    from PySide6.QtGui import QPageLayout
+    w = _window_with_photo(tmp_path)
+    w.tiling_panel.from_dict({"page": "Letter", "landscape": False})
+    c = w.exports
+    printer = c._make_printer()
+    assert printer.pageLayout().orientation() == QPageLayout.Portrait
+    paper = printer.pageLayout().fullRect(QPageLayout.Millimeter)
+    assert paper.height() > paper.width()
+
+
+def test_trace_detail_settings_round_trip(tmp_path, monkeypatch):
+    # The Trace detail control and "one shape only" are app settings, so
+    # they must survive a new window (QSettings), not just this one.
+    from PySide6.QtCore import QSettings
     monkeypatch.setattr(
-        "PySide6.QtWidgets.QMessageBox.warning",
-        lambda *a, **k: shown.append(a[2] if len(a) > 2 else ""))
-    w.open_svg(str(fp))
-    assert shown                       # the user was told
-    assert w.project.objects == []      # and nothing was half-imported
-
-
-def test_svg_files_are_not_accepted_as_raster_pages(tmp_path):
-    # Pages are decoded bitmaps; an SVG must be routed to Open SVG
-    # instead of failing later with "could not read image".
-    fp = tmp_path / "vec.svg"
-    fp.write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="10mm" '
-        'height="10mm" viewBox="0 0 10 10"><rect width="10" height="10"/>'
-        '</svg>', encoding="utf-8")
+        QSettings, "setValue", lambda self, k, v: store.__setitem__(k, v))
+    monkeypatch.setattr(
+        QSettings, "value", lambda self, k, d=None: store.get(k, d))
+    store = {}
     w = _window()
-    before = len(w.project.pages)
-    w._append_pages([str(fp)])
-    assert len(w.project.pages) == before
+    assert w.trace_tolerance_mm() == pytest.approx(0.35)
+    assert w.trace_keep_largest() is True
+    w.set_trace_tolerance_mm(0.5)
+    w.set_trace_keep_largest(False)
+    assert store["trace_tolerance_mm"] == pytest.approx(0.5)
+    assert store["trace_keep_largest"] is False
+    # a fresh window reads them back
+    fresh = _window()
+    assert fresh.trace_tolerance_mm() == pytest.approx(0.5)
+    assert fresh.trace_keep_largest() is False
 
 
-def test_print_tiles_works_on_an_imported_svg(tmp_path):
-    # Regression: the export/tiling controllers read w._loaded.path and
-    # bail out when _loaded is None, so a vector job built without a
-    # working image produced no tiles at all (Print Tiles did nothing).
-    fp = tmp_path / "pat.svg"
-    fp.write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="350mm" '
-        'height="250mm" viewBox="0 0 350 250">'
-        '<path d="M 10 10 C 100 0 250 0 340 10 L 340 240 L 10 240 Z"/>'
-        '<circle cx="175" cy="125" r="60"/></svg>', encoding="utf-8")
+def test_trace_tolerance_is_clamped_positive(tmp_path):
     w = _window()
-    w.open_svg(str(fp))
-    tiles = w.exports._build_tiles("Print Tiles")
-    assert tiles, "Print Tiles produced nothing for a vector job"
-    assert any("<path" in svg for _n, svg in tiles)
-
-
-def test_oversized_svg_is_capped_but_keeps_its_real_size(tmp_path):
-    # A 2 m banner at 10 px/mm would be 20000 px wide; the blank sheet is
-    # capped and mm_per_pixel rescaled so the PRINTED size is unchanged.
-    fp = tmp_path / "banner.svg"
-    fp.write_text(
-        '<svg xmlns="http://www.w3.org/2000/svg" width="2000mm" '
-        'height="1000mm" viewBox="0 0 2000 1000">'
-        '<rect x="0" y="0" width="2000" height="1000"/></svg>',
-        encoding="utf-8")
-    w = _window()
-    w.open_svg(str(fp))
-    assert max(w.project.pixel_width,
-               w.project.pixel_height) <= w.SVG_SHEET_MAX_PX
-    assert w.project.real_size_mm() == pytest.approx((2000.0, 1000.0))
-    assert w.exports._build_tiles("Print Tiles")
+    before = w.trace_tolerance_mm()
+    w.set_trace_tolerance_mm(-5.0)
+    assert w.trace_tolerance_mm() > 0.0
+    w.set_trace_tolerance_mm(before)

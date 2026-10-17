@@ -71,6 +71,53 @@ the `sys.path` fix inside it comes too late. On Windows/PowerShell:
 $env:PYTHONPATH="src"; python -m pagewright.main
 ```
 
+## Command line (headless)
+
+Two subcommands run without a display — they never import Qt, so they work
+over SSH, in a container, or in a shell loop:
+
+```bash
+pagewright info pattern.svg
+pagewright tile pattern.svg --page A4 --out ./tiles
+```
+
+`info` reads an input and reports its pixel size, real-world size, scale,
+contents and — the useful part — how many sheets it would take, before you
+commit to tiling it:
+
+```
+NFFS2027_flat.svg  (svg)
+  pixels      : 4069 x 2044
+  scale       : 0.1 mm/px  (SVG document units)
+  real size   : 406.9 mm x 204.4 mm
+  objects     : 1  (3 shapes, 12 points)
+  tile plan   : 3 sheet(s) = 3 col x 1 row on Letter
+                margin 6.0 mm, overlap 10.0 mm, sheet 215.9 mm x 279.4 mm
+```
+
+`--json` gives the same data machine-readably. `tile` writes one page-size
+SVG per sheet, at true scale with registration marks (the headless form of
+Export Tiles); `-n`/`--dry-run` reports the plan without writing.
+
+Inputs are images, SVG, PDF or `.tiproj.json` projects, chosen by extension.
+**A photo carries no real-world size** (in the GUI that is the two-click
+Calibrate gesture), so image inputs need a scale — one of `--dpi`,
+`--mm-per-px`, `--width` or `--height`. SVG, PDF and saved projects already
+know their size, and these flags override it:
+
+```bash
+pagewright tile scan.jpg --dpi 300 --overlap 15mm
+pagewright tile photo.png --width 300mm --page A4 --landscape
+pagewright tile job.tiproj.json --scale 50 -o ./half-size
+```
+
+Lengths take a unit (`10mm`, `1cm`, `0.5in`); a bare number is millimetres.
+`pagewright COMMAND --help` lists every flag.
+
+The work lives in `core/jobs.py`, which is Qt-free by contract (a test
+asserts it in a clean interpreter) — so the GUI and the CLI can drive the
+same job rather than drifting apart.
+
 ## Usage so far
 
 1. **File → Import Photo…** (Ctrl+Shift+O) to load an image. Scroll wheel

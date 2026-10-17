@@ -4,6 +4,7 @@ A deliberate collaborator of MainWindow (it reads the window's project, loaded
 image and tiling panel). Split out of main_window to keep that file focused.
 """
 
+import logging
 import os
 
 from PySide6.QtCore import Qt
@@ -12,6 +13,33 @@ from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 from ..core import svg_export
 from ..core import tiling
 from .dialogs import ExportSvgDialog
+
+_log = logging.getLogger(__name__)
+
+
+def _log_printer(tag, printer):
+    """Debug-level dump of a QPrinter's page geometry.
+
+    Kept because tiled printing has had several orientation bugs that
+    only reproduce against a real printer driver: Qt can report the
+    layout it was given while the spooler still produces portrait. Turn
+    it on with:
+
+        logging.basicConfig(level=logging.DEBUG)
+
+    or PAGEWRIGHT_DEBUG=1 (see pagewright.__main__)."""
+    if not _log.isEnabledFor(logging.DEBUG):
+        return                      # skip the Qt calls entirely when off
+    from PySide6.QtGui import QPageLayout
+    from PySide6.QtPrintSupport import QPrinter
+    pl = printer.pageLayout()
+    full = pl.fullRect(QPageLayout.Millimeter)
+    dev = printer.pageRect(QPrinter.DevicePixel)
+    _log.debug("%-26s orient=%-9s full=%.1fx%.1f dev=%.0fx%.0f "
+               "fullPage=%s fmt=%s name=%s",
+               tag, pl.orientation().name, full.width(), full.height(),
+               dev.width(), dev.height(), printer.fullPage(),
+               printer.outputFormat().name, printer.printerName())
 
 
 class ExportController:
@@ -259,6 +287,25 @@ class ExportController:
             pw_mm, ph_mm = ph_mm, pw_mm
         return pw_mm, ph_mm
 
+    def _tiling_orientation(self):
+        """The tiling panel's orientation as a QPageLayout value."""
+        from PySide6.QtGui import QPageLayout
+        return (QPageLayout.Landscape
+                if self._w.tiling_panel.params()["landscape"]
+                else QPageLayout.Portrait)
+
+    def _apply_tiling_orientation(self, printer):
+        """Force `printer` to the tiling panel's orientation.
+
+        setPageLayout() keeps a custom QPageSize's SIZE but normalises it
+        to portrait, so the orientation has to be re-applied after it.
+
+        NOTE: this is not sufficient on Windows. Qt reports the landscape
+        layout correctly at every checkpoint (dialog, painter.begin) yet
+        the spooled job can still come out portrait - see
+        _log_printer()."""
+        printer.setPageOrientation(self._tiling_orientation())
+
     def _make_printer(self):
         """A QPrinter preset to the tiling page size AND orientation (so
         the print dialog opens matching the tile layout)."""
@@ -270,10 +317,9 @@ class ExportController:
         printer = QPrinter(QPrinter.HighResolution)
         layout = QPageLayout(
             QPageSize(QSizeF(pw_mm, ph_mm), QPageSize.Millimeter),
-            (QPageLayout.Landscape if p["landscape"]
-             else QPageLayout.Portrait),
-            QMarginsF(0, 0, 0, 0))
+            self._tiling_orientation(), QMarginsF(0, 0, 0, 0))
         printer.setPageLayout(layout)
+        self._apply_tiling_orientation(printer)
         printer.setFullPage(True)
         return printer
 
@@ -311,9 +357,13 @@ class ExportController:
         if not chosen:
             return False
         pw_mm, ph_mm = self._tile_page_mm()
+        _log_printer("paint: before begin", printer)
         painter = QPainter()
         if not painter.begin(printer):
             return False
+        _log_printer("paint: after begin", printer)
+        _log.debug("  tile page %.1f x %.1f mm, %d page(s)",
+                   pw_mm, ph_mm, len(chosen))
         try:
             for i, renderer in enumerate(chosen):
                 if i:
@@ -568,6 +618,7 @@ class _TilePreviewDialog(QDialog):
         from PySide6.QtPrintSupport import (QAbstractPrintDialog,
                                             QPrintDialog, QPrinter)
         printer = self._printer
+        _log_printer("print: before dialog", printer)
         printer.setFromTo(1, self._n)
         pd = QPrintDialog(printer, self)
         pd.setWindowTitle("Print Tiles")
@@ -576,6 +627,7 @@ class _TilePreviewDialog(QDialog):
         if pd.exec() != QDialog.Accepted:
             self._preview.updatePreview()   # reflect settings changes
             return
+        _log_printer("print: after dialog", printer)
         if not self._c._check_paper_match(printer, "Print Tiles"):
             self._preview.updatePreview()
             return
