@@ -126,6 +126,12 @@ def build_actions(w):
         "right-click to finish.")
     w.act_measure.triggered.connect(w.start_measure)
 
+    w.act_clean_notches = QAction("Clean Up &Notches", w)
+    w.act_clean_notches.setToolTip(
+        "Square the straight notch edges of the selected object and snap "
+        "them to 1/16 in multiples (needs a calibrated scale)")
+    w.act_clean_notches.triggered.connect(w.clean_up_notches)
+
     w.act_clear_measure = QAction("Clear Measurements", w)
     w.act_clear_measure.triggered.connect(
         lambda: w.canvas.clear_measurements())
@@ -247,6 +253,7 @@ def build_menus(w):
     m_tools.addSeparator()
     m_tools.addAction(w.act_new_object)
     m_tools.addAction(w.act_run_seg)
+    m_tools.addAction(w.act_clean_notches)
     m_tools.addAction(w.act_clear_seeds)
     m_tools.addAction(w.act_clear_roi)
 
@@ -311,6 +318,8 @@ def show_canvas_menu(w, global_pos):
                 lambda _=False, s=sz: w.canvas.set_brush_radius(s))
         menu.addAction(w.act_clear_seeds)
     menu.addSeparator()
+    if getattr(w, "_active_index", -1) >= 0:
+        menu.addAction(w.act_clean_notches)
     menu.addAction(w.act_calibrate)
     menu.addAction(w.act_measure)
     hit = w.canvas.measurement_hit(global_pos)

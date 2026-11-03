@@ -109,6 +109,13 @@ class EditingController:
         # floor is relative for the same reason an absolute one failed -
         # a drawing sheet holds hundreds of unrelated ink fragments, and
         # any inside the trace area came back as extra polygons.
+        # Which enclosed regions are real holes is decided by the marks,
+        # not by size: the user said where "outside" is, and a hole is
+        # somewhere they said that. Printed labels inside the outline
+        # read as background to GrabCut and would otherwise come back
+        # as holes, but nobody marks outside on a letter.
+        outside_seeds = seg.outside_seed_mask(image.shape[:2], strokes)
+
         region_h, region_w = image.shape[:2]
         epsilon_px = cont.tolerance_mm_to_px(
             w.trace_tolerance_mm(), w.project.calibration.mm_per_pixel)
@@ -116,7 +123,8 @@ class EditingController:
         results = cont.extract_contours(
             mask, epsilon_px=epsilon_px, min_area_px=min_area_px,
             min_area_frac=cont.MIN_AREA_FRACTION,
-            keep_largest=w.trace_keep_largest())
+            keep_largest=w.trace_keep_largest(),
+            hole_seed_mask=outside_seeds)
         if not results:
             QMessageBox.information(
                 w, "Run Segmentation",

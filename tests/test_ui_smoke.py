@@ -273,3 +273,65 @@ def test_trace_tolerance_is_clamped_positive(tmp_path):
     w.set_trace_tolerance_mm(-5.0)
     assert w.trace_tolerance_mm() > 0.0
     w.set_trace_tolerance_mm(before)
+
+
+def _notched_object(w, mm_per_px=0.0846667):
+    """Give the window one object: a rectangle with an off-size notch."""
+    from pagewright.model import Contour, TracedObject
+    step = 25.4 / 16.0 / mm_per_px        # 1/16 in in pixels
+    bad = step * 0.88                     # an off-size notch floor
+    h = 40.0 / mm_per_px
+    pts = [(0.0, 0.0), (0.0, h), (bad, h), (bad, h - step * 2),
+           (bad * 2, h - step * 2), (bad * 2, h), (bad * 3, h),
+           (bad * 3, 0.0)]
+    obj = TracedObject(name="Former")
+    obj.contours = [Contour(points=pts)]
+    w.project.calibration.mm_per_pixel = mm_per_px
+    w.project.objects = [obj]
+    w.project.pixel_width, w.project.pixel_height = 2000, 2000
+    w.canvas.show_blank(2000, 2000)
+    w._load_layers_from_project()
+    w._active_index = 0
+    return w._objects[0]
+
+
+def test_clean_up_notches_is_one_undoable_step(tmp_path):
+    w = _window()
+    layer = _notched_object(w)
+    before = [list(c.points()) for c in layer.contours]
+    w.clean_up_notches()
+    after = [list(c.points()) for c in layer.contours]
+    assert after != before
+    assert w.undo_stack.can_undo()
+    assert w.undo_stack.undo_label() == "clean up notches"
+    w._do_undo()
+    restored = [list(c.points()) for c in layer.contours]
+    for b, r in zip(before[0], restored[0]):
+        assert b[0] == pytest.approx(r[0], abs=1e-6)
+        assert b[1] == pytest.approx(r[1], abs=1e-6)
+    w._do_redo()
+    again = [list(c.points()) for c in layer.contours]
+    for a, g in zip(after[0], again[0]):
+        assert a[0] == pytest.approx(g[0], abs=1e-6)
+
+
+def test_clean_up_notches_needs_a_calibrated_scale(tmp_path, monkeypatch):
+    w = _window()
+    layer = _notched_object(w)
+    w.project.calibration.mm_per_pixel = None
+    shown = []
+    monkeypatch.setattr(
+        "PySide6.QtWidgets.QMessageBox.information",
+        lambda *a, **k: shown.append(a[2] if len(a) > 2 else ""))
+    before = [list(c.points()) for c in layer.contours]
+    w.clean_up_notches()
+    assert shown, "the user was not told why nothing happened"
+    assert [list(c.points()) for c in layer.contours] == before
+    assert not w.undo_stack.can_undo()
+
+
+def test_clean_up_notches_with_no_selection_is_a_no_op(tmp_path):
+    w = _window()
+    w._active_index = -1
+    w.clean_up_notches()
+    assert not w.undo_stack.can_undo()

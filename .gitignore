@@ -8,6 +8,10 @@ output/
 # machines and do not belong in the repo.
 projects/
 
+# Session transcripts and scratch notes: conversation artifacts,
+# not project documentation. Design decisions belong in PLAN.md.
+notes/
+
 # Python
 __pycache__/
 *.py[cod]

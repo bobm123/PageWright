@@ -76,3 +76,23 @@ def test_scaled_strokes_scales_points_and_radius():
     scaled = seg._scaled_strokes([s], 0.5)[0]
     assert scaled.points == [(5.0, 10.0), (15.0, 20.0)]
     assert scaled.radius_px == 4.0
+
+
+def test_outside_seed_mask_records_only_background_strokes():
+    # Contour extraction asks this where the user said "outside", so a
+    # foreground stroke must not leak into it.
+    strokes = [
+        seg.Stroke("fg", [(50, 50), (60, 60)], 5.0),
+        seg.Stroke("bg", [(20, 20)], 4.0),
+    ]
+    mask = seg.outside_seed_mask((100, 100), strokes)
+    assert mask.shape == (100, 100)
+    assert mask[20, 20] == 1          # the bg dab
+    assert mask[50, 50] == 0          # the fg stroke is absent
+    assert mask.max() == 1
+
+
+def test_outside_seed_mask_is_empty_without_background_strokes():
+    mask = seg.outside_seed_mask(
+        (40, 40), [seg.Stroke("fg", [(10, 10)], 3.0)])
+    assert mask.sum() == 0

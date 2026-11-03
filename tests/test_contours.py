@@ -143,3 +143,133 @@ def test_a_hole_still_follows_its_outer_contour():
     m = _square_with_hole()
     results = cont.extract_contours(m, epsilon_px=1.0, keep_largest=True)
     assert [role for _, role in results] == [cont.ROLE_OUTER, cont.ROLE_HOLE]
+
+
+# ----- hole size fallback (used only when there are no marks) -------------
+
+def _part_with_island(side_mm, mm_per_px=0.0846667, tall_mm=None):
+    """A big part with one enclosed island of the given real size."""
+    m = np.zeros((900, 900), dtype=np.uint8)
+    m[100:800, 100:800] = 1
+    bw = max(1, int(round(side_mm / mm_per_px)))
+    bh = max(1, int(round((tall_mm if tall_mm else side_mm) / mm_per_px)))
+    m[450 - bh // 2:450 + bh // 2, 450 - bw // 2:450 + bw // 2] = 0
+    return m
+
+
+def test_hole_min_px_converts_and_disables_when_uncalibrated():
+    assert cont.hole_min_px(0.0846667) == pytest.approx(35.4, abs=0.2)
+    assert cont.hole_min_px(0.0846667, 6.0) == pytest.approx(70.9, abs=0.2)
+    # no scale -> no filtering, rather than guessing which holes are text
+    assert cont.hole_min_px(None) == 0.0
+    assert cont.hole_min_px(0.0) == 0.0
+    # explicitly off
+    assert cont.hole_min_px(0.0846667, 0.0) == 0.0
+
+
+def test_size_fallback_drops_a_printed_label():
+    # Without marks (a mask from outside the interactive tracer) the
+    # size rule still applies. The "6" label measured 2.37 x 3.05 mm -
+    # note the HEIGHT exceeds 3 mm, so the narrow side is what counts.
+    mpp = 0.0846667
+    m = _part_with_island(2.37, mpp, tall_mm=3.05)
+    kept = cont.extract_contours(m, epsilon_px=2.0, keep_largest=True,
+                                 min_hole_px=cont.hole_min_px(mpp))
+    assert [role for _, role in kept] == [cont.ROLE_OUTER]
+    # without the filter it comes through, which is the bug being fixed
+    unfiltered = cont.extract_contours(m, epsilon_px=2.0, keep_largest=True)
+    assert cont.ROLE_HOLE in [role for _, role in unfiltered]
+
+
+def test_real_cutouts_are_kept():
+    mpp = 0.0846667
+    floor = cont.hole_min_px(mpp)
+    for side_mm in (25.4 / 8, 25.4 * 3 / 16, 25.4 / 4, 25.4 / 2):
+        m = _part_with_island(side_mm, mpp)
+        kept = cont.extract_contours(m, epsilon_px=2.0, keep_largest=True,
+                                     min_hole_px=floor)
+        roles = [role for _, role in kept]
+        assert cont.ROLE_HOLE in roles, "%.2f mm cutout was dropped" % side_mm
+
+
+def test_hole_filter_off_keeps_thin_slots():
+    # A 1/16 in wide slot is narrower than the default minimum, so the
+    # control has to be able to turn the filter off.
+    mpp = 0.0846667
+    m = _part_with_island(25.4 / 16, mpp, tall_mm=8.0)
+    with_filter = cont.extract_contours(
+        m, epsilon_px=2.0, keep_largest=True,
+        min_hole_px=cont.hole_min_px(mpp))
+    assert cont.ROLE_HOLE not in [r for _, r in with_filter]
+    without = cont.extract_contours(
+        m, epsilon_px=2.0, keep_largest=True,
+        min_hole_px=cont.hole_min_px(mpp, 0.0))
+    assert cont.ROLE_HOLE in [r for _, r in without]
+
+
+# ----- the marks decide which enclosed regions are holes ------------------
+
+def _marked_part():
+    """A part with a real cutout and a letter-sized island, plus the
+    seed mask a user would produce: outside dabbed in the cutout only."""
+    import cv2
+    m = np.zeros((900, 900), dtype=np.uint8)
+    m[100:800, 100:800] = 1
+    cv2.circle(m, (300, 450), 60, 0, -1)             # real cutout
+    cv2.rectangle(m, (590, 430), (618, 466), 0, -1)  # a label glyph
+    seeds = np.zeros((900, 900), dtype=np.uint8)
+    cv2.circle(seeds, (300, 450), 12, 1, -1)         # "outside" dab in it
+    cv2.rectangle(seeds, (40, 40), (860, 60), 1, -1)  # outside the part
+    return m, seeds
+
+
+def test_a_hole_is_real_only_where_outside_was_marked():
+    # The point of marking inside and outside: the boundary runs
+    # between them. An enclosed region nobody called "outside" is not
+    # a hole, whatever its size - which is how printed lettering
+    # trapped inside the outline gets dropped with no size constant.
+    mask, seeds = _marked_part()
+    kept = cont.extract_contours(mask, epsilon_px=2.0, keep_largest=True,
+                                 hole_seed_mask=seeds)
+    roles = [role for _, role in kept]
+    assert roles.count(cont.ROLE_HOLE) == 1          # the marked cutout
+    assert roles.count(cont.ROLE_OUTER) == 1
+    # and it is the big one, not the glyph
+    import cv2
+    hole = [p for p, r in kept if r == cont.ROLE_HOLE][0]
+    _x, _y, bw, bh = cv2.boundingRect(np.array(hole, np.float32))
+    assert min(bw, bh) > 100
+
+
+def test_without_marks_both_regions_come_through():
+    # Documents what the marks are actually buying.
+    mask, _seeds = _marked_part()
+    kept = cont.extract_contours(mask, epsilon_px=2.0, keep_largest=True)
+    assert [r for _, r in kept].count(cont.ROLE_HOLE) == 2
+
+
+def test_an_empty_seed_mask_rejects_every_hole():
+    # Marking nothing outside is a statement too: no holes were claimed.
+    mask, _ = _marked_part()
+    empty = np.zeros(mask.shape, dtype=np.uint8)
+    kept = cont.extract_contours(mask, epsilon_px=2.0, keep_largest=True,
+                                 hole_seed_mask=empty)
+    assert [r for _, r in kept] == [cont.ROLE_OUTER]
+
+
+def test_marks_beat_size_in_both_directions():
+    # A TINY marked region is a hole; a LARGE unmarked one is not.
+    # Neither outcome is reachable with a size threshold.
+    import cv2
+    m = np.zeros((900, 900), dtype=np.uint8)
+    m[100:800, 100:800] = 1
+    cv2.rectangle(m, (280, 440), (300, 460), 0, -1)   # tiny, marked
+    cv2.circle(m, (600, 450), 80, 0, -1)              # large, unmarked
+    seeds = np.zeros((900, 900), dtype=np.uint8)
+    cv2.rectangle(seeds, (285, 445), (295, 455), 1, -1)
+    kept = cont.extract_contours(m, epsilon_px=1.0, keep_largest=True,
+                                 hole_seed_mask=seeds)
+    holes = [p for p, r in kept if r == cont.ROLE_HOLE]
+    assert len(holes) == 1
+    _x, _y, bw, bh = cv2.boundingRect(np.array(holes[0], np.float32))
+    assert max(bw, bh) < 40, "kept the large unmarked region instead"

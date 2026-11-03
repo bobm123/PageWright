@@ -1247,6 +1247,70 @@ class MainWindow(QMainWindow):
         self._refresh_object_list()
         self._refresh_editability()
 
+    def clean_up_notches(self):
+        """Tools > Clean Up Notches: square and 1/16 in-snap the active
+        object, as one undo step.
+
+        A separate action rather than part of tracing: it reshapes
+        geometry on the assumption that the straight bits are stock
+        notches, which is true of a model-aircraft former and false of
+        most other drawings. Needs a calibrated scale - without one
+        there is no 1/16 inch to snap to."""
+        from PySide6.QtWidgets import QMessageBox
+        from ..core import notches as nt
+        if self._active_index < 0 or self._active_index >= len(self._objects):
+            self.statusBar().showMessage("Select an object first.", 4000)
+            return
+        mpp = self.project.calibration.mm_per_pixel
+        if not mpp:
+            QMessageBox.information(
+                self, "Clean Up Notches",
+                "Calibrate the scale first - snapping to 1/16 in needs "
+                "to know how big a pixel is.")
+            return
+        layer = self._objects[self._active_index]
+        before = [list(c.points()) for c in layer.contours]
+        reports = []
+        after = []
+        for pts in before:
+            new_pts, report = nt.snap_notches(pts, mpp)
+            after.append(new_pts)
+            reports.append(report)
+        total_snapped = sum(r.snapped for r in reports)
+        total_axis = sum(r.axis_edges for r in reports)
+        if not total_axis:
+            self.statusBar().showMessage(
+                "No square notch edges found in '%s' - nothing to clean "
+                "up." % layer.name, 6000)
+            return
+        self._apply_contour_points(layer, after)
+        self.undo_stack.push(undo.FnCommand(
+            "clean up notches",
+            undo=lambda: self._apply_contour_points(layer, before),
+            redo=lambda: self._apply_contour_points(layer, after)))
+        skipped = sum(r.out_of_tolerance for r in reports)
+        worst = max((r.max_move_mm for r in reports), default=0.0)
+        self.statusBar().showMessage(
+            "Squared %d edge(s), snapped %d to 1/16 in (%d left as traced, "
+            "largest move %.2f mm) on '%s'."
+            % (sum(r.squared for r in reports), total_snapped, skipped,
+               worst, layer.name), 9000)
+
+    def _apply_contour_points(self, layer, point_lists):
+        """Replace a layer's contour points and refresh what depends on
+        them. Used by Clean Up Notches and by its undo."""
+        # move_vertex is the existing primitive the undo stack already
+        # uses, so this stays consistent with vertex editing rather
+        # than introducing a second way to change a contour.
+        for contour, pts in zip(layer.contours, point_lists):
+            for i, (x, y) in enumerate(pts):
+                if i < contour.vertex_count():
+                    contour.move_vertex(i, float(x), float(y))
+        self._sync_model()
+        self._update_bbox()
+        self._update_tile_grid()
+        self._refresh_scale_readout()
+
     def delete_active_object(self):
         if self._active_index < 0:
             return

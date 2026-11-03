@@ -75,6 +75,23 @@ def build_seed_mask(shape_hw, strokes):
     return mask
 
 
+def outside_seed_mask(shape_hw, strokes):
+    """HxW uint8 mask, 1 where the user marked OUTSIDE (background).
+
+    Separate from `build_seed_mask` because it answers a different
+    question. That one seeds GrabCut; this one records where the user
+    actually said "this is not the object", so contour extraction can
+    tell a real cutout (marked outside) from printed lettering trapped
+    inside the outline (never marked). See contours.extract_contours.
+    """
+    h, w = shape_hw
+    mask = np.zeros((h, w), dtype=np.uint8)
+    for s in strokes:
+        if s.label == "bg":
+            _paint_stroke(mask, s, 1)
+    return mask
+
+
 def has_foreground(strokes):
     """True if at least one foreground stroke with points is present."""
     for s in strokes:
