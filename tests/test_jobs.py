@@ -278,7 +278,7 @@ def test_tile_refuses_an_image_with_no_scale(tmp_path):
     with pytest.raises(jobs.JobError) as exc:
         jobs.tile(_png(tmp_path), out_dir=str(tmp_path / "o"))
     # the message must say how to fix it
-    assert "--dpi" in str(exc.value)
+    assert "no scale" in str(exc.value)
 
 
 def test_tile_embeds_the_photo_for_image_sources(tmp_path):
@@ -299,7 +299,7 @@ def test_embed_image_needs_pixels(tmp_path):
     with pytest.raises(jobs.JobError) as exc:
         jobs.tile(_svg(tmp_path), out_dir=str(tmp_path / "o3"),
                   embed_image=True)
-    assert "raster" in str(exc.value)
+    assert "no pixels" in str(exc.value)
 
 
 def test_tile_progress_callback_is_called(tmp_path):
@@ -346,7 +346,7 @@ def test_export_svg_defaults_its_output_beside_the_input(tmp_path):
 def test_export_svg_refuses_an_uncalibrated_image(tmp_path):
     with pytest.raises(jobs.JobError) as exc:
         jobs.export_svg(_png(tmp_path), out_path=str(tmp_path / "x.svg"))
-    assert "--dpi" in str(exc.value)
+    assert "no scale" in str(exc.value)
 
 
 def test_export_svg_needs_something_to_draw(tmp_path):
@@ -516,7 +516,7 @@ def test_find_parts_needs_a_scale(tmp_path):
     path, _mmpp = _plan(tmp_path)
     with pytest.raises(jobs.JobError) as exc:
         jobs.find_parts(path)
-    assert "--dpi" in str(exc.value)
+    assert "no scale" in str(exc.value)
 
 
 def test_find_parts_refuses_a_vector_source(tmp_path):
@@ -528,3 +528,41 @@ def test_find_parts_refuses_a_vector_source(tmp_path):
 def test_find_parts_limit_is_honoured(tmp_path):
     path, mmpp = _plan(tmp_path)
     assert jobs.find_parts(path, mm_per_px=mmpp, limit=2).count == 2
+
+# ----- source_from_project (the GUI seam) --------------------------------
+
+def test_source_from_project_needs_no_file(tmp_path):
+    """The GUI holds a live project, not a path. If this needed a file,
+    the window would have to save to a temp file to reach the job
+    layer - which is why it kept its own copy of the rules instead."""
+    src = jobs.load_source(_svg(tmp_path))
+    live = jobs.source_from_project(src.project)
+    assert live.path is None
+    assert live.project is src.project
+    out = str(tmp_path / "live.svg")
+    result = jobs.export_svg_source(live, out_path=out)
+    assert os.path.isfile(out)
+    assert result.objects == len(src.project.objects)
+
+
+def test_export_svg_source_enforces_the_same_rules_as_the_cli(tmp_path):
+    """Same validation whichever front end calls it: that is the whole
+    point of the split."""
+    src = jobs.load_source(_png(tmp_path))      # a photo has no scale
+    live = jobs.source_from_project(src.project, image_bgr=src.image_bgr)
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.export_svg_source(live, out_path=str(tmp_path / "n.svg"))
+    assert "no scale" in str(exc.value)
+
+
+def test_export_svg_source_carries_the_measurement_layer(tmp_path):
+    """annotations is GUI-only (there are no headless rulers yet), so
+    the shared path has to accept it rather than the GUI forking."""
+    src = jobs.load_source(_svg(tmp_path))
+    live = jobs.source_from_project(src.project)
+    out = str(tmp_path / "ann.svg")
+    jobs.export_svg_source(
+        live, out_path=out, inkscape=True,
+        annotations={"measurements": [(0.0, 0.0, 100.0, 0.0)]})
+    text = io.open(out, encoding="utf-8").read()
+    assert 'id="measurements"' in text

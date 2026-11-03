@@ -389,3 +389,10 @@ def test_find_parts_without_a_scale_fails_with_guidance(tmp_path):
     code, _out, err = _run(["find-parts", _plan(tmp_path)])
     assert code == cli.EXIT_ERROR
     assert "--dpi" in err
+
+def test_scale_guidance_names_the_flags_only_on_the_cli(tmp_path):
+    """The job layer serves the GUI too, so it says "supply one"; the
+    flags are named here, by cli._hint."""
+    code, _out, err = _run(["export-svg", _png(tmp_path)])
+    assert code == cli.EXIT_ERROR
+    assert "no scale" in err and "--mm-per-px" in err

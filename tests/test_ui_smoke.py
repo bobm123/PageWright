@@ -7,6 +7,7 @@ where PySide6 is not installed (the dev sandbox); it runs on the
 Windows dev machine as part of the normal suite.
 """
 
+import io
 import os
 import sys
 
@@ -335,3 +336,159 @@ def test_clean_up_notches_with_no_selection_is_a_no_op(tmp_path):
     w._active_index = -1
     w.clean_up_notches()
     assert not w.undo_stack.can_undo()
+
+# ----- Export SVG through the shared job layer ---------------------------
+
+def _window_with_traced_object(tmp_path):
+    from pagewright.model import Contour, TracedObject
+    w = _window_with_photo(tmp_path)
+    w.project.objects = [TracedObject(
+        name="part",
+        contours=[Contour(points=[(50, 50), (250, 50), (250, 200),
+                                  (50, 200)])])]
+    # objects live on the canvas; _sync_model rebuilds project.objects FROM
+    # the layers, so setting the model alone would be wiped on export.
+    w._load_layers_from_project()
+    return w
+
+
+def test_export_svg_writes_a_real_file(tmp_path, monkeypatch):
+    """Drives File > Export SVG with only the dialogs stubbed, so the
+    whole path below them is the real one. There was no test here
+    before, which is how the _loaded-is-None bug reached a release."""
+    from pagewright.ui import export_controller as ec
+    w = _window_with_traced_object(tmp_path)
+    out = str(tmp_path / "out.svg")
+
+    class _Dlg:
+        def __init__(self, _parent):
+            pass
+
+        def exec(self):
+            from PySide6.QtWidgets import QDialog
+            return QDialog.Accepted
+
+        def values(self):
+            # embed, downscale_max, filled, inkscape, annotations
+            return (False, None, False, True, False)
+
+    monkeypatch.setattr(ec, "ExportSvgDialog", _Dlg)
+    monkeypatch.setattr(ec.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (out, "")))
+    w.exports.export_svg()
+
+    assert os.path.isfile(out)
+    text = io.open(out, encoding="utf-8").read()
+    assert "inkscape:label" in text          # the dialog choice took effect
+    assert "mm" in text                      # sized in real units
+
+
+def test_export_svg_reports_a_job_error_in_a_dialog(tmp_path, monkeypatch):
+    """A JobError from the shared layer has to surface as a message box,
+    not a traceback: the GUI and the CLI differ only in how they
+    report."""
+    from pagewright.ui import export_controller as ec
+    w = _window_with_traced_object(tmp_path)
+
+    class _Dlg:
+        def __init__(self, _parent):
+            pass
+
+        def exec(self):
+            from PySide6.QtWidgets import QDialog
+            return QDialog.Accepted
+
+        def values(self):
+            return (False, None, False, False, False)
+
+    seen = {}
+
+    def _warn(_parent, title, text):
+        seen["title"], seen["text"] = title, text
+
+    bad = str(tmp_path / "no_such_dir" / "deep" / "x.svg")
+    monkeypatch.setattr(ec, "ExportSvgDialog", _Dlg)
+    monkeypatch.setattr(ec.QFileDialog, "getSaveFileName",
+                        staticmethod(lambda *a, **k: (bad, "")))
+    monkeypatch.setattr(ec.QMessageBox, "warning", staticmethod(_warn))
+    # make the write fail inside the job layer
+    monkeypatch.setattr(ec.jobs.os, "makedirs",
+                        lambda *a, **k: (_ for _ in ()).throw(
+                            OSError("denied")))
+    w.exports.export_svg()
+    assert seen.get("title") == "Export SVG"
+    assert "cannot write" in seen.get("text", "")
+
+# ----- Flatten Checked through the shared per-page seam ------------------
+
+def test_batch_flatten_runs_the_shared_per_page_transform(tmp_path,
+                                                          monkeypatch):
+    """Flatten Checked had no test, which is how batch.seed_and_refine
+    could return a tuple on one path and a model on the other and still
+    ship. It now calls jobs.flatten_page, the same seam the headless
+    `flatten` uses, so one test covers both."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from pagewright.model import PageEntry
+    from pagewright.ui import main_window as mw
+
+    w = _window()
+    srcs = []
+    for n in range(2):
+        img = np.full((300, 400, 3), 255, np.uint8)
+        cv2.putText(img, "text line", (40, 150),
+                    cv2.FONT_HERSHEY_SIMPLEX, 1.0, (0, 0, 0), 2)
+        fp = str(tmp_path / ("pg%d.png" % n))
+        cv2.imwrite(fp, img)
+        srcs.append(fp)
+    w.project.pages = [PageEntry(source_path=p) for p in srcs]
+    w.project.current_page = 0
+
+    # stand in for the Flatten tool's confirmed outline and the panel
+    from pagewright.core import dewarp
+    seed = dewarp.default_spread_model(400, 300)
+    monkeypatch.setattr(w.dewarp_stage, "current_outline", lambda: seed)
+    monkeypatch.setattr(w.dewarp_stage, "source_wh", lambda: (400, 300))
+    monkeypatch.setattr(w.pages_panel, "checked_rows", lambda: [0, 1])
+
+    shown = {}
+    monkeypatch.setattr(
+        mw.QMessageBox, "information",
+        staticmethod(lambda _p, title, text: shown.update(t=text)))
+
+    before = len(w.project.pages)
+    w.batch_flatten()
+
+    # a spread model yields L+R per page, so 2 pages -> 4 derived
+    assert len(w.project.pages) > before
+    assert "Flattened 2 page(s)" in shown.get("t", "")
+    assert "Problems:" not in shown.get("t", "")
+
+def test_open_svg_agrees_with_the_cli_on_the_sheet_size(tmp_path):
+    """File > Open SVG and `pagewright import-svg` read the same file
+    through the same helper, so the sheet is the same size either way.
+    The mm->px arithmetic used to exist in three copies."""
+    from pagewright.core import jobs
+    svg = tmp_path / "card.svg"
+    svg.write_text(
+        '<svg xmlns="http://www.w3.org/2000/svg" width="200mm" '
+        'height="150mm" viewBox="0 0 200 150">'
+        '<rect x="10" y="10" width="180" height="130"/></svg>',
+        encoding="utf-8")
+
+    headless, size_mm, _mpp = jobs.project_from_svg(str(svg))
+    w = _window()
+    w.open_svg(str(svg))
+
+    # size_mm is the CONTENT bounding box (the rect), not the document:
+    # a 180x130 rect inside a 200x150 mm sheet.
+    assert round(size_mm[0]) == 180 and round(size_mm[1]) == 130
+    gui_mpp = w.project.calibration.mm_per_pixel
+    assert gui_mpp == headless.calibration.mm_per_pixel
+    assert len(w.project.objects) == len(headless.objects)
+    # the window swaps in a blank working sheet, but it has to stay the
+    # same real-world size the headless path computed
+    assert w.project.real_size_mm()[0] == pytest.approx(
+        headless.real_size_mm()[0], abs=1.0)
+    assert w.project.real_size_mm()[1] == pytest.approx(
+        headless.real_size_mm()[1], abs=1.0)

@@ -478,7 +478,7 @@ class MainWindow(QMainWindow):
         import os
         import cv2
         from PySide6.QtWidgets import QApplication, QProgressDialog
-        from ..core import batch as batch_core
+        from ..core import jobs
         rows = self.pages_panel.checked_rows()
         if not rows:
             QMessageBox.information(
@@ -514,12 +514,10 @@ class MainWindow(QMainWindow):
                 errors.append("%s: could not read image"
                               % os.path.basename(pg.source_path or "?"))
                 continue
-            h, w = img.shape[:2]
-            seed = batch_core.propagate_model(prev_model, prev_wh, (w, h))
-            gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-            refined = batch_core.seed_and_refine(gray, seed)
             try:
-                outs = batch_core.flatten_with_model(img, refined)
+                # same per-page transform the headless `flatten` runs
+                outs, refined, page_wh = jobs.flatten_page(
+                    img, seed_model=prev_model, seed_wh=prev_wh)
             except Exception as exc:
                 errors.append("%s: %s"
                               % (os.path.basename(pg.source_path or "?"),
@@ -532,7 +530,7 @@ class MainWindow(QMainWindow):
                                              at_index=i)
             offset += len(entries)
             # the refined model seeds the NEXT page
-            prev_model, prev_wh = refined, (w, h)
+            prev_model, prev_wh = refined, page_wh
             done += 1
         prog.setValue(len(rows))
         self._refresh_pages_panel()
@@ -745,7 +743,7 @@ class MainWindow(QMainWindow):
         the model's only geometry (see core/svg_import)."""
         import os
         from PySide6.QtWidgets import QApplication, QFileDialog, QMessageBox
-        from ..core import svg_import
+        from ..core import jobs
         if not path:
             path, _ = QFileDialog.getOpenFileName(
                 self, "Open SVG", "", "SVG drawing (*.svg);;All files (*)")
@@ -753,8 +751,10 @@ class MainWindow(QMainWindow):
             return
         QApplication.setOverrideCursor(Qt.WaitCursor)
         try:
-            objects, size_mm, mpp = svg_import.import_svg(path)
-        except svg_import.SvgImportError as exc:
+            # shared with the CLI, so the sheet comes out the same size
+            # whichever way the SVG was opened
+            imported, size_mm, _mpp = jobs.project_from_svg(path)
+        except jobs.JobError as exc:
             QApplication.restoreOverrideCursor()
             QMessageBox.warning(self, "Open SVG", str(exc))
             return
@@ -770,13 +770,8 @@ class MainWindow(QMainWindow):
         self.switch_tool("trace")
         # A vector job has no photo: the canvas shows an empty scene the
         # size of the artwork, and the traces are the content.
-        self.project = Project()
+        self.project = imported
         self.project.calibration.display_unit = self.preferred_unit()
-        self.project.calibration.mm_per_pixel = mpp
-        self.project.pixel_width = max(1, int(round(size_mm[0] / mpp)))
-        self.project.pixel_height = max(1, int(round(size_mm[1] / mpp)))
-        self.project.source_image_path = path
-        self.project.objects = objects
         # A vector job still needs a LoadedImage-shaped working image:
         # the export/tiling controllers key off _loaded for the base
         # filename, the page size and the optional embedded bitmap, and
@@ -808,6 +803,7 @@ class MainWindow(QMainWindow):
         self._update_tile_grid()
         self._project_path = None
         self.setWindowTitle("PageWright - %s" % os.path.basename(path))
+        objects = self.project.objects
         n_c = sum(len(o.contours) for o in objects)
         self.statusBar().showMessage(
             "Imported %s: %d object(s), %d shape(s), %.1f x %.1f mm - "

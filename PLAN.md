@@ -496,11 +496,8 @@ MainWindow methods only 10 touch a dialog.
   on failure, so `flatten_with_model` died with "tuple object has no
   attribute edges". That broke the GUI's Flatten Checked too, which
   matches HANDOFF's note that batch flatten was never test-driven.
-- **Tier 2 - GUI calls the same job layer** (~2-3 days). Refactor the
-  10 dialog-bound methods into gather-params -> call-job. This is the
-  property worth having: one code path, two front ends. It would have
-  caught the `_loaded is None` bug that made Print Tiles silently
-  produce nothing for vector jobs.
+- **Tier 2 - GUI calls the same job layer. COMPLETE 2026-11-03,**
+  scoped down; see sec. 16.5.
 - **Tier 3 - full action registry with introspection** (~1 week+).
   NOT RECOMMENDED. Covering all 39 QActions mostly exposes mode
   toggles that are meaningless without a canvas, and it contradicts
@@ -622,6 +619,64 @@ parts to their neighbours.
 
 What this changes for the agent story: `find-parts --json` hands back
 bbox, centroid and polygon per part, so an agent can work a plan
-unaided - and for the parts it misses, the hole rule from 16.5 already
-accepts an outside-seed MASK as data rather than mouse gestures. The
-remaining Tier 2 work is unchanged.
+unaided - and for the parts it misses, the marks-based hole rule
+(commit 9788e10) already accepts an outside-seed MASK as data rather
+than mouse gestures. Tier 2 is now done too (sec. 16.5).
+
+### 16.5 Tier 2: one code path, two front ends (2026-11-03)
+
+Done, but scoped down from the estimate in 16.1 after counting what
+was actually there.
+
+**The count was wrong.** 16.1 said "10 dialog-bound methods in
+MainWindow". The real figure is ~45 dialog-bound functions across 8
+modules: main_window 12, export_controller 10, project_controller 8,
+dewarp_stage 6, ocr_stage 3, scale_stage 3, editing_controller 2,
+dialogs 1. Refactoring all of them is not 2-3 days, and most of it
+would buy nothing.
+
+**What was actually shared, and is now one path:**
+
+| Was duplicated | Now |
+|---|---|
+| Export SVG: calibration + empty checks, build, write | `jobs.export_svg_source` |
+| Flatten: propagate -> refine -> flatten, per page | `jobs.flatten_page` |
+| SVG mm->px sizing, in THREE copies | `jobs.project_from_svg` |
+
+The enabling piece is `jobs.source_from_project`. A `Source` is only a
+project plus optional pixels, so the live window already is one;
+without that the GUI would have to save a temp file to reach the job
+layer, which is exactly why it kept its own copy of the rules instead.
+
+**Left alone deliberately:**
+
+- **OCR** (`ocr_stage._run`) - works on a raw array and renders into a
+  text widget. Both front ends already share all the logic there is
+  (`core/ocr.py`); `jobs.ocr_source` only adds file writing, which the
+  GUI does through its own Save dialog. Routing it through a `Source`
+  would be a wrapper around a 3-line call.
+- **Printing** (`_do_print`, `_build_tiles`, `tiles_to_pages`) - needs
+  QPrinter. 16.1 already lists printing as Qt-only; `jobs.tile` is the
+  headless half.
+- **Pickers and gestures** (`add_page_folder`, `_pick_mark_color`,
+  `_on_calibrated`, `rename_active_object`, ...) - a folder picker that
+  appends to a list has no headless meaning.
+
+**Error text had to move.** A shared message cannot name a CLI flag:
+"give --dpi" is wrong in a message box. The job layer now says
+"calibrate it, or supply one" and `cli._hint` appends the flag list at
+the one place a JobError becomes stderr. Three job tests asserted
+"--dpi"; they now assert "no scale" and the flag check moved to the
+CLI tests, where it belongs.
+
+**Proof it works, rather than just compiles.** Reintroducing the
+`seed_and_refine` tuple bug (the one that shipped because batch flatten
+was never test-driven) now fails 4 tests across BOTH front ends from
+one defect. Before this, only the CLI tests caught it.
+
+Finding it needed tests that drive the real methods with only the
+dialogs stubbed. Writing them turned up two live bugs in code that had
+no coverage at all: `open_svg` referenced an undefined `objects` after
+the refactor and would have crashed on the next SVG opened, and an
+offscreen `QMessageBox.information` hangs forever, which is how an
+untested GUI path fails rather than reports.

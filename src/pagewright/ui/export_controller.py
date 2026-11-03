@@ -10,6 +10,7 @@ import os
 from PySide6.QtCore import Qt
 from PySide6.QtWidgets import QApplication, QDialog, QFileDialog, QMessageBox
 
+from ..core import jobs
 from ..core import svg_export
 from ..core import tiling
 from .dialogs import ExportSvgDialog
@@ -76,29 +77,27 @@ class ExportController:
         if not path:
             return
 
+        # Everything below the dialogs is the same work the CLI does, so
+        # it runs through the job layer rather than a second copy here.
+        source = jobs.source_from_project(
+            w.project, image_bgr=w._loaded.data, path=w._loaded.path)
         try:
             QApplication.setOverrideCursor(Qt.WaitCursor)
             try:
-                svg = svg_export.build_svg(
-                    w.project,
-                    image_bgr=w._loaded.data if embed else None,
-                    embed_photo=embed,
-                    downscale_max=downscale_max,
-                    filled=filled,
-                    inkscape=inkscape,
-                    annotations=annotations)
+                result = jobs.export_svg_source(
+                    source, out_path=path, embed_image=embed,
+                    downscale_max=downscale_max, filled=filled,
+                    inkscape=inkscape, annotations=annotations)
             finally:
                 QApplication.restoreOverrideCursor()
-            with open(path, "w", encoding="utf-8") as fh:
-                fh.write(svg)
-        except svg_export.ExportError as exc:
+        except jobs.JobError as exc:
             QMessageBox.warning(w, "Export SVG", str(exc))
             return
         except Exception as exc:
             QMessageBox.critical(w, "Export SVG", "Export failed: %s" % (exc,))
             return
 
-        w.statusBar().showMessage("Exported %s" % path, 6000)
+        w.statusBar().showMessage("Exported %s" % result.path, 6000)
 
     def _tile_region(self):
         """The Select Area rectangle as (x0, y0, x1, y1) image px, clamped

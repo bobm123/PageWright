@@ -484,6 +484,19 @@ _HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
              "find-parts": _cmd_find_parts}
 
 
+def _hint(exc):
+    """Add the CLI-only remedy to a job error.
+
+    The job layer serves both front ends, so its messages name no
+    flags - "supply one" means a dialog in the GUI and a flag here.
+    This is where the flags get named.
+    """
+    text = str(exc)
+    if "calibrate it, or supply one" in text:
+        text += " [--dpi, --mm-per-px, --width or --height]"
+    return text
+
+
 def run(argv, out=None, err=None):
     """Run one CLI command. Returns an exit code; never calls sys.exit.
 
@@ -501,7 +514,7 @@ def run(argv, out=None, err=None):
     try:
         return handler(args, out, err)
     except jobs.JobError as exc:
-        err.write("pagewright %s: %s\n" % (args.command, exc))
+        err.write("pagewright %s: %s\n" % (args.command, _hint(exc)))
         return EXIT_ERROR
     except KeyboardInterrupt:
         err.write("\ninterrupted\n")

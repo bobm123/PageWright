@@ -74,7 +74,8 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 ## Command line (headless)
 
 Seven subcommands run without a display — they never import Qt, so they work
-over SSH, in a container, or in a shell loop:
+over SSH, in a container, or in a shell loop. The GUI calls the same job
+layer for the same work, so there is one implementation behind both:
 
 ```bash
 pagewright info pattern.svg

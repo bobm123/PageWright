@@ -170,11 +170,36 @@ def load_source(path, mm_per_px=None, dpi=None, width=None, height=None,
     return src
 
 
-def _load_svg(path):
-    from . import svg_import
+def source_from_project(project, image_bgr=None, path=None, kind=None):
+    """Wrap an ALREADY-OPEN project as a Source, with no file access.
+
+    This is the seam the GUI calls through. A Source is only a project
+    plus optional pixels, so the window's live project is already one;
+    without this, the GUI would have to save to a temp file just to
+    reach the job layer, and the two front ends would keep their own
+    copies of every rule (which is how Export SVG and Print Tiles drifted
+    apart).
+    """
+    if kind is None:
+        kind = "image" if image_bgr is not None else "svg"
+    return Source(kind, path, project, image_bgr=image_bgr)
+
+
+def project_from_svg(path):
+    """Read an SVG into a fresh Project sized in pixels.
+
+    One place for the size arithmetic: an SVG carries mm, the model
+    works in pixels, and mm_per_pixel ties them together. This lived in
+    three copies (_load_svg, import_svg and the GUI's File > Open SVG),
+    which is three chances for the rounding to disagree about how big
+    the sheet is.
+
+    Returns (project, size_mm, mm_per_pixel). Raises JobError.
+    """
+    from . import svg_import as svgi
     try:
-        objects, size_mm, mpp = svg_import.import_svg(path)
-    except svg_import.SvgImportError as exc:
+        objects, size_mm, mpp = svgi.import_svg(path)
+    except svgi.SvgImportError as exc:
         raise JobError(str(exc))
     project = Project()
     project.objects = objects
@@ -182,6 +207,11 @@ def _load_svg(path):
     project.pixel_width = max(1, int(round(size_mm[0] / mpp)))
     project.pixel_height = max(1, int(round(size_mm[1] / mpp)))
     project.source_image_path = path
+    return project, size_mm, mpp
+
+
+def _load_svg(path):
+    project, _size_mm, _mpp = project_from_svg(path)
     return Source("svg", path, project,
                   calibrated_by="SVG document units")
 
@@ -360,8 +390,8 @@ def tile(path, out_dir=".", page="Letter", landscape=False, margin="6mm",
     project = source.project
     if not project.calibration.is_calibrated:
         raise JobError(
-            "no scale for %s - give --dpi, --mm-per-px, --width or "
-            "--height (SVG and PDF inputs carry their own size)"
+            "no scale for %s: calibrate it, or supply one "
+            "(SVG and PDF inputs carry their own size)"
             % os.path.basename(path))
     if not project.objects and source.image_bgr is None:
         raise JobError("nothing to tile: no traced objects and no image")
@@ -371,8 +401,8 @@ def tile(path, out_dir=".", page="Letter", landscape=False, margin="6mm",
     if embed_image is None:
         embed_image = source.image_bgr is not None
     if embed_image and source.image_bgr is None:
-        raise JobError("--embed-image needs a raster source "
-                       "(this input has no pixels)")
+        raise JobError("cannot embed the image: this input has "
+                       "no pixels")
 
     mpp = project.calibration.mm_per_pixel
     if scale_percent is not None and float(scale_percent) != 100.0:
@@ -445,18 +475,33 @@ def export_svg(path, out_path=None, embed_image=None, filled=False,
     True for raster sources and False for vector ones, matching what
     the source actually has to embed.
     """
-    source = load_source(path, **scale_kw)
+    return export_svg_source(
+        load_source(path, **scale_kw), out_path=out_path,
+        embed_image=embed_image, filled=filled, inkscape=inkscape,
+        downscale_max=downscale_max, progress=progress)
+
+
+def export_svg_source(source, out_path=None, embed_image=None, filled=False,
+                      inkscape=False, downscale_max=None, annotations=None,
+                      progress=None):
+    """Build and write the SVG for an open Source. The GUI calls this.
+
+    Everything from the calibration check down is shared with the
+    command line; only the dialogs differ. `annotations` carries the
+    measurement layer, which has no headless equivalent yet.
+    """
     project = source.project
+    path = source.path or "drawing"
     if not project.calibration.is_calibrated:
         raise JobError(
-            "no scale for %s - give --dpi, --mm-per-px, --width or "
-            "--height (SVG and PDF inputs carry their own size)"
+            "no scale for %s: calibrate it, or supply one "
+            "(SVG and PDF inputs carry their own size)"
             % os.path.basename(path))
     if embed_image is None:
         embed_image = source.image_bgr is not None
     if embed_image and source.image_bgr is None:
-        raise JobError("--embed-image needs a raster source "
-                       "(this input has no pixels)")
+        raise JobError("cannot embed the image: this input has "
+                       "no pixels")
     if not project.objects and not embed_image:
         raise JobError("nothing to export: no traced objects, and the "
                        "image is not being embedded")
@@ -470,7 +515,7 @@ def export_svg(path, out_path=None, embed_image=None, filled=False,
         text = svg_export.build_svg(
             project, image_bgr=source.image_bgr if embed_image else None,
             embed_photo=embed_image, downscale_max=downscale_max,
-            filled=filled, inkscape=inkscape)
+            filled=filled, inkscape=inkscape, annotations=annotations)
     except svg_export.ExportError as exc:
         raise JobError(str(exc))
 
@@ -507,22 +552,11 @@ def import_svg(path, out_path=None, progress=None):
     other subcommands) can work on, which is otherwise only reachable
     through File > Open SVG.
     """
-    from . import svg_import as svgi
     if not path or not os.path.isfile(path):
         raise JobError("file not found: %s" % (path,))
     if progress:
         progress("reading %s" % os.path.basename(path))
-    try:
-        objects, size_mm, mpp = svgi.import_svg(path)
-    except svgi.SvgImportError as exc:
-        raise JobError(str(exc))
-
-    project = Project()
-    project.objects = objects
-    project.calibration.mm_per_pixel = mpp
-    project.pixel_width = max(1, int(round(size_mm[0] / mpp)))
-    project.pixel_height = max(1, int(round(size_mm[1] / mpp)))
-    project.source_image_path = path
+    project, size_mm, mpp = project_from_svg(path)
 
     base = os.path.splitext(os.path.basename(path))[0]
     if out_path is None:
@@ -537,6 +571,7 @@ def import_svg(path, out_path=None, progress=None):
         raise JobError("cannot write %s: %s" % (out_path, exc))
     if progress:
         progress("wrote %s" % os.path.basename(out_path))
+    objects = project.objects
     return ImportResult(
         out_path, size_mm, mpp, len(objects),
         sum(len(o.contours) for o in objects),
@@ -557,6 +592,39 @@ class FlattenResult(object):
         return len(self.written)
 
 
+def flatten_page(bgr, seed_model=None, seed_wh=None, spread=False,
+                 refine=True):
+    """Flatten ONE page. Returns (images, model, wh).
+
+    The seam both front ends share. `seed_model` is the previous
+    page's confirmed outline: consecutive pages of a book share a
+    binding and opening angle, so propagating it and running only the
+    cheap text-line refinement is faster and keeps the geometry
+    consistent down a run. With no seed the outline is detected from
+    scratch (or started from a default spread).
+
+    The returned model seeds the NEXT page, which is why it comes back
+    rather than staying private: the GUI's Flatten Checked and the
+    headless `flatten` both carry it forward, and when they each did
+    their own version of this loop they drifted apart.
+    """
+    import cv2
+    from . import batch as batch_mod
+    from . import dewarp
+
+    gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+    wh = (bgr.shape[1], bgr.shape[0])
+    if seed_model is not None:
+        model = batch_mod.propagate_model(seed_model, seed_wh, wh)
+    elif spread:
+        model = dewarp.default_spread_model(gray.shape[1], gray.shape[0])
+    else:
+        model = dewarp.detect_page(gray)
+    if refine:
+        model = batch_mod.seed_and_refine(gray, model)
+    return batch_mod.flatten_with_model(bgr, model), model, wh
+
+
 def flatten(paths, out_dir=".", dpi=300, spread=False, refine=True,
             propagate=True, dry_run=False, progress=None):
     """Detect each page's outline, flatten it, and write the result.
@@ -572,9 +640,7 @@ def flatten(paths, out_dir=".", dpi=300, spread=False, refine=True,
     fails is recorded and the run carries on - one bad photo should not
     abandon a book.
     """
-    import cv2
-    from . import batch as batch_mod
-    from . import dewarp
+    import cv2                      # still used, for imwrite
 
     result = FlattenResult()
     result.dpi = dpi
@@ -596,31 +662,14 @@ def flatten(paths, out_dir=".", dpi=300, spread=False, refine=True,
             result.failed.append((path, str(exc)))
             continue
         bgr = loaded.data
-        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
-        wh = (bgr.shape[1], bgr.shape[0])
         if progress:
             progress("detecting %s" % name)
+        seed = prev_model if propagate else None
         try:
-            if prev_model is not None and propagate:
-                model = batch_mod.propagate_model(prev_model, prev_wh, wh)
-                if refine:
-                    model = batch_mod.seed_and_refine(gray, model)
-            elif spread:
-                model = dewarp.default_spread_model(gray.shape[1],
-                                                    gray.shape[0])
-                if refine:
-                    model = batch_mod.seed_and_refine(gray, model)
-            else:
-                model = dewarp.detect_page(gray)
-                if refine:
-                    model = batch_mod.seed_and_refine(gray, model)
+            images, model, wh = flatten_page(
+                bgr, seed_model=seed, seed_wh=prev_wh, spread=spread,
+                refine=refine)
         except Exception as exc:       # one bad photo must not stop a book
-            result.failed.append((path, "outline detection failed: %s"
-                                  % (exc,)))
-            continue
-        try:
-            images = batch_mod.flatten_with_model(bgr, model)
-        except Exception as exc:
             result.failed.append((path, "flatten failed: %s" % (exc,)))
             continue
         prev_model, prev_wh = model, wh
@@ -670,7 +719,13 @@ class OcrResult(object):
 
 def ocr(path, out_path=None, lang="eng", region=None, progress=None,
         **scale_kw):
-    """Read the text on an image (or a saved project's image)."""
+    """Read the text on an image (or a saved project's image).
+
+    Not split into an `_source` half like export_svg: the GUI's OCR
+    stage already shares all the logic there is (`core/ocr.py`) and
+    renders into a text widget rather than writing a file, so a Source
+    wrapper would only add a layer. See PLAN sec. 16.5.
+    """
     from . import ocr as ocr_mod
     err = ocr_mod.availability_error()
     if err:
@@ -737,9 +792,9 @@ def find_parts(path, trace=False, gap=None, min_area=None, max_aspect=None,
     mpp = project.calibration.mm_per_pixel
     if not mpp:
         raise JobError(
-            "no scale for %s - give --dpi, --mm-per-px, --width or "
-            "--height. Every threshold here is a real-world size, so "
-            "the sheet has to be to scale first."
+            "no scale for %s: calibrate it, or supply one. Every "
+            "threshold here is a real-world size, so the sheet has to "
+            "be to scale first."
             % os.path.basename(path))
 
     kw = {}
