@@ -29,14 +29,28 @@ def propagate_model(model, prev_wh, new_wh):
 def seed_and_refine(gray, model, iters=2):
     """Refine a seeded outline against this page's printed text lines.
 
+    Always returns a MODEL. The underlying refine_* functions return
+    (model, ok), and this used to pass that tuple straight through on
+    success while returning a bare model on failure - so a caller got
+    different types depending on whether refinement worked, and
+    flatten_with_model then failed with "tuple object has no attribute
+    edges". Callers that want to know whether refinement actually
+    improved anything should call dewarp.refine_with_text directly.
+
     Falls back to the unrefined seed on ANY failure - in a batch run a
-    slightly-off outline on one page beats aborting the whole book."""
+    slightly-off outline on one page beats abandoning the whole book."""
     try:
         if isinstance(model, dewarp.SpreadModel):
-            return dewarp.refine_spread_with_text(gray, model, iters=iters)
-        return dewarp.refine_with_text(gray, model, iters=iters)
+            refined = dewarp.refine_spread_with_text(gray, model,
+                                                     iters=iters)
+        else:
+            refined = dewarp.refine_with_text(gray, model, iters=iters)
     except Exception:
         return model
+    # refine_* report (model, ok); older callers expect just the model.
+    if isinstance(refined, tuple):
+        refined = refined[0]
+    return refined if refined is not None else model
 
 
 def flatten_with_model(bgr, model, out_w=None, out_h=None):

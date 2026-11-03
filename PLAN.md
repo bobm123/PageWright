@@ -482,14 +482,20 @@ no Qt modules loaded. The obstacle is that MainWindow methods fuse
 validate / ask-options / ask-path / compute into one method. Of ~90
 MainWindow methods only 10 touch a dialog.
 
-- **Tier 1 - job layer + subcommands. DONE 2026-10-15** (prototype,
-  uncommitted): `core/jobs.py` (Qt-free by contract, asserted by a test
-  in a clean interpreter) plus `cli.py` with `info` and `tile`.
-  `main.py` dispatches before importing PySide6. Scale for raster
-  inputs comes from `--dpi` / `--mm-per-px` / `--width` / `--height`;
-  SVG and PDF carry their own. Remaining: `export-svg`, `flatten`,
-  `ocr`, `import-svg` - mostly argparse wiring against the same
-  `load_source`.
+- **Tier 1 - job layer + subcommands. COMPLETE 2026-10-22.**
+  `core/jobs.py` (Qt-free by contract, asserted by a test in a clean
+  interpreter) plus `cli.py` with all six commands: `info`, `tile`,
+  `export-svg`, `import-svg`, `flatten`, `ocr`. `main.py` dispatches
+  before importing PySide6. Scale for raster inputs comes from
+  `--dpi` / `--mm-per-px` / `--width` / `--height`; SVG and PDF carry
+  their own. `flatten` is the one that earns the whole tier: page
+  detection needs no human, so a folder of book photographs is
+  straightened unattended, seeding each page from the previous one.
+  Finishing it turned up a real bug in `core/batch.py` -
+  `seed_and_refine` returned `(model, ok)` on success but a bare model
+  on failure, so `flatten_with_model` died with "tuple object has no
+  attribute edges". That broke the GUI's Flatten Checked too, which
+  matches HANDOFF's note that batch flatten was never test-driven.
 - **Tier 2 - GUI calls the same job layer** (~2-3 days). Refactor the
   10 dialog-bound methods into gather-params -> call-job. This is the
   property worth having: one code path, two front ends. It would have
@@ -542,3 +548,36 @@ Their agent story is Tier 3 done properly: a JSON control channel
 gesture, panel and dialog is drivable. If that holds up, a plausible
 future is PageWright as the headless FLATTENER feeding VectorCraft -
 our spline dewarp and calibration, their editing and tiling.
+
+### 16.3 Centreline tracing: measured and rejected (2026-10-19)
+
+Proposed because a traced outline "should" follow the middle of the
+printed line. Measured against a former whose true height Robert
+confirmed as 1 21/32 in, it is the WRONG correction:
+
+| reference            | height    | error vs true |
+|----------------------|-----------|---------------|
+| outer edge of ink    | 1.7033 in | +0.0471 in    |
+| centreline           | 1.6833 in | +0.0271 in    |
+| inner edge of ink    | 1.6633 in | +0.0071 in    |
+| what GrabCut gives   | 1.6600 in | +0.0038 in    |
+
+Both axes agree, and a normal-profile scan across the traced boundary
+puts the ink band at +1..+8 px INWARD of it: GrabCut already hugs the
+line's inner edge. Moving to the centreline would make every part
+about 0.023 in oversize.
+
+It is also wrong in principle for this app. A cut part ends where the
+line's INSIDE edge is - the draughtsman drew the line around the
+shape. Centreline is the convention for a dimension or fold line, not
+a cut line.
+
+The earlier "+0.02 in improvement" claim came from a reconstruction
+whose synthetic seed stopped at the OUTER edge (1.7033 in). Robert's
+real seeding does not behave that way. Lesson: measure the user's own
+trace, not a reconstruction of it.
+
+Still open from that analysis: the trace lands on the inner edge by
+luck of where the seed is painted, not by construction. If that
+non-determinism ever bites, the fix is an explicit inner-edge snap -
+NOT a centreline one.

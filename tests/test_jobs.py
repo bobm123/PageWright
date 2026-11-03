@@ -314,3 +314,152 @@ def test_tile_base_name_controls_the_filenames(tmp_path):
     out = str(tmp_path / "named")
     r = jobs.tile(_svg(tmp_path), out_dir=out, base_name="pattern")
     assert all(n.startswith("pattern-r") for n in r.names)
+
+
+# ----- export_svg ---------------------------------------------------------
+
+def test_export_svg_writes_a_true_scale_document(tmp_path):
+    out = str(tmp_path / "out.svg")
+    r = jobs.export_svg(_svg(tmp_path), out_path=out)
+    assert os.path.isfile(out)
+    text = _read(out)
+    assert 'width="390mm"' in text or "mm" in text
+    assert r.objects == 1
+    assert r.bytes_written > 0
+    assert r.size_mm == pytest.approx((380.0, 280.0))
+
+
+def test_export_svg_inkscape_flavour_names_its_layers(tmp_path):
+    out = str(tmp_path / "ink.svg")
+    jobs.export_svg(_svg(tmp_path), out_path=out, inkscape=True)
+    text = _read(out)
+    assert 'inkscape:label="Trace"' in text
+
+
+def test_export_svg_defaults_its_output_beside_the_input(tmp_path):
+    src = _svg(tmp_path, name="named.svg")
+    r = jobs.export_svg(src)
+    assert os.path.basename(r.path) == "named.svg"
+    assert os.path.dirname(r.path) == os.path.dirname(src)
+
+
+def test_export_svg_refuses_an_uncalibrated_image(tmp_path):
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.export_svg(_png(tmp_path), out_path=str(tmp_path / "x.svg"))
+    assert "--dpi" in str(exc.value)
+
+
+def test_export_svg_needs_something_to_draw(tmp_path):
+    # an image with no traces and no embedding has no content
+    with pytest.raises(jobs.JobError):
+        jobs.export_svg(_png(tmp_path), out_path=str(tmp_path / "y.svg"),
+                        dpi=254.0, embed_image=False)
+
+
+# ----- import_svg ---------------------------------------------------------
+
+def test_import_svg_writes_a_project_to_scale(tmp_path):
+    out = str(tmp_path / "job.tiproj.json")
+    r = jobs.import_svg(_svg(tmp_path), out_path=out)
+    assert os.path.isfile(out)
+    assert r.size_mm == pytest.approx((380.0, 280.0))
+    assert r.objects == 1 and r.contours == 1
+    # and the project it wrote really does load
+    src = jobs.load_source(out)
+    assert src.project.calibration.is_calibrated
+    assert src.size_mm == pytest.approx((380.0, 280.0))
+
+
+def test_import_then_export_keeps_the_size(tmp_path):
+    proj = str(tmp_path / "rt.tiproj.json")
+    jobs.import_svg(_svg(tmp_path), out_path=proj)
+    out = str(tmp_path / "rt.svg")
+    r = jobs.export_svg(proj, out_path=out)
+    assert r.size_mm == pytest.approx((380.0, 280.0))
+
+
+def test_import_svg_rejects_a_non_svg(tmp_path):
+    bad = tmp_path / "bad.svg"
+    bad.write_text("<html>nope</html>", encoding="utf-8")
+    with pytest.raises(jobs.JobError):
+        jobs.import_svg(str(bad), out_path=str(tmp_path / "x.json"))
+
+
+# ----- flatten ------------------------------------------------------------
+
+def _page_photo(tmp_path, name="page.png"):
+    """A dark frame with a light page in it, which detect_page can find."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    img = np.full((700, 900, 3), 30, np.uint8)
+    cv2.rectangle(img, (120, 90), (780, 610), (245, 245, 240), -1)
+    for k in range(8):               # some text lines to refine against
+        y = 150 + k * 55
+        cv2.line(img, (170, y), (730, y), (40, 40, 40), 4)
+    fp = str(tmp_path / name)
+    cv2.imwrite(fp, img)
+    return fp
+
+
+def test_flatten_straightens_a_page_without_any_human_input(tmp_path):
+    out = str(tmp_path / "flat")
+    r = jobs.flatten([_page_photo(tmp_path)], out_dir=out)
+    assert r.pages == 1
+    assert not r.failed
+    written = r.written[0][1]
+    assert os.path.isfile(written)
+
+
+def test_flatten_dry_run_writes_nothing(tmp_path):
+    out = str(tmp_path / "nope")
+    r = jobs.flatten([_page_photo(tmp_path)], out_dir=out, dry_run=True)
+    assert r.pages == 1
+    assert not os.path.exists(out)
+
+
+def test_flatten_records_a_bad_page_and_carries_on(tmp_path):
+    # One unreadable photo must not abandon the rest of the book.
+    good = _page_photo(tmp_path, "good.png")
+    out = str(tmp_path / "flat2")
+    r = jobs.flatten([str(tmp_path / "missing.png"), good], out_dir=out)
+    assert r.pages == 1
+    assert len(r.failed) == 1
+    assert "not found" in r.failed[0][1]
+
+
+def test_flatten_fails_loudly_when_every_page_fails(tmp_path):
+    with pytest.raises(jobs.JobError):
+        jobs.flatten([str(tmp_path / "a.png"), str(tmp_path / "b.png")],
+                     out_dir=str(tmp_path / "o"))
+
+
+def test_flatten_rejects_a_bad_dpi(tmp_path):
+    with pytest.raises(jobs.JobError):
+        jobs.flatten([_page_photo(tmp_path)], out_dir=str(tmp_path / "o"),
+                     dpi=0)
+
+
+def test_flatten_needs_at_least_one_input():
+    with pytest.raises(jobs.JobError):
+        jobs.flatten([])
+
+
+# ----- ocr ----------------------------------------------------------------
+
+def test_ocr_reports_a_missing_engine_as_a_joberror(tmp_path):
+    from pagewright.core import ocr as ocr_mod
+    if ocr_mod.availability_error() is None:
+        pytest.skip("Tesseract is installed here")
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.ocr(_png(tmp_path))
+    # the message must say how to fix it
+    assert "pytesseract" in str(exc.value) or "Tesseract" in str(exc.value)
+
+
+def test_ocr_refuses_a_vector_source(tmp_path):
+    from pagewright.core import ocr as ocr_mod
+    if ocr_mod.availability_error() is not None:
+        pytest.skip("OCR engine not installed")
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.ocr(_svg(tmp_path))
+    assert "no pixels" in str(exc.value)

@@ -73,7 +73,7 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 
 ## Command line (headless)
 
-Two subcommands run without a display — they never import Qt, so they work
+Six subcommands run without a display — they never import Qt, so they work
 over SSH, in a container, or in a shell loop:
 
 ```bash
@@ -110,6 +110,21 @@ pagewright tile scan.jpg --dpi 300 --overlap 15mm
 pagewright tile photo.png --width 300mm --page A4 --landscape
 pagewright tile job.tiproj.json --scale 50 -o ./half-size
 ```
+
+The rest of the set:
+
+```bash
+pagewright import-svg pattern.svg -o pattern.tiproj.json
+pagewright export-svg pattern.tiproj.json --inkscape
+pagewright flatten scans/*.jpg --out ./flat
+pagewright ocr page.png --out page.txt
+```
+
+`flatten` is the one worth knowing about: page-outline detection needs no
+human input, so a folder of book photographs is straightened in one go, each
+page seeded from the previous one (consecutive pages of a book share a binding
+and opening angle). A page that fails is reported and the run carries on, with
+a non-zero exit so a script notices.
 
 Lengths take a unit (`10mm`, `1cm`, `0.5in`); a bare number is millimetres.
 `pagewright COMMAND --help` lists every flag.

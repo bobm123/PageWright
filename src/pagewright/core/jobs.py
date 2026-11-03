@@ -424,3 +424,278 @@ def tile(path, out_dir=".", page="Letter", landscape=False, margin="6mm",
         if progress:
             progress("wrote %s" % name)
     return TileResult(written, out_dir or ".", plan, size_mm)
+
+
+# ----- export_svg ---------------------------------------------------------
+
+class ExportResult(object):
+    def __init__(self, path, size_mm, objects, bytes_written):
+        self.path = path
+        self.size_mm = size_mm
+        self.objects = objects
+        self.bytes_written = bytes_written
+
+
+def export_svg(path, out_path=None, embed_image=None, filled=False,
+               inkscape=False, downscale_max=None, progress=None,
+               **scale_kw):
+    """Write one true-scale SVG of the whole drawing.
+
+    The headless form of File > Export SVG. `embed_image` defaults to
+    True for raster sources and False for vector ones, matching what
+    the source actually has to embed.
+    """
+    source = load_source(path, **scale_kw)
+    project = source.project
+    if not project.calibration.is_calibrated:
+        raise JobError(
+            "no scale for %s - give --dpi, --mm-per-px, --width or "
+            "--height (SVG and PDF inputs carry their own size)"
+            % os.path.basename(path))
+    if embed_image is None:
+        embed_image = source.image_bgr is not None
+    if embed_image and source.image_bgr is None:
+        raise JobError("--embed-image needs a raster source "
+                       "(this input has no pixels)")
+    if not project.objects and not embed_image:
+        raise JobError("nothing to export: no traced objects, and the "
+                       "image is not being embedded")
+
+    if out_path is None:
+        out_path = os.path.join(os.path.dirname(path) or ".",
+                                source.base_name + ".svg")
+    if progress:
+        progress("building %s" % os.path.basename(out_path))
+    try:
+        text = svg_export.build_svg(
+            project, image_bgr=source.image_bgr if embed_image else None,
+            embed_photo=embed_image, downscale_max=downscale_max,
+            filled=filled, inkscape=inkscape)
+    except svg_export.ExportError as exc:
+        raise JobError(str(exc))
+
+    parent = os.path.dirname(out_path)
+    try:
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        with open(out_path, "w", encoding="utf-8") as fh:
+            fh.write(text)
+    except (IOError, OSError) as exc:
+        raise JobError("cannot write %s: %s" % (out_path, exc))
+    return ExportResult(out_path, source.size_mm, len(project.objects),
+                        len(text.encode("utf-8")))
+
+
+# ----- import_svg ---------------------------------------------------------
+
+class ImportResult(object):
+    def __init__(self, path, size_mm, mm_per_pixel, objects, contours,
+                 points, names):
+        self.path = path
+        self.size_mm = size_mm
+        self.mm_per_pixel = mm_per_pixel
+        self.objects = objects
+        self.contours = contours
+        self.points = points
+        self.names = list(names)
+
+
+def import_svg(path, out_path=None, progress=None):
+    """Read an SVG and write it as a PageWright project.
+
+    Turns existing vector art into a job the rest of the app (and the
+    other subcommands) can work on, which is otherwise only reachable
+    through File > Open SVG.
+    """
+    from . import svg_import as svgi
+    if not path or not os.path.isfile(path):
+        raise JobError("file not found: %s" % (path,))
+    if progress:
+        progress("reading %s" % os.path.basename(path))
+    try:
+        objects, size_mm, mpp = svgi.import_svg(path)
+    except svgi.SvgImportError as exc:
+        raise JobError(str(exc))
+
+    project = Project()
+    project.objects = objects
+    project.calibration.mm_per_pixel = mpp
+    project.pixel_width = max(1, int(round(size_mm[0] / mpp)))
+    project.pixel_height = max(1, int(round(size_mm[1] / mpp)))
+    project.source_image_path = path
+
+    base = os.path.splitext(os.path.basename(path))[0]
+    if out_path is None:
+        out_path = os.path.join(os.path.dirname(path) or ".",
+                                base + ".tiproj.json")
+    parent = os.path.dirname(out_path)
+    try:
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        project_io.save_project(project, out_path)
+    except (IOError, OSError) as exc:
+        raise JobError("cannot write %s: %s" % (out_path, exc))
+    if progress:
+        progress("wrote %s" % os.path.basename(out_path))
+    return ImportResult(
+        out_path, size_mm, mpp, len(objects),
+        sum(len(o.contours) for o in objects),
+        sum(len(c.points) for o in objects for c in o.contours),
+        [o.name for o in objects])
+
+
+# ----- flatten ------------------------------------------------------------
+
+class FlattenResult(object):
+    def __init__(self):
+        self.written = []        # [(source_path, out_path)]
+        self.failed = []         # [(source_path, reason)]
+        self.dpi = None
+
+    @property
+    def pages(self):
+        return len(self.written)
+
+
+def flatten(paths, out_dir=".", dpi=300, spread=False, refine=True,
+            propagate=True, dry_run=False, progress=None):
+    """Detect each page's outline, flatten it, and write the result.
+
+    This is the batch book-scan path and the reason a headless mode is
+    worth having: `dewarp.detect_page` needs no human input, so a whole
+    folder of photographs can be straightened unattended.
+
+    `propagate` seeds each page from the previous page's confirmed
+    model (consecutive pages of one book share a binding and opening
+    angle) and runs only the cheap text-line refinement, which is both
+    faster and keeps geometry consistent down the run. A page that
+    fails is recorded and the run carries on - one bad photo should not
+    abandon a book.
+    """
+    import cv2
+    from . import batch as batch_mod
+    from . import dewarp
+
+    result = FlattenResult()
+    result.dpi = dpi
+    if not paths:
+        raise JobError("no input images given")
+    if dpi <= 0:
+        raise JobError("--dpi must be positive")
+
+    prev_model = None
+    prev_wh = None
+    for path in paths:
+        name = os.path.basename(path)
+        if not os.path.isfile(path):
+            result.failed.append((path, "file not found"))
+            continue
+        try:
+            loaded = image_io.load_image(path)
+        except IOError as exc:
+            result.failed.append((path, str(exc)))
+            continue
+        bgr = loaded.data
+        gray = cv2.cvtColor(bgr, cv2.COLOR_BGR2GRAY)
+        wh = (bgr.shape[1], bgr.shape[0])
+        if progress:
+            progress("detecting %s" % name)
+        try:
+            if prev_model is not None and propagate:
+                model = batch_mod.propagate_model(prev_model, prev_wh, wh)
+                if refine:
+                    model = batch_mod.seed_and_refine(gray, model)
+            elif spread:
+                model = dewarp.default_spread_model(gray.shape[1],
+                                                    gray.shape[0])
+                if refine:
+                    model = batch_mod.seed_and_refine(gray, model)
+            else:
+                model = dewarp.detect_page(gray)
+                if refine:
+                    model = batch_mod.seed_and_refine(gray, model)
+        except Exception as exc:       # one bad photo must not stop a book
+            result.failed.append((path, "outline detection failed: %s"
+                                  % (exc,)))
+            continue
+        try:
+            images = batch_mod.flatten_with_model(bgr, model)
+        except Exception as exc:
+            result.failed.append((path, "flatten failed: %s" % (exc,)))
+            continue
+        prev_model, prev_wh = model, wh
+
+        stem = os.path.splitext(name)[0]
+        for k, out in enumerate(images):
+            tag = "" if len(images) == 1 else "-%s" % "LR"[k:k + 1]
+            dest = os.path.join(out_dir or ".",
+                                "%s%s_flat.png" % (stem, tag))
+            if dry_run:
+                result.written.append((path, dest))
+                continue
+            try:
+                if out_dir and not os.path.isdir(out_dir):
+                    os.makedirs(out_dir)
+                if not cv2.imwrite(dest, out):
+                    raise IOError("cv2 could not write the file")
+            except (IOError, OSError) as exc:
+                result.failed.append((path, "cannot write %s: %s"
+                                      % (dest, exc)))
+                continue
+            result.written.append((path, dest))
+            if progress:
+                progress("wrote %s" % os.path.basename(dest))
+    if not result.written and result.failed:
+        raise JobError("every page failed; first reason: %s"
+                       % result.failed[0][1])
+    return result
+
+
+# ----- ocr ----------------------------------------------------------------
+
+class OcrResult(object):
+    def __init__(self, path, text, out_path=None):
+        self.path = path
+        self.text = text
+        self.out_path = out_path
+
+    @property
+    def characters(self):
+        return len(self.text)
+
+    @property
+    def words(self):
+        return len(self.text.split())
+
+
+def ocr(path, out_path=None, lang="eng", region=None, progress=None,
+        **scale_kw):
+    """Read the text on an image (or a saved project's image)."""
+    from . import ocr as ocr_mod
+    err = ocr_mod.availability_error()
+    if err:
+        raise JobError(err)
+    source = load_source(path, **scale_kw)
+    if source.image_bgr is None:
+        raise JobError("OCR needs a raster source; %s has no pixels"
+                       % os.path.basename(path))
+    if progress:
+        progress("reading text from %s" % os.path.basename(path))
+    try:
+        text = ocr_mod.image_to_text(source.image_bgr, region_px=region,
+                                     lang=lang)
+    except RuntimeError as exc:
+        raise JobError(str(exc))
+
+    if out_path:
+        parent = os.path.dirname(out_path)
+        try:
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent)
+            with open(out_path, "w", encoding="utf-8") as fh:
+                fh.write(text)
+        except (IOError, OSError) as exc:
+            raise JobError("cannot write %s: %s" % (out_path, exc))
+        if progress:
+            progress("wrote %s" % os.path.basename(out_path))
+    return OcrResult(path, text, out_path)

@@ -10,6 +10,10 @@ drift.
     pagewright tile pattern.svg --page A4 --out ./tiles
     pagewright tile scan.jpg --dpi 300 --overlap 15mm
     pagewright tile photo.png --width 300mm --no-embed-image
+    pagewright export-svg job.tiproj.json --inkscape
+    pagewright import-svg pattern.svg -o pattern.tiproj.json
+    pagewright flatten scans/*.jpg --out ./flat
+    pagewright ocr page.png --out page.txt
 
 Qt is never imported here. `main.py` dispatches to this module BEFORE it
 touches PySide6, so these commands run on a machine with no display.
@@ -19,6 +23,7 @@ output), 2 argparse usage errors.
 """
 
 import argparse
+import os
 import sys
 
 from .core import jobs
@@ -29,7 +34,8 @@ EXIT_ERROR = 1
 
 # Subcommands this module provides. `main.py` checks membership to
 # decide between CLI and GUI, so a new command only needs adding here.
-COMMANDS = ("info", "tile")
+COMMANDS = ("info", "tile", "export-svg", "import-svg",
+            "flatten", "ocr")
 
 
 def _add_scale_flags(parser):
@@ -133,6 +139,84 @@ def build_parser():
                         help="only report errors")
     _add_page_flags(p_tile, with_defaults=True)
     _add_scale_flags(p_tile)
+
+    p_exp = subs.add_parser(
+        "export-svg", help="write one true-scale SVG of the whole drawing",
+        description="The headless form of Export SVG: a single mm-sized "
+                    "document, not page tiles.")
+    p_exp.add_argument("file", metavar="FILE",
+                       help="image, SVG, PDF or .tiproj.json project")
+    p_exp.add_argument("-o", "--out", metavar="FILE",
+                       help="output path (default: beside the input)")
+    p_exp.add_argument("--inkscape", action="store_true",
+                       help="Inkscape flavour: named layers, mm units")
+    p_exp.add_argument("--filled", action="store_true",
+                       help="fill shapes instead of outlining them")
+    p_exp.add_argument("--downscale-max", type=int, metavar="PX",
+                       help="cap the embedded image longest side")
+    emb = p_exp.add_mutually_exclusive_group()
+    emb.add_argument("--embed-image", dest="embed_image",
+                     action="store_true", default=None,
+                     help="embed the photo (default for image inputs)")
+    emb.add_argument("--no-embed-image", dest="embed_image",
+                     action="store_false", help="vector only")
+    p_exp.add_argument("-q", "--quiet", action="store_true",
+                       help="only report errors")
+    _add_scale_flags(p_exp)
+
+    p_imp = subs.add_parser(
+        "import-svg", help="turn existing vector art into a project",
+        description="Read an SVG and save it as a .tiproj.json the rest "
+                    "of the app and the other subcommands can work on. "
+                    "The document carries its own size, so the result is "
+                    "already to scale.")
+    p_imp.add_argument("file", metavar="FILE", help="an SVG drawing")
+    p_imp.add_argument("-o", "--out", metavar="FILE",
+                       help="output project path (default: beside it)")
+    p_imp.add_argument("-q", "--quiet", action="store_true",
+                       help="only report errors")
+
+    p_flat = subs.add_parser(
+        "flatten", help="straighten photographed pages, unattended",
+        description="Detect each page outline, flatten it and write a "
+                    "PNG. Needs no human input, so a folder of book "
+                    "photographs can be processed in one go.")
+    p_flat.add_argument("files", metavar="FILE", nargs="+",
+                        help="page photographs")
+    p_flat.add_argument("-o", "--out", default=".", metavar="DIR",
+                        help="output directory (default .)")
+    p_flat.add_argument("--dpi", type=float, default=300.0, metavar="N",
+                        help="output resolution (default 300)")
+    p_flat.add_argument("--spread", action="store_true",
+                        help="two pages per photo, split at the spine")
+    p_flat.add_argument("--no-refine", dest="refine", action="store_false",
+                        help="skip the text-line refinement pass")
+    p_flat.add_argument("--no-propagate", dest="propagate",
+                        action="store_false",
+                        help="detect every page from scratch instead of "
+                             "seeding from the previous one")
+    p_flat.add_argument("-n", "--dry-run", action="store_true",
+                        help="report what would be written")
+    p_flat.add_argument("-q", "--quiet", action="store_true",
+                        help="only report errors")
+
+    p_ocr = subs.add_parser(
+        "ocr", help="read the text on a page",
+        description="Run Tesseract over an image and print or save the "
+                    "text. Needs pytesseract and the Tesseract engine.")
+    p_ocr.add_argument("file", metavar="FILE",
+                       help="image, PDF or .tiproj.json project")
+    p_ocr.add_argument("-o", "--out", metavar="FILE",
+                       help="write the text here instead of stdout")
+    p_ocr.add_argument("--lang", default="eng", metavar="CODE",
+                       help="Tesseract language (default eng)")
+    p_ocr.add_argument("--region", nargs=4, type=float,
+                       metavar=("X0", "Y0", "X1", "Y1"),
+                       help="only read this rectangle, in image pixels")
+    p_ocr.add_argument("-q", "--quiet", action="store_true",
+                       help="only report errors")
+    _add_scale_flags(p_ocr)
+
     return parser
 
 
@@ -240,7 +324,83 @@ def _cmd_tile(args, out, err):
     return EXIT_OK
 
 
-_HANDLERS = {"info": _cmd_info, "tile": _cmd_tile}
+def _progress_to(err, quiet):
+    if quiet:
+        return None
+
+    def progress(message):
+        err.write("  %s\n" % message)
+    return progress
+
+
+def _cmd_export_svg(args, out, err):
+    result = jobs.export_svg(
+        args.file, out_path=args.out, embed_image=args.embed_image,
+        filled=args.filled, inkscape=args.inkscape,
+        downscale_max=args.downscale_max,
+        progress=_progress_to(err, args.quiet), **_scale_kwargs(args))
+    if not args.quiet:
+        size = ""
+        if result.size_mm:
+            size = " at %s x %s" % (_mm(result.size_mm[0]),
+                                    _mm(result.size_mm[1]))
+        out.write("%d object(s)%s -> %s (%.1f kB)\n"
+                  % (result.objects, size, result.path,
+                     result.bytes_written / 1024.0))
+    return EXIT_OK
+
+
+def _cmd_import_svg(args, out, err):
+    result = jobs.import_svg(
+        args.file, out_path=args.out,
+        progress=_progress_to(err, args.quiet))
+    if not args.quiet:
+        out.write("%s x %s, %d object(s), %d shape(s), %d point(s)\n"
+                  % (_mm(result.size_mm[0]), _mm(result.size_mm[1]),
+                     result.objects, result.contours, result.points))
+        out.write("written to %s\n" % result.path)
+    return EXIT_OK
+
+
+def _cmd_flatten(args, out, err):
+    result = jobs.flatten(
+        args.files, out_dir=args.out, dpi=args.dpi, spread=args.spread,
+        refine=args.refine, propagate=args.propagate,
+        dry_run=args.dry_run, progress=_progress_to(err, args.quiet))
+    for src, why in result.failed:
+        err.write("  skipped %s: %s\n" % (os.path.basename(src), why))
+    if not args.quiet:
+        out.write("%d page(s) flattened" % result.pages)
+        if result.failed:
+            out.write(", %d skipped" % len(result.failed))
+        out.write("\n")
+        if args.dry_run:
+            out.write("dry run - nothing written\n")
+        else:
+            out.write("written to %s\n" % (args.out or "."))
+    # Some pages failing is worth a non-zero status for a script.
+    return EXIT_ERROR if result.failed else EXIT_OK
+
+
+def _cmd_ocr(args, out, err):
+    result = jobs.ocr(
+        args.file, out_path=args.out, lang=args.lang,
+        region=tuple(args.region) if args.region else None,
+        progress=_progress_to(err, args.quiet), **_scale_kwargs(args))
+    if args.out:
+        if not args.quiet:
+            out.write("%d word(s), %d character(s) -> %s\n"
+                      % (result.words, result.characters, result.out_path))
+    else:
+        out.write(result.text)
+        if result.text and not result.text.endswith("\n"):
+            out.write("\n")
+    return EXIT_OK
+
+
+_HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
+             "export-svg": _cmd_export_svg, "import-svg": _cmd_import_svg,
+             "flatten": _cmd_flatten, "ocr": _cmd_ocr}
 
 
 def run(argv, out=None, err=None):

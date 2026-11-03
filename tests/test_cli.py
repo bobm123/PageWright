@@ -235,3 +235,105 @@ def test_top_level_help_lists_the_subcommands():
     text = buf.getvalue()
     for command in cli.COMMANDS:
         assert command in text
+
+
+# ----- export-svg / import-svg --------------------------------------------
+
+def test_export_svg_command(tmp_path):
+    out = str(tmp_path / "out.svg")
+    code, stdout, _err = _run(["export-svg", _svg(tmp_path), "-o", out])
+    assert code == cli.EXIT_OK
+    assert os.path.isfile(out)
+    assert "object(s)" in stdout
+    assert "380.0 mm" in stdout
+
+
+def test_import_svg_command_writes_a_loadable_project(tmp_path):
+    out = str(tmp_path / "job.tiproj.json")
+    code, stdout, _err = _run(["import-svg", _svg(tmp_path), "-o", out])
+    assert code == cli.EXIT_OK
+    assert os.path.isfile(out)
+    assert "written to" in stdout
+    # the project round-trips through the other commands
+    code2, info_out, _e2 = _run(["info", out, "--json"])
+    assert code2 == cli.EXIT_OK
+    assert json.loads(info_out)["calibrated"] is True
+
+
+def test_the_whole_chain_runs_from_the_command_line(tmp_path):
+    # import -> tile, which is the point of having these commands.
+    proj = str(tmp_path / "chain.tiproj.json")
+    assert _run(["import-svg", _svg(tmp_path), "-o", proj, "-q"])[0] == 0
+    tiles = str(tmp_path / "tiles")
+    assert _run(["tile", proj, "-o", tiles, "-q"])[0] == 0
+    assert len(os.listdir(tiles)) >= 4
+
+
+def test_export_svg_without_a_scale_fails_with_guidance(tmp_path):
+    code, _out, err = _run(["export-svg", _png(tmp_path),
+                            "-o", str(tmp_path / "x.svg")])
+    assert code == cli.EXIT_ERROR
+    assert "--dpi" in err
+
+
+# ----- flatten ------------------------------------------------------------
+
+def _page_photo(tmp_path, name="page.png"):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    img = np.full((700, 900, 3), 30, np.uint8)
+    cv2.rectangle(img, (120, 90), (780, 610), (245, 245, 240), -1)
+    for k in range(8):
+        y = 150 + k * 55
+        cv2.line(img, (170, y), (730, y), (40, 40, 40), 4)
+    fp = str(tmp_path / name)
+    cv2.imwrite(fp, img)
+    return fp
+
+
+def test_flatten_command(tmp_path):
+    out = str(tmp_path / "flat")
+    code, stdout, _err = _run(["flatten", _page_photo(tmp_path), "-o", out])
+    assert code == cli.EXIT_OK
+    assert "1 page(s) flattened" in stdout
+    assert len(os.listdir(out)) == 1
+
+
+def test_flatten_dry_run_writes_nothing(tmp_path):
+    out = str(tmp_path / "dry")
+    code, stdout, _err = _run(["flatten", _page_photo(tmp_path),
+                               "-o", out, "-n"])
+    assert code == cli.EXIT_OK
+    assert "dry run" in stdout
+    assert not os.path.exists(out)
+
+
+def test_flatten_reports_skipped_pages_and_exits_non_zero(tmp_path):
+    # A script needs to know some pages did not make it.
+    out = str(tmp_path / "part")
+    code, stdout, err = _run(["flatten", str(tmp_path / "missing.png"),
+                              _page_photo(tmp_path), "-o", out])
+    assert code == cli.EXIT_ERROR
+    assert "skipped" in err
+    assert "1 page(s) flattened" in stdout
+    assert len(os.listdir(out)) == 1       # the good one still landed
+
+
+# ----- ocr ----------------------------------------------------------------
+
+def test_ocr_without_an_engine_fails_cleanly(tmp_path):
+    from pagewright.core import ocr as ocr_mod
+    if ocr_mod.availability_error() is None:
+        pytest.skip("Tesseract is installed here")
+    code, out, err = _run(["ocr", _png(tmp_path)])
+    assert code == cli.EXIT_ERROR
+    assert out == ""                       # errors stay off stdout
+    assert "pytesseract" in err or "Tesseract" in err
+
+
+# ----- the registry stays in step -----------------------------------------
+
+def test_every_command_has_a_handler():
+    # COMMANDS drives main.py's dispatch, so a command listed there with
+    # no handler would be swallowed by the GUI parser instead of running.
+    assert set(cli.COMMANDS) == set(cli._HANDLERS)

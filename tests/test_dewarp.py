@@ -560,3 +560,24 @@ def test_flatten_with_model_returns_one_page():
     outs = batch.flatten_with_model(bgr, m)
     assert len(outs) == 1 and outs[0].ndim == 3
     assert outs[0].shape[0] > 50 and outs[0].shape[1] > 50
+
+
+def test_seed_and_refine_always_returns_a_model():
+    # Regression: refine_with_text returns (model, ok), and this used to
+    # pass that tuple straight through on success while returning a bare
+    # model on failure. flatten_with_model then died with "tuple object
+    # has no attribute edges" - which also broke the GUI batch flatten.
+    import numpy as np
+    import cv2
+    from pagewright.core import batch, dewarp
+    gray = np.full((400, 600), 255, np.uint8)
+    cv2.rectangle(gray, (50, 50), (550, 350), 0, 3)
+    model = dewarp.detect_page(gray)
+    refined = batch.seed_and_refine(gray, model)
+    assert not isinstance(refined, tuple)
+    assert hasattr(refined, "edges")
+    # and the result is usable by the next step in the pipeline
+    bgr = cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR)
+    outs = batch.flatten_with_model(bgr, refined)
+    assert len(outs) == 1
+    assert outs[0].ndim == 3
