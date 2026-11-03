@@ -73,7 +73,7 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 
 ## Command line (headless)
 
-Six subcommands run without a display — they never import Qt, so they work
+Seven subcommands run without a display — they never import Qt, so they work
 over SSH, in a container, or in a shell loop:
 
 ```bash
@@ -119,6 +119,25 @@ pagewright export-svg pattern.tiproj.json --inkscape
 pagewright flatten scans/*.jpg --out ./flat
 pagewright ocr page.png --out page.txt
 ```
+
+`find-parts` locates the drawn parts on a plan with **no seed marks at all**.
+A part is a closed loop of ink, so flooding the paper inward from the page
+border leaves the part interiors unreachable:
+
+```bash
+pagewright find-parts plan.png --dpi 300 --trace
+pagewright find-parts plan.png --dpi 300 -o parts.tiproj.json
+```
+
+With `-o` the traced outlines are saved as a project, one object per part,
+ready for `tile` or `export-svg` - so a raster plan becomes printable tiles
+without anyone marking anything. `--json` returns each part's bounding box,
+centroid and polygon, which is what an agent needs to drive the rest.
+
+Its limit is worth knowing: a part whose outline is crossed by a dimension
+line never seals and is not found. On a real model-aircraft sheet it found
+about a quarter of the parts, including every notched former. It is a way to
+skip the easy ones, not a replacement for marking the hard ones.
 
 `flatten` is the one worth knowing about: page-outline detection needs no
 human input, so a folder of book photographs is straightened in one go, each

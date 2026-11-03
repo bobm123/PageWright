@@ -463,3 +463,68 @@ def test_ocr_refuses_a_vector_source(tmp_path):
     with pytest.raises(jobs.JobError) as exc:
         jobs.ocr(_svg(tmp_path))
     assert "no pixels" in str(exc.value)
+
+
+# ----- find_parts ---------------------------------------------------------
+
+def _plan(tmp_path, name="plan.png"):
+    """A sheet with three closed part outlines on it."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    mmpp = 0.1                      # 10 px per mm
+    img = np.full((1500, 2000, 3), 255, np.uint8)
+    for (x, y, w, h) in ((200, 200, 700, 500), (1100, 200, 400, 300),
+                         (200, 800, 500, 400)):
+        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 0), 3)
+    fp = str(tmp_path / name)
+    cv2.imwrite(fp, img)
+    return fp, mmpp
+
+
+def test_find_parts_locates_the_outlines(tmp_path):
+    path, mmpp = _plan(tmp_path)
+    r = jobs.find_parts(path, mm_per_px=mmpp)
+    assert r.count == 3
+    areas = [c.area_mm2 for c in r.candidates]
+    assert areas == sorted(areas, reverse=True)
+
+
+def test_find_parts_can_trace_and_save_a_project(tmp_path):
+    path, mmpp = _plan(tmp_path)
+    out = str(tmp_path / "parts.tiproj.json")
+    r = jobs.find_parts(path, mm_per_px=mmpp, out_path=out)
+    assert os.path.isfile(out)
+    assert all(c.outline for c in r.candidates)
+    # the project it wrote is a real one the other jobs can use
+    info = jobs.info(out)
+    assert info.object_count == 3
+    assert info.is_calibrated
+    assert info.object_names == ["Part 1", "Part 2", "Part 3"]
+
+
+def test_find_parts_output_feeds_straight_into_tile(tmp_path):
+    # The point of the command: raster plan in, printable tiles out,
+    # with no human marking anything.
+    path, mmpp = _plan(tmp_path)
+    proj = str(tmp_path / "p.tiproj.json")
+    jobs.find_parts(path, mm_per_px=mmpp, out_path=proj)
+    tiles = jobs.tile(proj, out_dir=str(tmp_path / "t"))
+    assert tiles.sheets >= 1
+
+
+def test_find_parts_needs_a_scale(tmp_path):
+    path, _mmpp = _plan(tmp_path)
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.find_parts(path)
+    assert "--dpi" in str(exc.value)
+
+
+def test_find_parts_refuses_a_vector_source(tmp_path):
+    with pytest.raises(jobs.JobError) as exc:
+        jobs.find_parts(_svg(tmp_path))
+    assert "no pixels" in str(exc.value)
+
+
+def test_find_parts_limit_is_honoured(tmp_path):
+    path, mmpp = _plan(tmp_path)
+    assert jobs.find_parts(path, mm_per_px=mmpp, limit=2).count == 2

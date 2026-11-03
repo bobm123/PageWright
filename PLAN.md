@@ -581,3 +581,47 @@ Still open from that analysis: the trace lands on the inner edge by
 luck of where the seed is painted, not by construction. If that
 non-determinism ever bites, the fix is an explicit inner-edge snap -
 NOT a centreline one.
+
+### 16.4 find-parts: seeding is no longer the agent blocker (2026-11-03)
+
+Section 16.1 listed seed painting as "genuinely human-only", which
+was too pessimistic. A drawn part is a CLOSED LOOP of ink, so the
+sheet already says where the parts are: flood the paper inward from
+the page border and whatever it cannot reach is walled in by an
+outline. `core/find_parts.py` does that, and `pagewright find-parts`
+exposes it.
+
+Measured on the F-86D sheet (300 DPI, 4665x2954):
+
+- 15 candidates in 0.3 s, including every notched former.
+- The known former came out with a 72-point outline against the 73
+  the interactive tracer gives, and measured 1.6501 in tall against a
+  true 1 21/32 = 1.6562 in - a 0.006 in error, comparable to Robert's
+  hand trace at 0.004 in.
+- Use `outline_size_mm`, not `size_mm`: the latter is the ink
+  component's bounding box, i.e. the OUTER edge of the line, which
+  reads 0.047 in large. The enclosed region stops at the line's inside,
+  which is where a cut part actually ends.
+
+Three things made the naive version fail, all handled:
+
+- HAIRLINE GAPS. The sample former is a clean loop except one break
+  where a line trails off, and one break leaks the whole interior.
+  A morphological close bridges them. The kernel must be about TWICE
+  the gap to bridge (it has to span the break and still touch ink on
+  both sides): a 6 px break needed a 15 px kernel, not 7.
+- TEXT BOXES. A ruled box around a title encloses a region exactly as
+  a former does. Aspect-ratio and fill filters drop most of them; two
+  still get through on the sample sheet.
+- PARTS THAT NEVER SEAL. An outline crossed by a dimension line has no
+  enclosed interior. Recall on the sample sheet is roughly 1 in 4.
+
+Default gap is 0.3 mm, tuned on the real plan: 0.3 found 4 of 5 known
+parts, 0.6 dropped to 3 of 5 because the wider close began welding
+parts to their neighbours.
+
+What this changes for the agent story: `find-parts --json` hands back
+bbox, centroid and polygon per part, so an agent can work a plan
+unaided - and for the parts it misses, the hole rule from 16.5 already
+accepts an outside-seed MASK as data rather than mouse gestures. The
+remaining Tier 2 work is unchanged.

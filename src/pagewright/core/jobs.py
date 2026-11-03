@@ -699,3 +699,88 @@ def ocr(path, out_path=None, lang="eng", region=None, progress=None,
         if progress:
             progress("wrote %s" % os.path.basename(out_path))
     return OcrResult(path, text, out_path)
+
+
+# ----- find_parts ---------------------------------------------------------
+
+class FindPartsResult(object):
+    def __init__(self, path, candidates, mm_per_pixel, out_path=None):
+        self.path = path
+        self.candidates = list(candidates)
+        self.mm_per_pixel = mm_per_pixel
+        self.out_path = out_path
+
+    @property
+    def count(self):
+        return len(self.candidates)
+
+
+def find_parts(path, trace=False, gap=None, min_area=None, max_aspect=None,
+               min_fill=None, limit=0, out_path=None, tolerance_mm=None,
+               progress=None, **scale_kw):
+    """Locate the closed outlines on a sheet, with no seed marks.
+
+    The piece that lets an agent work a plan on its own: it says WHERE
+    the parts are, so the caller can trace each one by its bounding box
+    instead of needing a human to paint inside and outside first.
+
+    With `out_path` the traced outlines are saved as a project, one
+    object per part, ready for `tile` or `export-svg`.
+    """
+    from . import find_parts as fp
+
+    source = load_source(path, **scale_kw)
+    project = source.project
+    if source.image_bgr is None:
+        raise JobError("find-parts needs a raster source; %s has no pixels"
+                       % os.path.basename(path))
+    mpp = project.calibration.mm_per_pixel
+    if not mpp:
+        raise JobError(
+            "no scale for %s - give --dpi, --mm-per-px, --width or "
+            "--height. Every threshold here is a real-world size, so "
+            "the sheet has to be to scale first."
+            % os.path.basename(path))
+
+    kw = {}
+    if gap is not None:
+        kw["gap_mm"] = _as_mm(gap, "--gap")
+    if min_area is not None:
+        kw["min_area_mm2"] = float(min_area)
+    if max_aspect is not None:
+        kw["max_aspect"] = float(max_aspect)
+    if min_fill is not None:
+        kw["min_fill"] = float(min_fill)
+
+    want_trace = trace or bool(out_path)
+    try:
+        cands = fp.find_parts(source.image_bgr, mpp, trace=want_trace,
+                              tolerance_mm=tolerance_mm, limit=limit,
+                              progress=progress, **kw)
+    except ValueError as exc:
+        raise JobError(str(exc))
+
+    result = FindPartsResult(path, cands, mpp)
+    if out_path:
+        from ..model import Contour, TracedObject
+        objects = []
+        for k, cand in enumerate(cands):
+            if not cand.outline:
+                continue
+            obj = TracedObject(name="Part %d" % (k + 1))
+            obj.contours = [Contour(points=list(cand.outline))]
+            objects.append(obj)
+        if not objects:
+            raise JobError("nothing traceable found to save")
+        project.objects = objects
+        parent = os.path.dirname(out_path)
+        try:
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent)
+            project_io.save_project(project, out_path)
+        except (IOError, OSError) as exc:
+            raise JobError("cannot write %s: %s" % (out_path, exc))
+        result.out_path = out_path
+        if progress:
+            progress("wrote %s" % os.path.basename(out_path))
+    return result

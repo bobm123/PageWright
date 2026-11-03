@@ -337,3 +337,55 @@ def test_every_command_has_a_handler():
     # COMMANDS drives main.py's dispatch, so a command listed there with
     # no handler would be swallowed by the GUI parser instead of running.
     assert set(cli.COMMANDS) == set(cli._HANDLERS)
+
+
+# ----- find-parts ---------------------------------------------------------
+
+def _plan(tmp_path, name="plan.png"):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    img = np.full((1500, 2000, 3), 255, np.uint8)
+    for (x, y, w, h) in ((200, 200, 700, 500), (1100, 200, 400, 300),
+                         (200, 800, 500, 400)):
+        cv2.rectangle(img, (x, y), (x + w, y + h), (0, 0, 0), 3)
+    fp = str(tmp_path / name)
+    cv2.imwrite(fp, img)
+    return fp
+
+
+def test_find_parts_command(tmp_path):
+    code, stdout, _err = _run(["find-parts", _plan(tmp_path),
+                               "--mm-per-px", "0.1"])
+    assert code == cli.EXIT_OK
+    assert "3 part(s)" in stdout
+    assert "mm2" in stdout
+
+
+def test_find_parts_json_gives_an_agent_what_it_needs(tmp_path):
+    code, stdout, _err = _run(["find-parts", _plan(tmp_path),
+                               "--mm-per-px", "0.1", "--trace", "--json"])
+    assert code == cli.EXIT_OK
+    data = json.loads(stdout)
+    assert data["count"] == 3
+    part = data["parts"][0]
+    # enough to act on without a second call
+    for key in ("bbox", "centroid", "area_mm2", "size_mm", "outline"):
+        assert key in part
+    assert len(part["bbox"]) == 4
+    assert part["outline"] and len(part["outline"]) >= 4
+
+
+def test_find_parts_saves_a_project_that_tiles(tmp_path):
+    proj = str(tmp_path / "parts.tiproj.json")
+    assert _run(["find-parts", _plan(tmp_path), "--mm-per-px", "0.1",
+                 "-o", proj, "-q"])[0] == cli.EXIT_OK
+    assert os.path.isfile(proj)
+    tiles = str(tmp_path / "tiles")
+    assert _run(["tile", proj, "-o", tiles, "-q"])[0] == cli.EXIT_OK
+    assert os.listdir(tiles)
+
+
+def test_find_parts_without_a_scale_fails_with_guidance(tmp_path):
+    code, _out, err = _run(["find-parts", _plan(tmp_path)])
+    assert code == cli.EXIT_ERROR
+    assert "--dpi" in err

@@ -14,6 +14,7 @@ drift.
     pagewright import-svg pattern.svg -o pattern.tiproj.json
     pagewright flatten scans/*.jpg --out ./flat
     pagewright ocr page.png --out page.txt
+    pagewright find-parts plan.png --dpi 300 --trace
 
 Qt is never imported here. `main.py` dispatches to this module BEFORE it
 touches PySide6, so these commands run on a machine with no display.
@@ -35,7 +36,7 @@ EXIT_ERROR = 1
 # Subcommands this module provides. `main.py` checks membership to
 # decide between CLI and GUI, so a new command only needs adding here.
 COMMANDS = ("info", "tile", "export-svg", "import-svg",
-            "flatten", "ocr")
+            "flatten", "ocr", "find-parts")
 
 
 def _add_scale_flags(parser):
@@ -217,6 +218,40 @@ def build_parser():
                        help="only report errors")
     _add_scale_flags(p_ocr)
 
+    p_find = subs.add_parser(
+        "find-parts", help="locate the drawn parts on a sheet",
+        description="Find the closed outlines on a plan without any "
+                    "seed marks, by flooding the paper inward from the "
+                    "page border: whatever it cannot reach is walled in "
+                    "by a part outline. Reports where each one is, so a "
+                    "caller can trace it by its bounding box instead of "
+                    "painting inside and outside first. Parts whose "
+                    "outline is crossed by a dimension line never seal "
+                    "and will not be found.")
+    p_find.add_argument("file", metavar="FILE",
+                        help="image, PDF or .tiproj.json project")
+    p_find.add_argument("--trace", action="store_true",
+                        help="also extract each outline as a polygon")
+    p_find.add_argument("-o", "--out", metavar="FILE",
+                        help="save the traced parts as a project "
+                             "(implies --trace)")
+    p_find.add_argument("--json", action="store_true",
+                        help="machine-readable output")
+    p_find.add_argument("--gap", metavar="LEN",
+                        help="widest break in an outline to bridge "
+                             "(default 0.3mm)")
+    p_find.add_argument("--min-area", type=float, metavar="MM2",
+                        help="smallest part to report (default 150 mm2)")
+    p_find.add_argument("--max-aspect", type=float, metavar="R",
+                        help="reject shapes longer than this (default 4)")
+    p_find.add_argument("--min-fill", type=float, metavar="F",
+                        help="reject hollow frames below this (default "
+                             "0.35)")
+    p_find.add_argument("--limit", type=int, default=0, metavar="N",
+                        help="report only the N largest")
+    p_find.add_argument("-q", "--quiet", action="store_true",
+                        help="only report errors")
+    _add_scale_flags(p_find)
     return parser
 
 
@@ -398,9 +433,55 @@ def _cmd_ocr(args, out, err):
     return EXIT_OK
 
 
+def _cmd_find_parts(args, out, err):
+    result = jobs.find_parts(
+        args.file, trace=args.trace, gap=args.gap,
+        min_area=args.min_area, max_aspect=args.max_aspect,
+        min_fill=args.min_fill, limit=args.limit, out_path=args.out,
+        progress=_progress_to(err, args.quiet), **_scale_kwargs(args))
+    if args.json:
+        import json
+        rows = []
+        for c in result.candidates:
+            rows.append({
+                "bbox": list(c.bbox),
+                "centroid": list(c.centroid),
+                "area_mm2": round(c.area_mm2, 2),
+                "size_mm": [round(v, 2) for v in c.size_mm],
+                "outline_size_mm": ([round(v, 2) for v in c.outline_size_mm]
+                                    if c.outline_size_mm else None),
+                "fill": round(c.fill, 3),
+                "aspect": round(c.aspect, 2),
+                "points": len(c.outline) if c.outline else 0,
+                "outline": ([[round(x, 2), round(y, 2)]
+                             for x, y in c.outline] if c.outline else None),
+            })
+        out.write(json.dumps({"path": result.path,
+                              "mm_per_pixel": result.mm_per_pixel,
+                              "count": result.count,
+                              "project": result.out_path,
+                              "parts": rows}, indent=2) + "\n")
+        return EXIT_OK
+    if not args.quiet:
+        if not result.count:
+            out.write("no closed outlines found\n")
+            return EXIT_OK
+        out.write("%d part(s):\n" % result.count)
+        for i, c in enumerate(result.candidates):
+            size = c.outline_size_mm or c.size_mm
+            pts = ("  %3d pts" % len(c.outline)) if c.outline else ""
+            out.write("  %2d  %7.1f mm2  %6.1f x %-6.1f mm  at %4d,%-4d%s\n"
+                      % (i + 1, c.area_mm2, size[0], size[1],
+                         c.bbox[0], c.bbox[1], pts))
+        if result.out_path:
+            out.write("written to %s\n" % result.out_path)
+    return EXIT_OK
+
+
 _HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
              "export-svg": _cmd_export_svg, "import-svg": _cmd_import_svg,
-             "flatten": _cmd_flatten, "ocr": _cmd_ocr}
+             "flatten": _cmd_flatten, "ocr": _cmd_ocr,
+             "find-parts": _cmd_find_parts}
 
 
 def run(argv, out=None, err=None):
