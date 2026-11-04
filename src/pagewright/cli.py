@@ -275,6 +275,11 @@ def build_parser():
     p_rec.add_argument("--thickness", metavar="LEN",
                        help="sheet stock for parts with no thickness "
                             "of their own (accepts 1/16in, 1.5mm)")
+    p_rec.add_argument("--as-drawn", action="store_true",
+                       help="keep each unplaced part where it sits on "
+                            "the sheet, instead of centring it. Without "
+                            "this they all centre on the origin and "
+                            "come out as one stack of solids.")
     p_rec.add_argument("--plane", choices=["XY", "YZ", "XZ"],
                        help="plane for parts that are not placed "
                             "(default XY)")
@@ -536,6 +541,7 @@ def _cmd_export_recipe(args, out, err):
     result = jobs.export_recipe(
         args.file, out_path=args.out, design=args.design,
         plane=args.plane, thickness=args.thickness,
+        as_drawn=args.as_drawn,
         progress=_progress_to(err, args.quiet), **_scale_kwargs(args))
     for name, why in result.skipped:
         err.write("  skipped %s: %s\n" % (name, why))

@@ -347,3 +347,44 @@ def test_an_unplaced_part_keeps_its_assembly():
     doc, _ = rx.build_recipe(p)
     assert doc["timeline"][0]["sketch"]["referencePlane"]["name"] == "XY"
     assert doc["_pagewright"]["assemblies"] == {"Wing": ["Body1"]}
+
+
+# ----- as-drawn layout ---------------------------------------------------
+
+def test_unplaced_parts_all_centre_on_the_origin_by_default():
+    """Which is right once they are being placed, and wrong before:
+    15 parts of the F-86D sheet came out as one stack at z 0..1.6."""
+    p = _project([Build(thickness_mm=1.6), Build(thickness_mm=1.6)])
+    # move the second part elsewhere on the sheet
+    p.objects[1].contours[0].points = [(200, 200), (300, 200),
+                                       (300, 280), (200, 280)]
+    doc, _ = rx.build_recipe(p)
+    box = []
+    for t in doc["timeline"]:
+        if t["type"] == "Sketch":
+            xs = [q["xyz"][0] for q in t["sketch"]["points"]]
+            box.append((min(xs), max(xs)))
+    assert box[0] == pytest.approx(box[1], abs=1e-6)     # stacked
+
+
+def test_as_drawn_keeps_each_part_where_it_sits():
+    p = _project([Build(thickness_mm=1.6), Build(thickness_mm=1.6)])
+    p.objects[1].contours[0].points = [(200, 200), (300, 200),
+                                       (300, 280), (200, 280)]
+    doc, _ = rx.build_recipe(p, as_drawn=True)
+    mins = []
+    for t in doc["timeline"]:
+        if t["type"] == "Sketch":
+            mins.append(min(q["xyz"][0] for q in t["sketch"]["points"]))
+    assert mins[1] > mins[0] + 4.0      # cm apart, as on the sheet
+
+
+def test_as_drawn_does_not_disturb_a_placed_part():
+    """Once a part has a plane it is being positioned, and its sheet
+    position is meaningless again."""
+    p = _project([Build(thickness_mm=1.6, plane="YZ", station_mm=40.0)])
+    plain, _ = rx.build_recipe(p)
+    drawn, _ = rx.build_recipe(p, as_drawn=True)
+    a = [q["xyz"] for q in plain["timeline"][0]["sketch"]["points"]]
+    b = [q["xyz"] for q in drawn["timeline"][0]["sketch"]["points"]]
+    assert a == b

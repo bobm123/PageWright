@@ -123,18 +123,27 @@ def _rotate(points, degrees):
     return [(x * c - y * s, x * s + y * c) for x, y in points]
 
 
-def _centred_mm(contour, mm_per_pixel, pixel_height, rotate_deg=None):
-    """Contour pixels -> mm in the sketch plane, centred on the part.
+def _centred_mm(contour, mm_per_pixel, pixel_height, rotate_deg=None,
+                centre=True):
+    """Contour pixels -> mm in the sketch plane.
 
     Image y grows downward and CAD y grows up, so the row is flipped.
-    Parts are centred on their own centroid: a plan sheet is nested, so
-    the position a part was DRAWN at is where there was room on the
-    paper, not where it belongs. Placement comes from Build.
+
+    With `centre`, a part sits on its own centroid, ready to be placed
+    by its Build: a plan sheet is nested, so where a part was DRAWN is
+    where there was room on the paper, not where it belongs.
+
+    Without it, every part keeps its sheet position. That is what you
+    want when nothing has been placed yet - otherwise all of them
+    centre on the origin and come out as one stack of overlapping
+    solids (measured: 15 parts of the F-86D sheet, all at z 0..1.6).
+    Laid out as drawn they are at least separate, pickable bodies.
     """
     pts = [(x * mm_per_pixel, (pixel_height - y) * mm_per_pixel)
            for x, y in contour.points]
-    _area, cx, cy = polygon_area_centroid(pts)
-    pts = [(x - cx, y - cy) for x, y in pts]
+    if centre:
+        _area, cx, cy = polygon_area_centroid(pts)
+        pts = [(x - cx, y - cy) for x, y in pts]
     return _rotate(pts, rotate_deg)
 
 
@@ -272,7 +281,8 @@ def _safe(name, used):
     return out
 
 
-def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
+def build_recipe(project, design=None, default_plane=DEFAULT_PLANE,
+                 as_drawn=False):
     """Build the recipe document for `project`. Returns (dict, skipped).
 
     `skipped` is a list of (part name, reason) for parts that could not
@@ -318,7 +328,11 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
         rotate = getattr(build, "rotate_deg", None)
         assembly = getattr(build, "assembly", None) or None
 
-        pts_mm = _centred_mm(outer, mpp, project.pixel_height, rotate)
+        # An unplaced part keeps its sheet position unless it is being
+        # placed: otherwise they all stack on the origin.
+        keep = as_drawn and not getattr(build, "plane", None)
+        pts_mm = _centred_mm(outer, mpp, project.pixel_height, rotate,
+                             centre=not keep)
         area_mm2, cx, cy = polygon_area_centroid(pts_mm)
         loop_cm = _to_world_cm(pts_mm, plane, station)
         centroid_cm = _to_world_cm([(cx, cy)], plane, station)[0]
@@ -355,7 +369,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
 
 
 def write_recipe(project, out_path, design=None,
-                 default_plane=DEFAULT_PLANE):
+                 default_plane=DEFAULT_PLANE, as_drawn=False):
     """Write the recipe for `project` to `out_path`.
 
     Returns (path, parts written, skipped, doc) - the document too, so
@@ -363,7 +377,8 @@ def write_recipe(project, out_path, design=None,
     build it twice.
     """
     doc, skipped = build_recipe(project, design=design,
-                                default_plane=default_plane)
+                                default_plane=default_plane,
+                                as_drawn=as_drawn)
     parent = os.path.dirname(out_path)
     try:
         if parent and not os.path.isdir(parent):

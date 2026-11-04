@@ -855,7 +855,8 @@ class RecipeResult(object):
 
 
 def export_recipe(path, out_path=None, design=None, plane=None,
-                  thickness=None, progress=None, **scale_kw):
+                  thickness=None, as_drawn=False, progress=None,
+                  **scale_kw):
     """Write the traced parts as a MyArchive recipe.json.
 
     The headless end of the plan-to-CAD route: SolidCraft, Fusion and
@@ -876,7 +877,8 @@ def export_recipe(path, out_path=None, design=None, plane=None,
     try:
         written, parts, skipped, doc = rx.write_recipe(
             project, out_path, design=design or source.base_name,
-            default_plane=(plane or rx.DEFAULT_PLANE).upper())
+            default_plane=(plane or rx.DEFAULT_PLANE).upper(),
+            as_drawn=as_drawn)
     except rx.RecipeError as exc:
         raise JobError(str(exc))
     if progress:
