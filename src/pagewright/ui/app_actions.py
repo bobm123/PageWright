@@ -126,6 +126,12 @@ def build_actions(w):
         "right-click to finish.")
     w.act_measure.triggered.connect(w.start_measure)
 
+    w.act_find_parts = QAction("&Find Parts", w)
+    w.act_find_parts.setToolTip(
+        "Trace every closed outline on the sheet at once, with no "
+        "seeds (needs a calibrated scale). Select Area limits it.")
+    w.act_find_parts.triggered.connect(w.find_parts)
+
     w.act_clean_notches = QAction("Clean Up &Notches", w)
     w.act_clean_notches.setToolTip(
         "Square the straight notch edges of the selected object and snap "
@@ -253,6 +259,7 @@ def build_menus(w):
     m_tools.addSeparator()
     m_tools.addAction(w.act_new_object)
     m_tools.addAction(w.act_run_seg)
+    m_tools.addAction(w.act_find_parts)
     m_tools.addAction(w.act_clean_notches)
     m_tools.addAction(w.act_clear_seeds)
     m_tools.addAction(w.act_clear_roi)

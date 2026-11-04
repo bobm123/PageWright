@@ -1247,6 +1247,116 @@ class MainWindow(QMainWindow):
         self._refresh_object_list()
         self._refresh_editability()
 
+    def find_parts(self):
+        """Tools > Find Parts: trace every closed outline on the sheet.
+
+        The batch counterpart to painting seeds one part at a time. A
+        drawn part is a closed loop of ink, so the sheet already says
+        where the parts are; this is the same core the `find-parts`
+        subcommand uses, which until now was the only way to reach it.
+
+        Adds the parts as new objects rather than replacing what is
+        there, so a sheet can be worked in passes - run it, keep what
+        it found, then paint seeds for the ones it missed.
+        """
+        from PySide6.QtWidgets import QApplication, QMessageBox
+        from ..core import find_parts as fp
+        from ..model import Contour, TracedObject
+        if self._loaded is None:
+            return
+        mpp = self.project.calibration.mm_per_pixel
+        if not mpp:
+            QMessageBox.information(
+                self, "Find Parts",
+                "Calibrate the scale first - every size this uses to "
+                "tell a part from a stray mark is in millimetres.")
+            return
+
+        image = self._loaded.data
+        x0 = y0 = 0
+        rect = self.canvas.roi_rect()
+        if rect is not None:        # Select Area limits the search
+            x0 = max(0, int(rect.left()))
+            y0 = max(0, int(rect.top()))
+            x1 = min(self._loaded.pixel_width, int(rect.right()))
+            y1 = min(self._loaded.pixel_height, int(rect.bottom()))
+            if x1 - x0 > 8 and y1 - y0 > 8:
+                image = image[y0:y1, x0:x1]
+            else:
+                x0 = y0 = 0
+
+        try:
+            QApplication.setOverrideCursor(Qt.WaitCursor)
+            try:
+                found = fp.find_parts(
+                    image, mpp, trace=True,
+                    tolerance_mm=self.trace_tolerance_mm())
+            finally:
+                QApplication.restoreOverrideCursor()
+        except ValueError as exc:
+            QMessageBox.warning(self, "Find Parts", str(exc))
+            return
+        except Exception as exc:
+            QMessageBox.critical(self, "Find Parts",
+                                 "Find Parts failed: %s" % (exc,))
+            return
+
+        if not found:
+            QMessageBox.information(
+                self, "Find Parts",
+                "No closed outlines found. A part whose outline a "
+                "dimension line crosses never seals, so it cannot be "
+                "found this way - trace those by painting seeds.")
+            return
+
+        self._sync_model()
+        start = len(self._objects)
+        models = []
+        for k, cand in enumerate(found):
+            pts = [(x + x0, y + y0) for x, y in cand.outline]
+            obj = TracedObject(name="Part %d" % (start + k + 1))
+            obj.contours.append(Contour(points=pts, closed=True))
+            models.append(obj)
+
+        self._add_layers(models)
+        # Structural change: old edit commands point at contours that
+        # are no longer the active object's, as Trace Poly does.
+        self.undo_stack.clear()
+        self.undo_stack.push(undo.FnCommand(
+            "find parts",
+            undo=lambda: self._truncate_layers(start),
+            redo=lambda: self._add_layers(models)))
+
+        total = sum(len(c.outline) for c in found)
+        self.statusBar().showMessage(
+            "Found %d part(s), %d points. Name them and set a plane to "
+            "build them in CAD; parts a dimension line crosses are not "
+            "found and still need seeds." % (len(found), total), 10000)
+
+    def _add_layers(self, models):
+        """Append object layers from models, selecting the first."""
+        first = len(self._objects)
+        for obj in models:
+            self._objects.append(self._build_layer_from_model(obj))
+        self._active_index = first if self._objects else -1
+        self._sync_model()
+        self._refresh_object_list()
+        self._refresh_editability()
+        self._update_bbox()
+        self._update_tile_grid()
+
+    def _truncate_layers(self, count):
+        """Drop every layer from `count` on - the undo of _add_layers."""
+        while len(self._objects) > count:
+            self._objects[-1].remove()
+            del self._objects[-1]
+        self._active_index = min(self._active_index, len(self._objects) - 1)
+        self._sync_model()
+        self._refresh_object_list()
+        self._refresh_editability()
+        self._update_bbox()
+        self._update_tile_grid()
+
     def clean_up_notches(self):
         """Tools > Clean Up Notches: square and 1/16 in-snap the active
         object, as one undo step.

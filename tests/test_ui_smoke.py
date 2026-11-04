@@ -627,3 +627,93 @@ def test_sheet_stock_survives_save_and_reload(tmp_path):
     project_io.save_project(w.project, out)
     assert project_io.load_project(out).sheet_thickness_mm == \
         pytest.approx(1.5875)
+
+
+# ----- Find Parts in the GUI ---------------------------------------------
+
+def _window_with_plan(tmp_path):
+    """A window holding a sheet with three closed outlines on it."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    img = np.full((600, 900, 3), 255, np.uint8)
+    for x in (60, 360, 660):
+        cv2.rectangle(img, (x, 120), (x + 180, 420), (0, 0, 0), 3)
+    fp = str(tmp_path / "plan.png")
+    cv2.imwrite(fp, img)
+    w = _window()
+    w.projects.load_photo(fp, start_dewarp=False)
+    w.project.calibration.mm_per_pixel = 25.4 / 300.0
+    return w
+
+
+def test_find_parts_adds_every_outline_as_an_object(tmp_path):
+    w = _window_with_plan(tmp_path)
+    w.find_parts()
+    assert len(w._objects) == 3
+    assert len(w.project.objects) == 3        # reached the model too
+
+
+def test_find_parts_is_one_undo_step(tmp_path):
+    """15 parts on a real sheet: undoing them one at a time would be
+    unusable."""
+    w = _window_with_plan(tmp_path)
+    w.find_parts()
+    w.undo_stack.undo()
+    assert w._objects == [] and w.project.objects == []
+    w.undo_stack.redo()
+    assert len(w._objects) == 3
+
+
+def test_find_parts_adds_rather_than_replaces(tmp_path):
+    """A sheet gets worked in passes: run it, keep what it found, then
+    paint seeds for the ones it missed."""
+    w = _window_with_plan(tmp_path)
+    w.find_parts()
+    w.find_parts()
+    assert len(w._objects) == 6
+    assert [o.name for o in w._objects][:4] == [
+        "Part 1", "Part 2", "Part 3", "Part 4"]
+
+
+def test_select_area_limits_the_search(tmp_path):
+    from PySide6.QtCore import QRectF
+    w = _window_with_plan(tmp_path)
+    w.canvas.set_roi(QRectF(40, 100, 230, 340))     # the first box only
+    w.find_parts()
+    assert len(w._objects) == 1
+    xs = [p[0] for p in w._objects[0].contours[0].points()]
+    # and the points are in FULL-image coordinates, not region ones
+    assert min(xs) > 40
+
+
+def test_find_parts_needs_a_calibrated_scale(tmp_path, monkeypatch):
+    """Every threshold it uses is a real-world size."""
+    from pagewright.ui import main_window as mw
+    w = _window_with_plan(tmp_path)
+    w.project.calibration.mm_per_pixel = None
+    seen = {}
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        staticmethod(lambda _p, t, x: seen.update(t=t, x=x)))
+    w.find_parts()
+    assert seen.get("t") == "Find Parts"
+    assert "alibrate" in seen.get("x", "")
+    assert w._objects == []
+
+
+def test_a_blank_sheet_says_so_rather_than_adding_nothing(tmp_path,
+                                                          monkeypatch):
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    from pagewright.ui import main_window as mw
+    img = np.full((300, 400, 3), 255, np.uint8)
+    fp = str(tmp_path / "blank.png")
+    cv2.imwrite(fp, img)
+    w = _window()
+    w.projects.load_photo(fp, start_dewarp=False)
+    w.project.calibration.mm_per_pixel = 25.4 / 300.0
+    seen = {}
+    monkeypatch.setattr(mw.QMessageBox, "information",
+                        staticmethod(lambda _p, t, x: seen.update(t=t, x=x)))
+    w.find_parts()
+    assert seen.get("t") == "Find Parts"
+    assert "seeds" in seen.get("x", "")
