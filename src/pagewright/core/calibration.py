@@ -59,20 +59,40 @@ def format_length(value_mm, unit, decimals=2):
     return "%.*f %s" % (decimals, from_mm(value_mm, unit), unit)
 
 
+def _as_number(text):
+    """A plain number, a fraction (1/16) or a mixed number (3 1/2)."""
+    t = " ".join(text.split()).replace(" /", "/").replace("/ ", "/")
+    if "/" not in t:
+        return float(t)
+    whole = 0.0
+    if " " in t:
+        head, t = t.split(" ", 1)
+        whole = float(head)
+    num, den = (p.strip() for p in t.split("/", 1))
+    den = float(den)
+    if den == 0.0:
+        raise ValueError("division by zero in length")
+    return whole + float(num) / den
+
+
 def parse_length_mm(text):
     """Parse a user-entered length WITH an optional unit into millimetres.
 
     Accepts forms like '133.35', '133.35 mm', '13.3cm', '5.25 in',
     '5.25"', '56 cm'. A bare number is millimetres. Raises ValueError
     for anything unparseable or non-positive.
+
+    Fractions and mixed numbers are accepted too - '1/16', '1/16 in',
+    '3 1/2"' - because sheet stock is sold that way and a modeller
+    reading "SHEET NO.2 1/16" off a plan should be able to type it.
     """
     import re
     s = str(text).strip().lower().replace('"', ' in')
-    m = re.fullmatch(r"([0-9]*\.?[0-9]+)\s*(mm|cm|in|inch|inches)?",
-                     s)
+    num = r"(?:\d+\s+)?\d+\s*/\s*\d+|[0-9]*\.?[0-9]+"
+    m = re.fullmatch(r"(%s)\s*(mm|cm|in|inch|inches)?" % num, s)
     if not m:
         raise ValueError("cannot parse length: %r" % (text,))
-    value = float(m.group(1))
+    value = _as_number(m.group(1))
     unit = m.group(2) or "mm"
     factor = {"mm": 1.0, "cm": 10.0,
               "in": 25.4, "inch": 25.4, "inches": 25.4}[unit]

@@ -135,6 +135,9 @@ class MainWindow(QMainWindow):
         self.objects_panel.traceKeepLargestChanged.connect(
             self.set_trace_keep_largest)
         self.objects_panel.visibilityToggled.connect(self._on_visibility_toggled)
+        self.objects_panel.sheetThicknessChanged.connect(
+            self._on_sheet_thickness_changed)
+        self.objects_panel.buildChanged.connect(self._on_build_changed)
         layout.addWidget(self.objects_panel)
 
         self.tiling_panel = TilingPanel(panel)
@@ -1351,13 +1354,40 @@ class MainWindow(QMainWindow):
             self._objects[self._active_index].name = name.strip()
             self._refresh_object_list()
 
+    def _on_sheet_thickness_changed(self, mm):
+        """Sheet stock: the default thickness for every unset part."""
+        self.project.sheet_thickness_mm = mm
+        self._refresh_build_panel()
+
+    def _on_build_changed(self, field, value):
+        """Write one placement field onto the SELECTED layer.
+
+        Onto the layer, not the model: _sync_model rebuilds
+        project.objects from the layers, so a value written to the
+        model would be discarded at the next export.
+        """
+        if not (0 <= self._active_index < len(self._objects)):
+            return
+        setattr(self._objects[self._active_index].build, field, value)
+        self._refresh_build_panel()
+
+    def _refresh_build_panel(self):
+        """Show the selected layer's build settings, or clear them."""
+        layer = (self._objects[self._active_index]
+                 if 0 <= self._active_index < len(self._objects) else None)
+        self.objects_panel.set_build(
+            None if layer is None else layer.build,
+            sheet_mm=self.project.sheet_thickness_mm)
+
     def _on_object_row_changed(self, row):
         if 0 <= row < len(self._objects):
             self._active_index = row
             self._refresh_editability()
+            self._refresh_build_panel()
 
     def _refresh_object_list(self):
         self.objects_panel.set_layers(self._objects, self._active_index)
+        self._refresh_build_panel()
 
     def _on_visibility_toggled(self, layer, visible):
         layer.set_visible(visible)

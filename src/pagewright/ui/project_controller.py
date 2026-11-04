@@ -110,6 +110,7 @@ class ProjectController:
         w.canvas.set_photo(pixmap,
                            (loaded.pixel_width, loaded.pixel_height))
         w.objects_panel.set_margin(w.project.margin_mm)
+        w.objects_panel.set_sheet_thickness(w.project.sheet_thickness_mm)
         w.act_mode_pan.setChecked(True)
         w._mode_pan()
         w._set_tools_enabled(True)
@@ -163,6 +164,7 @@ class ProjectController:
         w.act_mode_pan.setChecked(True)
         w._mode_pan()
         w.objects_panel.set_margin(w.project.margin_mm)
+        w.objects_panel.set_sheet_thickness(w.project.sheet_thickness_mm)
         w.tiling_panel.from_dict(w.project.tiling)
         w.set_unit(w.project.calibration.display_unit)
         w._refresh_object_list()

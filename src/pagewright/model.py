@@ -172,6 +172,19 @@ class Project:
         # differs from factory, so unchanged projects stay colorless.
         self.mark_color = None       # "#rrggbb" or None
         self.mark_opacity = None     # 0..1 diamond fill opacity, or None
+        # Stock thickness for the whole sheet, as plans state it
+        # ("SHEET NO.2 1/16"). A part's own Build.thickness_mm wins
+        # where one is set; this is the default for the rest.
+        self.sheet_thickness_mm = None
+
+    def part_thickness_mm(self, obj):
+        """The thickness to build `obj` at, or None if unknown.
+
+        One place decides, so the panel, the CAD export and any
+        future caller cannot disagree about which value wins.
+        """
+        own = getattr(getattr(obj, "build", None), "thickness_mm", None)
+        return own if own is not None else self.sheet_thickness_mm
 
     def set_source_image(self, loaded_image):
         """Record the loaded image's path and pixel dimensions."""

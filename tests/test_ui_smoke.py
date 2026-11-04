@@ -531,3 +531,99 @@ def test_build_survives_save_and_reload(tmp_path):
     reloaded = project_io.load_project(out)
     b = reloaded.objects[0].build
     assert (b.thickness_mm, b.plane, b.station_mm) == (1.6, "YZ", 120.0)
+
+
+# ----- stock and placement panel -----------------------------------------
+
+def _window_with_two_parts(tmp_path):
+    from pagewright.model import Contour, TracedObject
+    w = _window_with_photo(tmp_path)
+    w.project.objects = [
+        TracedObject(name="Former 3",
+                     contours=[Contour(points=[(50, 50), (250, 50),
+                                               (250, 200)])]),
+        TracedObject(name="Rib A",
+                     contours=[Contour(points=[(60, 60), (260, 60),
+                                               (260, 210)])]),
+    ]
+    w._load_layers_from_project()
+    w._refresh_object_list()
+    return w
+
+
+def test_typing_a_fraction_sets_the_sheet_stock(tmp_path):
+    """Balsa is sold in sixteenths and the plan prints '1/16', so that
+    is what a modeller will type."""
+    w = _window_with_two_parts(tmp_path)
+    w.objects_panel._sheet.setText("1/16 in")
+    w.objects_panel._emit_sheet()
+    assert w.project.sheet_thickness_mm == pytest.approx(1.5875)
+
+
+def test_unparseable_stock_marks_the_field_and_changes_nothing(tmp_path):
+    w = _window_with_two_parts(tmp_path)
+    w.objects_panel._sheet.setText("1/16 in")
+    w.objects_panel._emit_sheet()
+    w.objects_panel._sheet.setText("about yay thick")
+    w.objects_panel._emit_sheet()
+    assert w.project.sheet_thickness_mm == pytest.approx(1.5875)
+    assert "ffe4e4" in w.objects_panel._sheet.styleSheet()
+
+
+def test_build_edits_land_on_the_selected_layer(tmp_path):
+    """Onto the LAYER: _sync_model rebuilds project.objects from the
+    layers, so a value written to the model would be lost on export."""
+    w = _window_with_two_parts(tmp_path)
+    w._on_object_row_changed(1)                    # select "Rib A"
+    w.objects_panel._plane.setCurrentIndex(
+        w.objects_panel._plane.findData("XZ"))
+    w.objects_panel._station.setText("-25 mm")
+    w.objects_panel._emit_len("station_mm", w.objects_panel._station,
+                              allow_negative=True)
+
+    assert w._objects[1].build.plane == "XZ"
+    assert w._objects[0].build.plane is None       # the other is untouched
+    w._sync_model()
+    assert w.project.objects[1].build.station_mm == pytest.approx(-25.0)
+
+
+def test_selecting_a_part_shows_its_own_settings(tmp_path):
+    from pagewright.model import Build
+    w = _window_with_two_parts(tmp_path)
+    w._objects[0].build = Build(thickness_mm=3.0, plane="YZ")
+    w._objects[1].build = Build(plane="XZ")
+    w._on_object_row_changed(0)
+    assert w.objects_panel._thick.text() == "3 mm"
+    w._on_object_row_changed(1)
+    assert w.objects_panel._thick.text() == ""     # falls back to sheet
+    assert w.objects_panel._plane.currentData() == "XZ"
+
+
+def test_the_note_shows_the_thickness_that_will_be_used(tmp_path):
+    """A part with no thickness of its own still builds, at the sheet
+    stock, so the panel has to say which number applies."""
+    w = _window_with_two_parts(tmp_path)
+    w.project.sheet_thickness_mm = 1.5875
+    w._on_object_row_changed(0)
+    w.objects_panel._plane.setCurrentIndex(
+        w.objects_panel._plane.findData("YZ"))
+    note = w.objects_panel._build_note.text()
+    assert "1.5875 mm on YZ" in note
+
+
+def test_the_group_is_disabled_with_nothing_selected(tmp_path):
+    w = _window_with_photo(tmp_path)
+    w._refresh_object_list()
+    assert not w.objects_panel._build_box.isEnabled()
+
+
+def test_sheet_stock_survives_save_and_reload(tmp_path):
+    from pagewright.core import project_io
+    w = _window_with_two_parts(tmp_path)
+    w.objects_panel._sheet.setText("1/16 in")
+    w.objects_panel._emit_sheet()
+    w._sync_model()
+    out = str(tmp_path / "stock.tiproj.json")
+    project_io.save_project(w.project, out)
+    assert project_io.load_project(out).sheet_thickness_mm == \
+        pytest.approx(1.5875)

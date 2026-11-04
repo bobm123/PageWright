@@ -116,6 +116,9 @@ def project_to_dict(project):
     if getattr(project, "mark_color", None):
         d["marks"] = {"color": project.mark_color,
                       "opacity": project.mark_opacity}
+    # sheet stock thickness: written only when the user set one
+    if getattr(project, "sheet_thickness_mm", None):
+        d["sheet_thickness_mm"] = float(project.sheet_thickness_mm)
     return d
 
 
@@ -214,6 +217,18 @@ def project_from_dict(d):
     if marks:
         project.mark_color = marks.get("color")
         project.mark_opacity = marks.get("opacity")
+
+    thick = d.get("sheet_thickness_mm")
+    if thick is not None:
+        try:
+            thick = float(thick)
+        except (TypeError, ValueError):
+            raise ProjectIOError("sheet_thickness_mm is not a number: %r"
+                                 % (d.get("sheet_thickness_mm"),))
+        if thick <= 0.0:
+            raise ProjectIOError("sheet_thickness_mm must be positive: %r"
+                                 % (thick,))
+        project.sheet_thickness_mm = thick
 
     pages = d.get("pages")
     if pages:
