@@ -225,3 +225,52 @@ def test_write_recipe_makes_the_folder_and_valid_json(tmp_path):
         doc = json.load(fh)
     assert doc["design"] == "Sabre"
     assert doc["archiver"]["version"] == "1.3.0"
+
+
+# ----- plane from the plan's own part numbers ----------------------------
+
+@pytest.mark.parametrize("name,plane", [
+    ("F-3", "YZ"), ("F3", "YZ"), ("f 3", "YZ"), ("former 2", "YZ"),
+    ("bulkhead 1", "YZ"),
+    ("R-2", "XZ"), ("R2", "XZ"), ("rib 4", "XZ"), ("W1", "XZ"),
+])
+def test_a_part_number_implies_a_plane(name, plane):
+    """Plans number parts by what they are, and those names are typed
+    in by hand while annotating - so the convention is free
+    information about which way a part stands."""
+    assert rx.plane_from_name(name) == plane
+
+
+@pytest.mark.parametrize("name", ["Rudder", "Fin", "Stabilizer",
+                                  "Part 1", "F", "3", "Wing", "FS-3",
+                                  "", None])
+def test_a_name_that_is_not_a_part_number_implies_nothing(name):
+    """It wants a letter then a number. Guessing from 'Rudder' or
+    'Fin' would place a part wrongly and quietly."""
+    assert rx.plane_from_name(name) is None
+
+
+def test_the_name_only_fills_in_an_unset_plane():
+    p = _project([Build(thickness_mm=1.6, plane="XY")])
+    p.objects[0].name = "F-3"
+    doc, _ = rx.build_recipe(p)
+    assert doc["timeline"][0]["sketch"]["referencePlane"]["name"] == "XY"
+
+
+def test_the_name_beats_the_default():
+    p = _project([Build(thickness_mm=1.6)])
+    p.objects[0].name = "R-2"
+    doc, _ = rx.build_recipe(p, default_plane="XY")
+    assert doc["timeline"][0]["sketch"]["referencePlane"]["name"] == "XZ"
+
+
+def test_an_unplaced_part_still_exports():
+    """Partial output beats refusing: a sheet where only some parts are
+    placed should still build the ones that are."""
+    p = _project([Build(thickness_mm=1.6), Build(thickness_mm=1.6)])
+    p.objects[0].name, p.objects[1].name = "F-1", "Rudder"
+    doc, skipped = rx.build_recipe(p)
+    assert skipped == []
+    planes = [t["sketch"]["referencePlane"]["name"]
+              for t in doc["timeline"] if t["type"] == "Sketch"]
+    assert planes == ["YZ", "XY"]

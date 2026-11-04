@@ -611,7 +611,13 @@ Three things made the naive version fail, all handled:
   a former does. Aspect-ratio and fill filters drop most of them; two
   still get through on the sample sheet.
 - PARTS THAT NEVER SEAL. An outline crossed by a dimension line has no
-  enclosed interior. Recall on the sample sheet is roughly 1 in 4.
+  enclosed interior. These are mostly the thin ribs and spars.
+
+What it DOES find is the large parts: 15 on the sample sheet, whose
+bounding boxes cover 72% of the drawing - every notched former plus the
+rudder, stabilizer and wheel. Earlier notes called this "roughly 1 in 4"
+and treated it as a blocker; that counted parts rather than work, and
+was the wrong measure (see sec. 16.9).
 
 Default gap is 0.3 mm, tuned on the real plan: 0.3 found 4 of 5 known
 parts, 0.6 dropped to 3 of 5 because the wider close began welding
@@ -744,9 +750,11 @@ pocket cut from a former exported as a 72-entity DXF - but nothing in
 PageWright drives it yet, and a modified part does not come back to
 tiled patterns automatically.
 
-**Recall is now the bottleneck.** `find-parts` locates 15 of roughly
-60 parts on that sheet. Since the designer is annotating anyway, the
-fix is probably annotate-and-trace rather than better auto-detection.
+**Recall is NOT the bottleneck** (superseded by sec. 16.9).
+`find-parts` locates 15 parts covering 72% of that sheet, and the ones
+it misses are thin ribs and spars a designer adds by hand in minutes.
+Placement and orientation of the parts already found are worth more
+than finding more parts.
 
 ### 16.7 Backlog: un-notched copies for lofting (raised 2026-11-04)
 
@@ -834,3 +842,63 @@ Where each stands:
   relationship between parts, so this is CAD-side work that only
   needs the parts to arrive correctly placed. Which is the argument
   for 16.7 (un-notched lofting profiles) being the next real step.
+
+### 16.9 Partial results are the deliverable (Robert, 2026-11-04)
+
+Standing guidance, and a correction to how earlier sections framed
+this work:
+
+> Most of these features could be added by the human designer once
+> she has a 3D model showing structures in the correct orientation.
+> Initial placements are a nice-to-have. 50% of the structure placed
+> on the plans is a huge win, as long as missing formers or ribs can
+> be added by hand.
+
+The user of this tool is a designer with CAD skills, not someone who
+needs a finished model handed to them. What they cannot do cheaply is
+trace sixty parts off a scan and stand them up in the right places.
+What they can do in minutes is draw a missing rib.
+
+So the measure is WORK SAVED, not parts found. By that measure
+find-parts already does well: 15 parts covering 72% of the sheet,
+and the ones it misses are the thin, simple ribs and spars - the
+cheapest things to add by hand. Sections 16.4 and 16.6 called the
+same number "roughly 1 in 4" and listed recall as the bottleneck.
+That was counting the wrong thing.
+
+What this means for the backlog:
+
+- **Do not chase recall** as though it gates the rest. Better
+  detection is worth having, but it is not what unblocks a designer.
+- **Prefer anything that improves ORIENTATION and PLACEMENT** of the
+  parts already found, since that is the part a human cannot redo
+  quickly. 16.7 (un-notched lofting profiles) is the strongest
+  candidate on those grounds.
+- **Ship partial output rather than refusing.** A sheet where half
+  the parts lack a thickness should still export the half that have
+  one, naming what it skipped - which export-recipe already does.
+- **Do not block on perfect.** Incomplete and correct beats complete
+  and late.
+
+### 16.10 Part numbers carry the placement (Robert, 2026-11-04)
+
+"Hand annotated F-numbers and R-numbers is acceptable in the
+workflow." That settles the naming question and pays for itself: a
+plan numbers its parts by what they ARE - F-3 is the third fuselage
+former, R-2 the second wing rib - so a name typed in while annotating
+already says which way the part stands.
+
+`recipe_export.plane_from_name` reads it: F/former/frame/bulkhead/fus
+-> YZ, R/rib/W/wing -> XZ. It only fills in a plane nobody set, so an
+explicit choice always wins, and the match is deliberately narrow -
+a letter (or word) then a number. "Rudder", "Fin" and "Stabilizer"
+read as nothing, because guessing from them would place a part
+wrongly and quietly.
+
+It removes the per-part plane click for the parts that follow the
+convention, which on a typical sheet is most of them. No OCR is
+involved: the names are typed, which is why this works at all.
+
+Still worth doing later: use the same names to drive STATION, since
+F-1 through F-9 run fore to aft in order. That needs a spacing the
+plan does not state, so it would be a guess - left alone for now.

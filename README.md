@@ -149,10 +149,14 @@ ready for `tile` or `export-svg` - so a raster plan becomes printable tiles
 without anyone marking anything. `--json` returns each part's bounding box,
 centroid and polygon, which is what an agent needs to drive the rest.
 
-Its limit is worth knowing: a part whose outline is crossed by a dimension
-line never seals and is not found. On a real model-aircraft sheet it found
-about a quarter of the parts, including every notched former. It is a way to
-skip the easy ones, not a replacement for marking the hard ones.
+What it finds are the big parts. On a real model-aircraft sheet it found 15,
+whose bounding boxes cover 72% of the drawing: every notched former, the
+rudder, the stabilizer and the wheel. What it misses is mostly thin ribs and
+spars whose outlines a dimension line crosses, so they never seal.
+
+That is the right trade for the job. Getting the formers placed is most of
+the work, and a missing rib is quick to add by hand — so this is a head
+start, not a complete parts list, and it does not have to be one.
 
 `flatten` is the one worth knowing about: page-outline detection needs no
 human input, so a folder of book photographs is straightened in one go, each

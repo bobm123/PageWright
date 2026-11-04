@@ -48,6 +48,45 @@ PLANE_AXES = {
 
 DEFAULT_PLANE = "XY"
 
+# Plans number their parts by what the part IS: F-3 is the third
+# fuselage former, R-2 the second wing rib. Those names get typed in by
+# hand while annotating, so the convention is free information about
+# which way a part stands - a former across the fuselage (YZ), a rib
+# across the wing (XZ). Only used where no plane was set explicitly.
+NAME_PLANES = (
+    (("f", "former", "frame", "bulkhead", "fus"), "YZ"),
+    (("r", "rib", "w", "wing"), "XZ"),
+)
+
+
+def plane_from_name(name):
+    """Guess a plane from a part name like "F-3" or "R2", or None.
+
+    Deliberately narrow: it wants a letter (or a word) followed by a
+    number, so "Rudder" and "Fin" do not read as a rib and a former.
+    """
+    text = (name or "").strip().lower()
+    if not text:
+        return None
+    head = ""
+    for ch in text:
+        if ch.isdigit():
+            break
+        if ch.isalpha():
+            head += ch
+        elif ch in " -_.":
+            if head:
+                break
+        else:
+            return None
+    tail = text[len(head):].lstrip(" -_.")
+    if not head or not tail or not tail[0].isdigit():
+        return None
+    for prefixes, plane in NAME_PLANES:
+        if head in prefixes:
+            return plane
+    return None
+
 
 class RecipeError(Exception):
     pass
@@ -261,7 +300,9 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
             continue
 
         build = getattr(obj, "build", None)
-        plane = (getattr(build, "plane", None) or default_plane).upper()
+        plane = (getattr(build, "plane", None)
+                 or plane_from_name(obj.name)
+                 or default_plane).upper()
         if plane not in PLANE_AXES:
             skipped.append((obj.name, "unknown plane %r" % (plane,)))
             continue

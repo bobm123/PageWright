@@ -21,9 +21,14 @@ Three things make the naive version fail, all handled here:
     region fills its bounding box) drop most of them.
   * PARTS THAT NEVER SEAL. An outline crossed by a dimension line, or
     sharing ink with its neighbour, has no enclosed interior and will
-    not be found. On the sample sheet this finds roughly a quarter of
-    the parts. That is the honest limit: `find_parts` is a way to skip
-    the easy ones, not a replacement for marking the hard ones.
+    not be found. These are mostly the thin ribs and spars.
+
+What comes out is the LARGE parts: 15 on the sample sheet, covering
+72% of the drawing - every notched former plus the rudder, stabilizer
+and wheel. That is the useful half of the trade. The reader of this
+output is a designer with CAD skills, for whom tracing sixty parts off
+a scan is expensive and drawing one missing rib is not, so a head
+start on the big parts is worth more than completeness.
 
 GUI-free: cv2 + numpy, and no Python-only idioms that would block the
 C++ port.
