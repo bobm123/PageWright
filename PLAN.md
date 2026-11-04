@@ -747,3 +747,37 @@ tiled patterns automatically.
 **Recall is now the bottleneck.** `find-parts` locates 15 of roughly
 60 parts on that sheet. Since the designer is annotating anyway, the
 fix is probably annotate-and-trace rather than better auto-detection.
+
+### 16.7 Backlog: un-notched copies for lofting (raised 2026-11-04)
+
+Robert: alongside each former and rib, offer a copy with the notches
+filled in. Those clean profiles are what you loft through when you
+want to move structure around - a loft wants the fuselage SURFACE,
+and a notched profile lofts the notches too, which is not the shape
+of the aeroplane.
+
+Not started. Recorded now because it changes what a part is: one
+traced outline would carry two profiles, a cut one and a lofting
+one, which is a model question rather than an export detail.
+
+What already helps: `core/notches.py` finds sharp corners
+(CORNER_DEG) and axis-aligned edges, which is the hard half of
+recognising a notch, and it is already wired to the GUI as Clean Up
+Notches.
+
+What does NOT work, measured on the F-86D former: a convex hull.
+Hulling the 72-point outline gives 26 points and adds 9.2% area, but
+it removes every concavity, not just the notches - a curved underside
+or a lightening cutout would be swallowed with them. It has to be
+notch-aware: find the axis-aligned slots that break an otherwise
+smooth boundary and bridge each one, leaving the rest alone.
+
+Open questions worth settling before building it:
+
+- Does the un-notched copy live as a second Contour with a role
+  ("loft"), a second TracedObject, or a flag on Build? A second
+  contour keeps the two in step when the outline is edited.
+- Should it reach the recipe at all, or only the lofting tool? A
+  loft profile is usually a construction sketch, not a body.
+- A notch filled across a curve needs the ARC the notch interrupted,
+  not a straight chord, or the loft gets a flat spot.
