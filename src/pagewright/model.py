@@ -98,6 +98,15 @@ class Build:
     view is XY). `station_mm` is how far along the normal of that
     plane it sits, and `rotate_deg` turns it in its own plane.
 
+    `assembly` names the major assembly the part belongs to -
+    "Fuselage", "Wing", "LandingGear". Parts that share one become a
+    component, which is what lets a whole assembly be swapped: taking
+    the landing gear off and fitting floats means deleting one
+    component and adding another, not picking struts out of a pile of
+    loose bodies. A part with no `plane` is LEFT FLAT, lying in the
+    plan plane as it was drawn, which is the right state for an
+    assembly nobody has positioned yet.
+
     All fields are optional: an outline with no Build is still a
     perfectly good traced polygon for printing, which is what most
     jobs are.
@@ -106,25 +115,27 @@ class Build:
     PLANES = ("XY", "YZ", "XZ")
 
     def __init__(self, thickness_mm=None, plane=None, station_mm=None,
-                 rotate_deg=None):
+                 rotate_deg=None, assembly=None):
         self.thickness_mm = thickness_mm
         self.plane = plane
         self.station_mm = station_mm
         self.rotate_deg = rotate_deg
+        self.assembly = assembly
 
     def is_empty(self):
         """True when nothing has been set, so it need not be saved."""
         return (self.thickness_mm is None and self.plane is None
-                and self.station_mm is None and self.rotate_deg is None)
+                and self.station_mm is None and self.rotate_deg is None
+                and not self.assembly)
 
     def copy(self):
         return Build(self.thickness_mm, self.plane, self.station_mm,
-                     self.rotate_deg)
+                     self.rotate_deg, self.assembly)
 
     def __repr__(self):
-        return "Build(%r mm, %s, station=%r, rot=%r)" % (
+        return "Build(%r mm, %s, station=%r, rot=%r, asm=%r)" % (
             self.thickness_mm, self.plane, self.station_mm,
-            self.rotate_deg)
+            self.rotate_deg, self.assembly)
 
 
 class TracedObject:

@@ -58,6 +58,8 @@ def _build_to_dict(build):
         d["station_mm"] = float(build.station_mm)
     if build.rotate_deg is not None:
         d["rotate_deg"] = float(build.rotate_deg)
+    if build.assembly:
+        d["assembly"] = str(build.assembly)
     return d
 
 
@@ -175,10 +177,12 @@ def _build_from_dict(d):
                                  % (key, v))
         return v
 
+    assembly = d.get("assembly")
     return Build(thickness_mm=_num("thickness_mm", positive=True),
                  plane=plane,
                  station_mm=_num("station_mm"),
-                 rotate_deg=_num("rotate_deg"))
+                 rotate_deg=_num("rotate_deg"),
+                 assembly=str(assembly) if assembly else None)
 
 
 def _object_from_dict(d):

@@ -218,9 +218,10 @@ def test_duplicate_names_stay_distinct():
 
 def test_write_recipe_makes_the_folder_and_valid_json(tmp_path):
     out = str(tmp_path / "deep" / "recipe.json")
-    path, parts, skipped = rx.write_recipe(
+    path, parts, skipped, doc_out = rx.write_recipe(
         _project([Build(thickness_mm=1.6)]), out, design="Sabre")
     assert (path, parts, skipped) == (out, 1, [])
+    assert doc_out["design"] == "Sabre"     # returned, not rebuilt
     with open(out, encoding="utf-8") as fh:
         doc = json.load(fh)
     assert doc["design"] == "Sabre"
@@ -274,3 +275,75 @@ def test_an_unplaced_part_still_exports():
     planes = [t["sketch"]["referencePlane"]["name"]
               for t in doc["timeline"] if t["type"] == "Sketch"]
     assert planes == ["YZ", "XY"]
+
+
+# ----- major assemblies --------------------------------------------------
+
+def _grouped():
+    p = _project([Build(thickness_mm=1.6, assembly="Fuselage"),
+                  Build(thickness_mm=1.6, assembly="Fuselage"),
+                  Build(thickness_mm=1.6, assembly="LandingGear")])
+    return p
+
+
+def test_parts_are_grouped_by_assembly():
+    doc, _ = rx.build_recipe(_grouped())
+    groups = doc["_pagewright"]["assemblies"]
+    assert groups == {"Fuselage": ["Body1", "Body2"],
+                      "LandingGear": ["Body3"]}
+
+
+def test_groups_name_bodies_not_sketches():
+    """component.move_bodies takes BODY names, and the importer calls
+    them Body1, Body2... - not after our sketches."""
+    doc, _ = rx.build_recipe(_grouped())
+    for names in doc["_pagewright"]["assemblies"].values():
+        assert all(n.startswith("Body") for n in names)
+
+
+def test_the_assembly_script_makes_siblings_under_root():
+    """component.create defaults to the ACTIVE component and creating
+    one activates it, so without an explicit parent the second
+    assembly nests inside the first."""
+    doc, _ = rx.build_recipe(_grouped())
+    script = rx.assembly_script(doc)
+    creates = [c for c in script["commands"]
+               if c["command"] == "component.create"]
+    assert len(creates) == 2
+    assert all(c["params"]["parent"] == "root" for c in creates)
+
+
+def test_assemblies_are_ungrounded_so_they_can_be_swapped():
+    """The point: replacing landing gear with floats is deleting one
+    component and adding another."""
+    doc, _ = rx.build_recipe(_grouped())
+    for c in rx.assembly_script(doc)["commands"]:
+        if c["command"] == "component.create":
+            assert c["params"]["grounded"] is False
+
+
+def test_every_component_gets_its_bodies_moved():
+    doc, _ = rx.build_recipe(_grouped())
+    cmds = rx.assembly_script(doc)["commands"]
+    moves = {c["params"]["component"]: c["params"]["bodies"]
+             for c in cmds if c["command"] == "component.move_bodies"}
+    assert moves == {"Fuselage": ["Body1", "Body2"],
+                     "LandingGear": ["Body3"]}
+
+
+def test_no_assembly_means_no_script():
+    """Most jobs are not assemblies; they should not gain an empty
+    component tree."""
+    doc, _ = rx.build_recipe(_project([Build(thickness_mm=1.6)]))
+    assert doc["_pagewright"]["assemblies"] == {}
+    assert rx.assembly_script(doc)["commands"] == []
+
+
+def test_an_unplaced_part_keeps_its_assembly():
+    """'Left flat' means lying in the plan plane as drawn, which is the
+    right state for an assembly nobody has positioned yet - it still
+    belongs to its group."""
+    p = _project([Build(thickness_mm=1.6, assembly="Wing")])
+    doc, _ = rx.build_recipe(p)
+    assert doc["timeline"][0]["sketch"]["referencePlane"]["name"] == "XY"
+    assert doc["_pagewright"]["assemblies"] == {"Wing": ["Body1"]}

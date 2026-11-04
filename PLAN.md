@@ -902,3 +902,50 @@ involved: the names are typed, which is why this works at all.
 Still worth doing later: use the same names to drive STATION, since
 F-1 through F-9 run fore to aft in order. That needs a spacing the
 plan does not state, so it would be a guess - left alone for now.
+
+### 16.11 Major assemblies as components (Robert, 2026-11-04)
+
+"Major assemblies can be left flat or added later. When added they
+should be as components and assemblies in their position relative to
+the fuselage. One use case might be replacing landing gear with
+floats so the user can develop additional struts needed."
+
+"Left flat" means left lying in the PLAN PLANE as drawn, not stood
+up. A part with no `plane` is exactly that, so the model already
+expressed it - what was missing was the grouping.
+
+`Build.assembly` names the group: "Fuselage", "Wing", "LandingGear".
+Parts sharing one become a SolidCraft component, ungrounded so the
+whole thing can be moved or replaced. That is what the floats case
+needs: deleting one component and adding another, rather than
+picking struts out of a pile of loose bodies.
+
+**The recipe format cannot carry a component tree.** It has one
+`component` string per sketch, every recipe in MyArchive uses a
+single value named after the design, and the importer moves every
+body to root regardless. So `export-recipe` writes a companion
+`assembly.json` - the SolidCraft command list - to run after the
+import. The CLI prints which file and when.
+
+Three things measured rather than assumed:
+
+- `component.create` defaults to the ACTIVE component, and creating
+  one activates it. Without an explicit `parent: root` the second
+  assembly NESTS inside the first (LandingGear came out with parent
+  1 instead of 0). Siblings need the parent stated every time.
+- `component.move_bodies` takes BODY names. The importer calls them
+  Body1, Body2..., not after our sketches, so the groups record body
+  names - which the recipe already declares per extrude.
+- Deleting a component does NOT delete its bodies; they drop back to
+  root. Worth knowing before telling anyone the swap is clean.
+
+Verified end to end: 4 parts in 3 assemblies -> recipe -> importer
+PASS 8/8 -> assembly script -> three sibling components at parent 0
+holding the right bodies -> delete LandingGear, create Floats, which
+both succeed.
+
+Not done, and deliberately: positioning an assembly RELATIVE to the
+fuselage. `occurrence.move` takes translate and axis/angle, so the
+mechanism is there, but nothing on the plan states where a wing
+meets a fuselage. Per sec. 16.9 that is a placement the designer
+makes once in CAD, not something to guess.

@@ -542,6 +542,12 @@ def _cmd_export_recipe(args, out, err):
     if not args.quiet:
         out.write("%d part(s) -> %s\n" % (result.parts,
                                         result.out_path))
+        if result.assemblies:
+            out.write("%d assembly component(s): %s\n"
+                      % (len(result.assemblies),
+                         ", ".join(sorted(result.assemblies))))
+            out.write("run %s after importing the recipe\n"
+                      % result.assembly_path)
     return EXIT_OK
 
 

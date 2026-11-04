@@ -168,7 +168,8 @@ def _line(tag, p0, p1):
     }
 
 
-def _sketch_item(index, name, plane, station_mm, loops_cm):
+def _sketch_item(index, name, plane, station_mm, loops_cm,
+                 component=None):
     points, curves, loop_tokens = [], [], []
     for li, loop in enumerate(loops_cm):
         tokens = []
@@ -196,7 +197,7 @@ def _sketch_item(index, name, plane, station_mm, loops_cm):
         "health": "HealthyFeatureHealthState",
         "sketch": {
             "parametric": True,
-            "component": "PageWright",
+            "component": component or "PageWright",
             "referencePlane": {"type": "ConstructionPlane", "name": plane},
             "transform": transform,
             "points": points,
@@ -277,6 +278,12 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
     `skipped` is a list of (part name, reason) for parts that could not
     be built - almost always a missing thickness. They are reported
     rather than guessed at, because a wrong thickness is a wasted part.
+
+    Parts sharing a `Build.assembly` are recorded under one component
+    name. A recipe cannot express a component TREE - the format has a
+    single `component` string per sketch and the importer moves every
+    body to root - so `assembly_script` emits the SolidCraft commands
+    that build the structure, to run after the import.
     """
     mpp = project.calibration.mm_per_pixel
     if not mpp:
@@ -287,6 +294,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
         raise RecipeError("nothing to export: no traced objects")
 
     timeline, skipped, used = [], [], set()
+    groups = {}
     for obj in project.objects:
         outer = next((c for c in obj.contours
                       if getattr(c, "role", "outer") != "hole"), None)
@@ -308,6 +316,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
             continue
         station = getattr(build, "station_mm", None) or 0.0
         rotate = getattr(build, "rotate_deg", None)
+        assembly = getattr(build, "assembly", None) or None
 
         pts_mm = _centred_mm(outer, mpp, project.pixel_height, rotate)
         area_mm2, cx, cy = polygon_area_centroid(pts_mm)
@@ -316,8 +325,13 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
 
         name = _safe(obj.name, used)
         index = len(timeline)
+        if assembly:
+            # the BODY name, not the sketch's: component.move_bodies
+            # takes bodies, and the importer names them Body1, Body2...
+            groups.setdefault(assembly, []).append(
+                "Body%d" % (index // 2 + 1))
         sketch, loop_tokens = _sketch_item(index, name, plane, station,
-                                           [loop_cm])
+                                           [loop_cm], assembly)
         timeline.append(sketch)
         timeline.append(_extrude_item(
             index + 1, "%s_extrude" % name, name, loop_tokens,
@@ -336,13 +350,18 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE):
         "timeline": timeline,
         "canvases": [],
     }
+    doc["_pagewright"] = {"assemblies": groups}
     return doc, skipped
 
 
 def write_recipe(project, out_path, design=None,
                  default_plane=DEFAULT_PLANE):
-    """Write the recipe for `project` to `out_path`. Returns (path,
-    parts written, skipped)."""
+    """Write the recipe for `project` to `out_path`.
+
+    Returns (path, parts written, skipped, doc) - the document too, so
+    a caller that also wants the assembly script does not have to
+    build it twice.
+    """
     doc, skipped = build_recipe(project, design=design,
                                 default_plane=default_plane)
     parent = os.path.dirname(out_path)
@@ -354,4 +373,37 @@ def write_recipe(project, out_path, design=None,
             fh.write("\n")
     except (IOError, OSError) as exc:
         raise RecipeError("cannot write %s: %s" % (out_path, exc))
-    return out_path, len(doc["timeline"]) // 2, skipped
+    return out_path, len(doc["timeline"]) // 2, skipped, doc
+
+
+def assembly_script(doc):
+    """SolidCraft commands that group the rebuilt bodies into components.
+
+    Run after the recipe is imported. A recipe carries one `component`
+    string per sketch and the importer moves every body to root, so the
+    structure has to be built separately.
+
+    Components are created as SIBLINGS under root, with `parent` given
+    explicitly: component.create defaults to the ACTIVE component and
+    creating one activates it, so without this the second assembly
+    nests inside the first (measured - LandingGear came out with
+    parent 1 instead of 0).
+
+    They are ungrounded so a whole assembly can be moved or replaced,
+    which is the point: swapping landing gear for floats should be
+    deleting one component and adding another, not picking struts out
+    of a pile of loose bodies.
+    """
+    groups = (doc.get("_pagewright") or {}).get("assemblies") or {}
+    commands = []
+    for name in sorted(groups):
+        bodies = [b for b in groups[name] if b]
+        if not bodies:
+            continue
+        commands.append({"command": "component.create",
+                         "params": {"name": name, "parent": "root",
+                                    "grounded": False}})
+        commands.append({"command": "component.move_bodies",
+                         "params": {"bodies": list(bodies),
+                                    "component": name}})
+    return {"commands": commands}

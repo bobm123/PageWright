@@ -844,11 +844,14 @@ def find_parts(path, trace=False, gap=None, min_area=None, max_aspect=None,
 # ----- export_recipe ------------------------------------------------------
 
 class RecipeResult(object):
-    def __init__(self, path, out_path, parts, skipped):
+    def __init__(self, path, out_path, parts, skipped,
+                 assembly_path=None, assemblies=None):
         self.path = path
         self.out_path = out_path
         self.parts = parts
         self.skipped = list(skipped)
+        self.assembly_path = assembly_path
+        self.assemblies = dict(assemblies or {})
 
 
 def export_recipe(path, out_path=None, design=None, plane=None,
@@ -871,14 +874,32 @@ def export_recipe(path, out_path=None, design=None, plane=None,
     if progress:
         progress("building %s" % os.path.basename(out_path))
     try:
-        written, parts, skipped = rx.write_recipe(
+        written, parts, skipped, doc = rx.write_recipe(
             project, out_path, design=design or source.base_name,
             default_plane=(plane or rx.DEFAULT_PLANE).upper())
     except rx.RecipeError as exc:
         raise JobError(str(exc))
     if progress:
         progress("wrote %d part(s)" % parts)
-    return RecipeResult(path, written, parts, skipped)
+
+    # The component tree cannot go in the recipe (one component string
+    # per sketch, and the importer moves every body to root), so it is
+    # a companion script to run after the import.
+    groups = (doc.get("_pagewright") or {}).get("assemblies") or {}
+    asm_path = None
+    if groups:
+        import json
+        asm_path = os.path.join(os.path.dirname(written) or ".",
+                                "assembly.json")
+        try:
+            with open(asm_path, "w", encoding="utf-8") as fh:
+                json.dump(rx.assembly_script(doc), fh, indent=1)
+                fh.write(chr(10))
+        except (IOError, OSError) as exc:
+            raise JobError("cannot write %s: %s" % (asm_path, exc))
+        if progress:
+            progress("wrote %d assembly component(s)" % len(groups))
+    return RecipeResult(path, written, parts, skipped, asm_path, groups)
 
 
 # ----- import_dxf ---------------------------------------------------------
