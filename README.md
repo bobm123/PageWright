@@ -73,7 +73,7 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 
 ## Command line (headless)
 
-Seven subcommands run without a display — they never import Qt, so they work
+Eight subcommands run without a display — they never import Qt, so they work
 over SSH, in a container, or in a shell loop. The GUI calls the same job
 layer for the same work, so there is one implementation behind both:
 
@@ -119,7 +119,20 @@ pagewright import-svg pattern.svg -o pattern.tiproj.json
 pagewright export-svg pattern.tiproj.json --inkscape
 pagewright flatten scans/*.jpg --out ./flat
 pagewright ocr page.png --out page.txt
+pagewright export-recipe parts.tiproj.json --thickness 1/16in
 ```
+
+`export-recipe` writes the traced parts as a MyArchive `recipe.json`:
+one sketch and one extrude per part, placed by the plane, station and
+thickness recorded on each. SolidCraft, Fusion and OpenSCAD all rebuild
+from that format, so an old plan becomes solid parts a designer can add
+servos and control rods to, then send back out as DXF for a laser
+cutter.
+
+Where a part belongs is recorded, not inferred: a plan sheet is nested
+for material efficiency, so the position a part was drawn at says
+nothing about where it sits on the aeroplane. A part with no thickness
+is reported rather than guessed at.
 
 `find-parts` locates the drawn parts on a plan with **no seed marks at all**.
 A part is a closed loop of ink, so flooding the paper inward from the page

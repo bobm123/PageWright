@@ -15,6 +15,7 @@ drift.
     pagewright flatten scans/*.jpg --out ./flat
     pagewright ocr page.png --out page.txt
     pagewright find-parts plan.png --dpi 300 --trace
+    pagewright export-recipe parts.tiproj.json --thickness 1/16in
 
 Qt is never imported here. `main.py` dispatches to this module BEFORE it
 touches PySide6, so these commands run on a machine with no display.
@@ -36,7 +37,7 @@ EXIT_ERROR = 1
 # Subcommands this module provides. `main.py` checks membership to
 # decide between CLI and GUI, so a new command only needs adding here.
 COMMANDS = ("info", "tile", "export-svg", "import-svg",
-            "flatten", "ocr", "find-parts")
+            "flatten", "ocr", "find-parts", "export-recipe")
 
 
 def _add_scale_flags(parser):
@@ -252,6 +253,32 @@ def build_parser():
     p_find.add_argument("-q", "--quiet", action="store_true",
                         help="only report errors")
     _add_scale_flags(p_find)
+
+    p_rec = subs.add_parser(
+        "export-recipe", help="write the parts as a CAD recipe.json",
+        description="Write the traced parts as a MyArchive "
+                    "recipe.json: one sketch and one extrude per "
+                    "part, placed by the plane, station and "
+                    "thickness recorded on each. SolidCraft, Fusion "
+                    "and OpenSCAD all rebuild from this format. A "
+                    "part with no thickness is reported, not "
+                    "guessed at.")
+    p_rec.add_argument("file", metavar="FILE",
+                       help="a .tiproj.json project, or an SVG")
+    p_rec.add_argument("-o", "--out", metavar="FILE",
+                       help="recipe.json to write (default: "
+                            "<name>_recipe/recipe.json beside the input)")
+    p_rec.add_argument("--design", metavar="NAME",
+                       help="design name recorded in the recipe")
+    p_rec.add_argument("--thickness", metavar="LEN",
+                       help="sheet stock for parts with no thickness "
+                            "of their own (accepts 1/16in, 1.5mm)")
+    p_rec.add_argument("--plane", choices=["XY", "YZ", "XZ"],
+                       help="plane for parts that are not placed "
+                            "(default XY)")
+    p_rec.add_argument("-q", "--quiet", action="store_true",
+                       help="only report errors")
+    _add_scale_flags(p_rec)
     return parser
 
 
@@ -478,10 +505,24 @@ def _cmd_find_parts(args, out, err):
     return EXIT_OK
 
 
+def _cmd_export_recipe(args, out, err):
+    result = jobs.export_recipe(
+        args.file, out_path=args.out, design=args.design,
+        plane=args.plane, thickness=args.thickness,
+        progress=_progress_to(err, args.quiet), **_scale_kwargs(args))
+    for name, why in result.skipped:
+        err.write("  skipped %s: %s\n" % (name, why))
+    if not args.quiet:
+        out.write("%d part(s) -> %s\n" % (result.parts,
+                                        result.out_path))
+    return EXIT_OK
+
+
 _HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
              "export-svg": _cmd_export_svg, "import-svg": _cmd_import_svg,
              "flatten": _cmd_flatten, "ocr": _cmd_ocr,
-             "find-parts": _cmd_find_parts}
+             "find-parts": _cmd_find_parts,
+             "export-recipe": _cmd_export_recipe}
 
 
 def _hint(exc):

@@ -839,3 +839,43 @@ def find_parts(path, trace=False, gap=None, min_area=None, max_aspect=None,
         if progress:
             progress("wrote %s" % os.path.basename(out_path))
     return result
+
+
+# ----- export_recipe ------------------------------------------------------
+
+class RecipeResult(object):
+    def __init__(self, path, out_path, parts, skipped):
+        self.path = path
+        self.out_path = out_path
+        self.parts = parts
+        self.skipped = list(skipped)
+
+
+def export_recipe(path, out_path=None, design=None, plane=None,
+                  thickness=None, progress=None, **scale_kw):
+    """Write the traced parts as a MyArchive recipe.json.
+
+    The headless end of the plan-to-CAD route: SolidCraft, Fusion and
+    OpenSCAD all rebuild from a recipe, so this is where a scanned
+    plan leaves PageWright and becomes solid parts.
+    """
+    from . import recipe_export as rx
+    source = load_source(path, **scale_kw)
+    project = source.project
+    if thickness:
+        project.sheet_thickness_mm = _as_mm(thickness, "--thickness")
+    if out_path is None:
+        out_path = os.path.join(os.path.dirname(path) or ".",
+                                source.base_name + "_recipe",
+                                "recipe.json")
+    if progress:
+        progress("building %s" % os.path.basename(out_path))
+    try:
+        written, parts, skipped = rx.write_recipe(
+            project, out_path, design=design or source.base_name,
+            default_plane=(plane or rx.DEFAULT_PLANE).upper())
+    except rx.RecipeError as exc:
+        raise JobError(str(exc))
+    if progress:
+        progress("wrote %d part(s)" % parts)
+    return RecipeResult(path, written, parts, skipped)

@@ -396,3 +396,52 @@ def test_scale_guidance_names_the_flags_only_on_the_cli(tmp_path):
     code, _out, err = _run(["export-svg", _png(tmp_path)])
     assert code == cli.EXIT_ERROR
     assert "no scale" in err and "--mm-per-px" in err
+
+
+# ----- export-recipe -----------------------------------------------------
+
+def _traced_project(tmp_path, thickness=None):
+    """A saved project with one traced part, for the recipe route."""
+    from pagewright.core import project_io
+    from pagewright.model import Build, Contour, Project, TracedObject
+    p = Project()
+    p.pixel_width, p.pixel_height = 400, 300
+    p.calibration.mm_per_pixel = 0.5
+    p.sheet_thickness_mm = thickness
+    o = TracedObject(name="Former 3",
+                     build=Build(plane="YZ", station_mm=40.0))
+    o.contours.append(Contour(points=[(10, 10), (110, 10), (110, 90),
+                                      (10, 90)]))
+    p.objects.append(o)
+    path = str(tmp_path / "parts.tiproj.json")
+    project_io.save_project(p, path)
+    return path
+
+
+def test_export_recipe_command(tmp_path):
+    out = str(tmp_path / "r" / "recipe.json")
+    code, stdout, _err = _run(["export-recipe",
+                               _traced_project(tmp_path, 1.6),
+                               "-o", out])
+    assert code == cli.EXIT_OK
+    assert "1 part(s)" in stdout
+    assert os.path.isfile(out)
+
+
+def test_export_recipe_takes_a_fraction_for_the_stock(tmp_path):
+    """1/16 in is how balsa is sold and what the plan prints."""
+    import json
+    out = str(tmp_path / "r2" / "recipe.json")
+    assert _run(["export-recipe", _traced_project(tmp_path), "-o", out,
+                 "--thickness", "1/16in", "-q"])[0] == cli.EXIT_OK
+    with open(out, encoding="utf-8") as fh:
+        doc = json.load(fh)
+    dist = doc["timeline"][1]["extrude"]["extentOne"]["distance"]
+    assert dist["value"] == pytest.approx(0.15875)      # cm
+
+
+def test_export_recipe_without_a_thickness_fails_and_says_so(tmp_path):
+    code, _out, err = _run(["export-recipe", _traced_project(tmp_path),
+                            "-o", str(tmp_path / "r3" / "recipe.json")])
+    assert code == cli.EXIT_ERROR
+    assert "thickness" in err

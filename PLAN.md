@@ -680,3 +680,70 @@ no coverage at all: `open_svg` referenced an undefined `objects` after
 the refactor and would have crashed on the next SVG opened, and an
 offscreen `QMessageBox.information` hangs forever, which is how an
 untested GUI path fails rather than reports.
+
+### 16.6 Old plans into CAD and back (2026-11-04)
+
+Goal: take a scanned plan, stand its sheet parts up in CAD in the
+right orientation so a designer can add servos, motors and control
+rods, then send the modified parts back out as patterns or DXF for a
+laser cutter. NOT a lofted fuselage - flat parts only.
+
+The route turned out to be short, because CadRoundTrip already has
+the hard half. `recipe.json` is its tool-neutral hub and SolidCraft,
+Fusion and OpenSCAD all rebuild from it. PageWright only had to learn
+to write one.
+
+Two things made that possible without Fusion:
+
+- A `token` is only an identity key. SolidCraft's own exporter mints
+  `sc:0` and `Sketch1/c1`, so ours can be readable.
+- An extrude finds its profile by token first, then falls back to
+  AREA and CENTROID. A synthetic recipe has no Fusion tokens, so the
+  area path is the one that runs - which is why recipe_export
+  computes a true area centroid rather than a vertex mean.
+
+Verified by running the real `solidcraft_import.py` over our output:
+**PASS, 8 of 8 items rebuilt, 0 differ**, giving four closed solids
+each 1.6 mm on the axis its plane dictates, at the requested
+stations, with volumes matching the traced areas to 0.01%.
+
+One bug found that way: `startExtent` is a bare string in a recipe,
+not a dict. The importer reported "unsupported" and stopped at the
+first extrude. Unit tests alone would not have caught it; only
+running the real consumer did.
+
+**Why placement is recorded, not inferred.** A plan sheet is NESTED
+for material efficiency. On the F-86D sheet the ribs sit in a row,
+the formers are scattered and the stabilizer is turned 90 degrees, so
+where a part was drawn says nothing about where it belongs. The
+designer supplies plane, station and thickness; PageWright carries
+them. Robert confirmed this is expected, which removed the only part
+of the problem that had no sound answer.
+
+**PageWright earns its place in this pipeline.** SolidCraft 0.28 has
+`canvas.insert`, `canvas.calibrate` and `canvas.to_sketch`, which
+looked like they made it redundant. On the same former crop at the
+same calibration:
+
+| | PageWright | SolidCraft canvas.to_sketch |
+|---|---|---|
+| entities | 72-point polygon | 408 curves (402 splines) |
+| outlines | 1 - the part | 5 - part plus lettering |
+| height | 41.83 mm | 44.47 mm |
+| sketch DOF | n/a | 2424 |
+| extrudes to | 1 body | 5 bodies |
+
+True height is 42.07 mm. Their tracer follows the OUTER edge of the
+ink (the same inner/outer distinction as sec. 16.3) and takes the
+part number as geometry. Clean, few, correctly-sized polygons are the
+product.
+
+**Still to do for the full loop:** the return leg. `sheet.export_dxf`
+and `sketch.export_dxf` exist and were tested by hand - a servo
+pocket cut from a former exported as a 72-entity DXF - but nothing in
+PageWright drives it yet, and a modified part does not come back to
+tiled patterns automatically.
+
+**Recall is now the bottleneck.** `find-parts` locates 15 of roughly
+60 parts on that sheet. Since the designer is annotating anyway, the
+fix is probably annotate-and-trace rather than better auto-detection.
