@@ -781,3 +781,56 @@ Open questions worth settling before building it:
   loft profile is usually a construction sketch, not a body.
 - A notch filled across a curve needs the ARC the notch interrupted,
   not a straight chord, or the loft gets a flat spot.
+
+### 16.8 The return leg, and what people will actually do (2026-11-04)
+
+`import-dxf` closes the loop. A part modified in CAD comes back as
+DXF and becomes a project again, so it can be printed 1:1 as a
+pattern. Verified end to end on the F-86D former: trace -> recipe ->
+SolidCraft -> cut a servo bay and two lightening holes -> DXF -> back
+in as 4 loops at 31.83 x 41.83 mm, the original traced size -> tiled
+to a printable sheet.
+
+LINE, ARC and CIRCLE are read. Splines are already flattened by
+SolidCraft on export (a four-point fit spline came out as 72 LINEs),
+so nothing else is needed. Anything unrecognised is COUNTED AND
+REPORTED, never dropped: a silently ignored entity is a hole missing
+from a cut part.
+
+One bug worth remembering: `sheet.export_dxf` writes a far richer
+file than `sketch.export_dxf` - TABLES, BLOCKS and OBJECTS sections,
+whose own code-2 values broke the first section tracker. It returned
+2 loops instead of 4 and looked plausible. Only counting the features
+that went in caught it.
+
+**Curve detail is a user control, not a constant** (Robert, same
+day). These plans were drawn at this size with a French curve through
+a couple of control points, so sub-tenth-millimetre fidelity
+reproduces the draughtsman's hand rather than the aeroplane, and
+complex splines make needlessly heavy models. `--detail` sets the
+chord deviation; the default is 0.2 mm, which is finer than a laser
+kerf. Measured on a 7 mm hole: 19 points at 0.05 mm, 10 at 0.2 mm,
+6 at 0.5 mm. The same number holds the DEVIATION constant, so it
+behaves the same on a 3 mm hole and a 300 mm curve.
+
+**The use cases to design against** (Robert): adding an electric
+motor, adding ailerons, and simply changing the output size - the
+Sagitta glider being the example he wants to run it on.
+
+Where each stands:
+
+- **Change output size.** Mostly there. `tile --scale` prints at a
+  percentage, and scaling `mm_per_pixel` enlarges a recipe too
+  (measured: 8.85 cm -> 11.06 cm at 125%). Note that thickness
+  deliberately does NOT scale with it, which is correct - balsa comes
+  in fixed sizes, so a 125% model is still cut from 1/16 stock. Worth
+  an explicit flag rather than making the user edit calibration.
+- **Electric motor.** Needs a firewall former and a thrust line, so
+  it is mostly the existing flow plus a new part the plan never had.
+  Nothing blocks it.
+- **Ailerons.** The hard one. It means CUTTING an existing wing
+  panel - splitting a rib set and adding spars - rather than
+  modifying one part in isolation. Nothing in PageWright models the
+  relationship between parts, so this is CAD-side work that only
+  needs the parts to arrive correctly placed. Which is the argument
+  for 16.7 (un-notched lofting profiles) being the next real step.

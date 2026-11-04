@@ -16,6 +16,7 @@ drift.
     pagewright ocr page.png --out page.txt
     pagewright find-parts plan.png --dpi 300 --trace
     pagewright export-recipe parts.tiproj.json --thickness 1/16in
+    pagewright import-dxf former.dxf -o former.tiproj.json
 
 Qt is never imported here. `main.py` dispatches to this module BEFORE it
 touches PySide6, so these commands run on a machine with no display.
@@ -37,7 +38,8 @@ EXIT_ERROR = 1
 # Subcommands this module provides. `main.py` checks membership to
 # decide between CLI and GUI, so a new command only needs adding here.
 COMMANDS = ("info", "tile", "export-svg", "import-svg",
-            "flatten", "ocr", "find-parts", "export-recipe")
+            "flatten", "ocr", "find-parts", "export-recipe",
+            "import-dxf")
 
 
 def _add_scale_flags(parser):
@@ -279,6 +281,31 @@ def build_parser():
     p_rec.add_argument("-q", "--quiet", action="store_true",
                        help="only report errors")
     _add_scale_flags(p_rec)
+
+    p_dxf = subs.add_parser(
+        "import-dxf", help="read a DXF of flat parts back in",
+        description="Read a DXF back into a project: the return leg "
+                    "of the CAD round trip. A part modified in CAD "
+                    "comes back as DXF and can be printed 1:1 as a "
+                    "pattern again. LINE, ARC and CIRCLE are read; "
+                    "anything else is reported, never dropped "
+                    "silently. The largest closed loop is the "
+                    "outline and the rest are holes.")
+    p_dxf.add_argument("file", metavar="FILE", help="the .dxf to read")
+    p_dxf.add_argument("-o", "--out", metavar="FILE",
+                       help="save as this .tiproj.json project")
+    p_dxf.add_argument("--name", metavar="NAME",
+                       help="name for the part (default: the filename)")
+    p_dxf.add_argument("--detail", type=float, metavar="MM",
+                       help="how far a flattened curve may deviate "
+                            "(default 0.2 mm, finer than a laser "
+                            "kerf; these plans were drawn with a "
+                            "French curve, so tighter rarely helps)")
+    p_dxf.add_argument("--px-per-mm", type=float, default=10.0,
+                       metavar="N",
+                       help="internal pixel resolution (default 10)")
+    p_dxf.add_argument("-q", "--quiet", action="store_true",
+                       help="only report errors")
     return parser
 
 
@@ -518,11 +545,31 @@ def _cmd_export_recipe(args, out, err):
     return EXIT_OK
 
 
+def _cmd_import_dxf(args, out, err):
+    result = jobs.import_dxf(
+        args.file, out_path=args.out, name=args.name,
+        px_per_mm=args.px_per_mm, detail_mm=args.detail,
+        progress=_progress_to(err, args.quiet))
+    for kind, n in sorted(result.info.get("skipped", {}).items()):
+        err.write("  ignored %d %s entity(s)\n" % (n, kind))
+    if result.info.get("open"):
+        err.write("  %d open chain(s): the outline may have a gap\n"
+                  % result.info["open"])
+    if not args.quiet:
+        out.write("%d loop(s), %d points, %.1f x %.1f mm\n"
+                  % (result.loops, result.points, result.size_mm[0],
+                     result.size_mm[1]))
+        if result.out_path:
+            out.write("written to %s\n" % result.out_path)
+    return EXIT_OK
+
+
 _HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
              "export-svg": _cmd_export_svg, "import-svg": _cmd_import_svg,
              "flatten": _cmd_flatten, "ocr": _cmd_ocr,
              "find-parts": _cmd_find_parts,
-             "export-recipe": _cmd_export_recipe}
+             "export-recipe": _cmd_export_recipe,
+             "import-dxf": _cmd_import_dxf}
 
 
 def _hint(exc):

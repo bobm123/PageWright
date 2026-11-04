@@ -879,3 +879,85 @@ def export_recipe(path, out_path=None, design=None, plane=None,
     if progress:
         progress("wrote %d part(s)" % parts)
     return RecipeResult(path, written, parts, skipped)
+
+
+# ----- import_dxf ---------------------------------------------------------
+
+class DxfResult(object):
+    def __init__(self, path, out_path, loops, points, size_mm, info):
+        self.path = path
+        self.out_path = out_path
+        self.loops = loops
+        self.points = points
+        self.size_mm = size_mm
+        self.info = dict(info)
+
+
+def import_dxf(path, out_path=None, name=None, px_per_mm=10.0,
+               detail_mm=None, progress=None):
+    """Read a DXF of flat parts back in as a project.
+
+    The return leg: a part modified in CAD comes back as DXF, and this
+    turns it into a job the tiler can print 1:1 so the change can be
+    cut by hand as well as by machine.
+
+    The largest closed loop becomes the outline and the rest become
+    holes, which is what a flat cut part looks like.
+
+    `detail_mm` is how far a flattened curve may deviate. The default
+    (0.2 mm) suits a plan drawn with a French curve at this size and
+    is finer than a laser kerf; tighten it only when the part really
+    is that precise.
+    """
+    from . import dxf_import as dxf
+    from ..model import Contour, TracedObject
+    if not path or not os.path.isfile(path):
+        raise JobError("file not found: %s" % (path,))
+    if px_per_mm <= 0.0:
+        raise JobError("--px-per-mm must be positive")
+    try:
+        with open(path, encoding="utf-8", errors="replace") as fh:
+            text = fh.read()
+    except (IOError, OSError) as exc:
+        raise JobError("cannot read %s: %s" % (path, exc))
+    if progress:
+        progress("reading %s" % os.path.basename(path))
+    try:
+        loops, info = dxf.read_dxf(text, mm_per_pixel=1.0 / px_per_mm,
+                                   sagitta_mm=detail_mm)
+    except dxf.DxfImportError as exc:
+        raise JobError(str(exc))
+
+    xs = [p[0] for loop in loops for p in loop]
+    ys = [p[1] for loop in loops for p in loop]
+    minx, miny = min(xs), min(ys)
+    project = Project()
+    project.calibration.mm_per_pixel = 1.0 / px_per_mm
+    project.source_image_path = path
+
+    obj = TracedObject(name=name or os.path.splitext(
+        os.path.basename(path))[0])
+    for i, loop in enumerate(loops):
+        # y up in CAD, down in image space; shift so the part starts at 0
+        pts = [(x - minx, (max(ys) - y)) for x, y in loop]
+        obj.contours.append(Contour(points=pts, closed=True,
+                                    role="outer" if i == 0 else "hole"))
+    project.objects = [obj]
+    project.pixel_width = max(1, int(round(max(xs) - minx)))
+    project.pixel_height = max(1, int(round(max(ys) - miny)))
+
+    size_mm = (project.pixel_width / px_per_mm,
+               project.pixel_height / px_per_mm)
+    if out_path:
+        parent = os.path.dirname(out_path)
+        try:
+            if parent and not os.path.isdir(parent):
+                os.makedirs(parent)
+            project_io.save_project(project, out_path)
+        except (IOError, OSError, project_io.ProjectIOError) as exc:
+            raise JobError("cannot write %s: %s" % (out_path, exc))
+        if progress:
+            progress("wrote %s" % os.path.basename(out_path))
+    return DxfResult(path, out_path, len(loops),
+                     sum(len(c.points) for c in obj.contours),
+                     size_mm, info)

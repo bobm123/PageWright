@@ -445,3 +445,56 @@ def test_export_recipe_without_a_thickness_fails_and_says_so(tmp_path):
                             "-o", str(tmp_path / "r3" / "recipe.json")])
     assert code == cli.EXIT_ERROR
     assert "thickness" in err
+
+
+# ----- import-dxf --------------------------------------------------------
+
+def _dxf_file(tmp_path, name="part.dxf"):
+    """A 40x30 mm square with a 5 mm hole, as SolidCraft writes them."""
+    body = ""
+    for x0, y0, x1, y1 in ((0, 0, 40, 0), (40, 0, 40, 30),
+                           (40, 30, 0, 30), (0, 30, 0, 0)):
+        body += ("0\nLINE\n8\n0\n10\n%f\n20\n%f\n11\n%f\n21\n%f\n"
+                 % (x0, y0, x1, y1))
+    body += "0\nCIRCLE\n8\n0\n10\n20.0\n20\n15.0\n40\n5.0\n"
+    text = ("0\nSECTION\n2\nHEADER\n9\n$INSUNITS\n70\n4\n0\nENDSEC\n"
+            "0\nSECTION\n2\nENTITIES\n" + body + "0\nENDSEC\n0\nEOF\n")
+    path = tmp_path / name
+    path.write_text(text, encoding="utf-8")
+    return str(path)
+
+
+def test_import_dxf_command(tmp_path):
+    out = str(tmp_path / "back.tiproj.json")
+    code, stdout, _err = _run(["import-dxf", _dxf_file(tmp_path),
+                               "-o", out])
+    assert code == cli.EXIT_OK
+    assert "2 loop(s)" in stdout and "40.0 x 30.0 mm" in stdout
+    assert os.path.isfile(out)
+
+
+def test_a_reimported_part_tiles(tmp_path):
+    """The point of the return leg: a part modified in CAD prints as a
+    1:1 pattern again."""
+    proj = str(tmp_path / "back.tiproj.json")
+    assert _run(["import-dxf", _dxf_file(tmp_path), "-o", proj,
+                 "-q"])[0] == cli.EXIT_OK
+    tiles = str(tmp_path / "t")
+    assert _run(["tile", proj, "-o", tiles, "-q"])[0] == cli.EXIT_OK
+    assert os.listdir(tiles)
+
+
+def test_detail_controls_how_many_points_a_curve_costs(tmp_path):
+    """These plans were drawn with a French curve, so the user picks
+    how much fidelity is worth paying for."""
+    import json
+    counts = {}
+    for detail in ("0.05", "0.5"):
+        out = str(tmp_path / ("d%s.tiproj.json" % detail))
+        assert _run(["import-dxf", _dxf_file(tmp_path), "-o", out,
+                     "--detail", detail, "-q"])[0] == cli.EXIT_OK
+        with open(out, encoding="utf-8") as fh:
+            doc = json.load(fh)
+        hole = doc["objects"][0]["contours"][1]
+        counts[detail] = len(hole["points"])
+    assert counts["0.05"] > counts["0.5"]

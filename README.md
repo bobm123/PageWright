@@ -73,7 +73,7 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 
 ## Command line (headless)
 
-Eight subcommands run without a display — they never import Qt, so they work
+Nine subcommands run without a display — they never import Qt, so they work
 over SSH, in a container, or in a shell loop. The GUI calls the same job
 layer for the same work, so there is one implementation behind both:
 
@@ -120,6 +120,7 @@ pagewright export-svg pattern.tiproj.json --inkscape
 pagewright flatten scans/*.jpg --out ./flat
 pagewright ocr page.png --out page.txt
 pagewright export-recipe parts.tiproj.json --thickness 1/16in
+pagewright import-dxf former.dxf -o former.tiproj.json
 ```
 
 `export-recipe` writes the traced parts as a MyArchive `recipe.json`:
