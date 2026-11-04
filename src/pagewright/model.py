@@ -83,14 +83,60 @@ class Style:
         self.fill = fill
 
 
+class Build:
+    """How a traced outline becomes a solid part.
+
+    A plan sheet is nested for material efficiency, not laid out like
+    an assembly: on the F-86D sheet the ribs sit in a row and the
+    stabilizer is turned 90 degrees. Where a part BELONGS is therefore
+    not recoverable from where it was drawn, so it is recorded here
+    rather than inferred.
+
+    `thickness_mm` is the sheet stock the part is cut from.
+    `plane` is the plane it stands on in the assembly: "XY", "YZ" or
+    "XZ" (a fuselage former is YZ, a rib is XZ, sheet in the plan
+    view is XY). `station_mm` is how far along the normal of that
+    plane it sits, and `rotate_deg` turns it in its own plane.
+
+    All fields are optional: an outline with no Build is still a
+    perfectly good traced polygon for printing, which is what most
+    jobs are.
+    """
+
+    PLANES = ("XY", "YZ", "XZ")
+
+    def __init__(self, thickness_mm=None, plane=None, station_mm=None,
+                 rotate_deg=None):
+        self.thickness_mm = thickness_mm
+        self.plane = plane
+        self.station_mm = station_mm
+        self.rotate_deg = rotate_deg
+
+    def is_empty(self):
+        """True when nothing has been set, so it need not be saved."""
+        return (self.thickness_mm is None and self.plane is None
+                and self.station_mm is None and self.rotate_deg is None)
+
+    def copy(self):
+        return Build(self.thickness_mm, self.plane, self.station_mm,
+                     self.rotate_deg)
+
+    def __repr__(self):
+        return "Build(%r mm, %s, station=%r, rot=%r)" % (
+            self.thickness_mm, self.plane, self.station_mm,
+            self.rotate_deg)
+
+
 class TracedObject:
     """A single traced object: one outer contour plus zero or more holes, or
     several disjoint loops grouped under one label."""
 
-    def __init__(self, name="object", contours=None, style=None):
+    def __init__(self, name="object", contours=None, style=None,
+                 build=None):
         self.name = name
         self.contours = list(contours) if contours else []
         self.style = style if style is not None else Style()
+        self.build = build if build is not None else Build()
 
 
 class Calibration:

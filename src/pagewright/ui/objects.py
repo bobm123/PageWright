@@ -8,7 +8,7 @@ An optional `edit_sink` is forwarded to every EditableContour so interactive
 vertex edits can be recorded on the application's undo stack (Phase 6).
 """
 
-from ..model import Contour, Style, TracedObject
+from ..model import Build, Contour, Style, TracedObject
 from .editable import EditableContour
 
 
@@ -20,6 +20,7 @@ class ObjectLayer:
         self.name = name
         self.contours = []          # list[EditableContour]
         self.style = Style()
+        self.build = Build()        # CAD intent; survives _sync_model
         self.visible = True
         self._edit_sink = edit_sink
 
@@ -85,7 +86,8 @@ class ObjectLayer:
 
     def to_model(self):
         """Build a model.TracedObject snapshot of the current vertices."""
-        obj = TracedObject(name=self.name, style=self.style)
+        obj = TracedObject(name=self.name, style=self.style,
+                           build=self.build.copy())
         for c in self.contours:
             obj.contours.append(
                 Contour(points=c.points(), closed=True, role=c.role))

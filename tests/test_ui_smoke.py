@@ -492,3 +492,42 @@ def test_open_svg_agrees_with_the_cli_on_the_sheet_size(tmp_path):
         headless.real_size_mm()[0], abs=1.0)
     assert w.project.real_size_mm()[1] == pytest.approx(
         headless.real_size_mm()[1], abs=1.0)
+
+# ----- Build survives the canvas round trip ------------------------------
+
+def test_build_survives_sync_model(tmp_path):
+    """_sync_model rebuilds project.objects FROM the canvas layers, so a
+    Build set on the model alone would be silently wiped on the next
+    export. The layer has to carry it."""
+    from pagewright.model import Build, Contour, TracedObject
+    w = _window_with_photo(tmp_path)
+    w.project.objects = [TracedObject(
+        name="Former 3",
+        contours=[Contour(points=[(50, 50), (250, 50), (250, 200)])],
+        build=Build(thickness_mm=1.6, plane="YZ", station_mm=120.0))]
+    w._load_layers_from_project()
+
+    assert w._objects[0].build.plane == "YZ"      # reached the layer
+    w._sync_model()                               # and back again
+    b = w.project.objects[0].build
+    assert (b.thickness_mm, b.plane, b.station_mm) == (1.6, "YZ", 120.0)
+
+
+def test_build_survives_save_and_reload(tmp_path):
+    """The whole point: a designer sets thickness and station, saves,
+    and finds them there tomorrow."""
+    from pagewright.core import project_io
+    from pagewright.model import Build, Contour, TracedObject
+    w = _window_with_photo(tmp_path)
+    w.project.objects = [TracedObject(
+        name="Former 3",
+        contours=[Contour(points=[(50, 50), (250, 50), (250, 200)])],
+        build=Build(thickness_mm=1.6, plane="YZ", station_mm=120.0))]
+    w._load_layers_from_project()
+    w._sync_model()
+
+    out = str(tmp_path / "job.tiproj.json")
+    project_io.save_project(w.project, out)
+    reloaded = project_io.load_project(out)
+    b = reloaded.objects[0].build
+    assert (b.thickness_mm, b.plane, b.station_mm) == (1.6, "YZ", 120.0)

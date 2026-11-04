@@ -9,8 +9,8 @@ import pytest
 sys.path.insert(0, os.path.join(os.path.dirname(__file__), "..", "src"))
 
 from pagewright.core import project_io as pio  # noqa: E402
-from pagewright.model import (Contour, PageEntry, Project, Style,  # noqa: E402
-                              TracedObject)
+from pagewright.model import (Build, Contour, PageEntry, Project,  # noqa: E402
+                              Style, TracedObject)
 
 
 def _sample_project():
@@ -178,3 +178,77 @@ def test_mark_style_round_trip_and_absent():
     d = pio.project_to_dict(q)
     assert "marks" not in d
     assert pio.project_from_dict(d).mark_color is None
+
+# ----- Build: how an outline becomes a solid part ------------------------
+
+def test_build_round_trips():
+    p = _sample_project()
+    p.objects[0].build = Build(thickness_mm=1.6, plane="YZ",
+                               station_mm=120.0, rotate_deg=90.0)
+    q = pio.project_from_dict(pio.project_to_dict(p))
+    b = q.objects[0].build
+    assert (b.thickness_mm, b.plane) == (1.6, "YZ")
+    assert (b.station_mm, b.rotate_deg) == (120.0, 90.0)
+
+
+def test_an_unset_build_is_not_written():
+    """A project with no CAD intent must serialise exactly as it did
+    before Build existed, so old files stay byte-identical."""
+    d = pio.project_to_dict(_sample_project())
+    assert all("build" not in o for o in d["objects"])
+
+
+def test_a_file_with_no_build_loads_with_an_empty_one():
+    d = pio.project_to_dict(_sample_project())
+    q = pio.project_from_dict(d)
+    assert q.objects[0].build.is_empty()
+
+
+def test_partial_build_keeps_only_what_was_set():
+    """Thickness is usually sheet-wide; placement comes later. A part
+    with only a thickness must not gain a default plane."""
+    p = _sample_project()
+    p.objects[0].build = Build(thickness_mm=1.6)
+    d = pio.project_to_dict(p)
+    assert d["objects"][0]["build"] == {"thickness_mm": 1.6}
+    assert pio.project_from_dict(d).objects[0].build.plane is None
+
+
+def test_an_unknown_plane_is_refused():
+    """Caught on load, not at CAD-export time: a typo here cuts a part
+    facing the wrong way."""
+    d = pio.project_to_dict(_sample_project())
+    d["objects"][0]["build"] = {"plane": "QQ"}
+    with pytest.raises(pio.ProjectIOError) as exc:
+        pio.project_from_dict(d)
+    assert "QQ" in str(exc.value)
+
+
+def test_a_lowercase_plane_is_accepted():
+    d = pio.project_to_dict(_sample_project())
+    d["objects"][0]["build"] = {"plane": "yz"}
+    assert pio.project_from_dict(d).objects[0].build.plane == "YZ"
+
+
+@pytest.mark.parametrize("bad", [0, -1.6])
+def test_a_non_positive_thickness_is_refused(bad):
+    d = pio.project_to_dict(_sample_project())
+    d["objects"][0]["build"] = {"thickness_mm": bad}
+    with pytest.raises(pio.ProjectIOError):
+        pio.project_from_dict(d)
+
+
+def test_a_non_numeric_thickness_is_refused():
+    d = pio.project_to_dict(_sample_project())
+    d["objects"][0]["build"] = {"thickness_mm": "1/16 in"}
+    with pytest.raises(pio.ProjectIOError) as exc:
+        pio.project_from_dict(d)
+    assert "thickness_mm" in str(exc.value)
+
+
+def test_a_negative_station_is_fine():
+    """Stations run both ways from the origin; only thickness has to
+    be positive."""
+    d = pio.project_to_dict(_sample_project())
+    d["objects"][0]["build"] = {"station_mm": -40.0}
+    assert pio.project_from_dict(d).objects[0].build.station_mm == -40.0

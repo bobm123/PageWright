@@ -989,6 +989,7 @@ class MainWindow(QMainWindow):
         layer = ObjectLayer(self.canvas.scene_obj(), model_obj.name,
                             edit_sink=self)
         layer.style = model_obj.style
+        layer.build = getattr(model_obj, "build", layer.build).copy()
         for c in model_obj.contours:
             layer.add_contour(c.points, role=c.role, closed=c.closed)
         return layer

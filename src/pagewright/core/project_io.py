@@ -12,8 +12,8 @@ stored, and the UI reloads the image from that path when opening a project.
 
 import json
 
-from ..model import (Calibration, Contour, PageEntry, Project, Style,
-                     TracedObject, default_tiling)
+from ..model import (Build, Calibration, Contour, PageEntry, Project,
+                     Style, TracedObject, default_tiling)
 
 FORMAT_VERSION = 1
 
@@ -41,12 +41,36 @@ def _contour_to_dict(contour):
     }
 
 
+def _build_to_dict(build):
+    """Only the fields that were set, and nothing at all when none were.
+
+    Keeps a project that has no CAD intent serialising exactly as it did
+    before Build existed.
+    """
+    if build is None or build.is_empty():
+        return None
+    d = {}
+    if build.thickness_mm is not None:
+        d["thickness_mm"] = float(build.thickness_mm)
+    if build.plane is not None:
+        d["plane"] = build.plane
+    if build.station_mm is not None:
+        d["station_mm"] = float(build.station_mm)
+    if build.rotate_deg is not None:
+        d["rotate_deg"] = float(build.rotate_deg)
+    return d
+
+
 def _object_to_dict(obj):
-    return {
+    d = {
         "name": obj.name,
         "style": _style_to_dict(obj.style),
         "contours": [_contour_to_dict(c) for c in obj.contours],
     }
+    build = _build_to_dict(getattr(obj, "build", None))
+    if build:
+        d["build"] = build
+    return d
 
 
 def natural_key(name):
@@ -117,9 +141,47 @@ def _contour_from_dict(d):
     )
 
 
+def _build_from_dict(d):
+    """Read a Build, rejecting values that would make a wrong part.
+
+    Validated on load rather than at CAD-export time: a bad plane or a
+    negative thickness is a typo worth catching while the file is still
+    on screen, not after it has been cut.
+    """
+    if not d:
+        return Build()
+    plane = d.get("plane")
+    if plane is not None:
+        plane = str(plane).upper()
+        if plane not in Build.PLANES:
+            raise ProjectIOError(
+                "unknown build plane %r (expected one of %s)"
+                % (d.get("plane"), ", ".join(Build.PLANES)))
+
+    def _num(key, positive=False):
+        v = d.get(key)
+        if v is None:
+            return None
+        try:
+            v = float(v)
+        except (TypeError, ValueError):
+            raise ProjectIOError("build %s is not a number: %r"
+                                 % (key, d.get(key)))
+        if positive and v <= 0.0:
+            raise ProjectIOError("build %s must be positive: %r"
+                                 % (key, v))
+        return v
+
+    return Build(thickness_mm=_num("thickness_mm", positive=True),
+                 plane=plane,
+                 station_mm=_num("station_mm"),
+                 rotate_deg=_num("rotate_deg"))
+
+
 def _object_from_dict(d):
     obj = TracedObject(name=d.get("name", "object"),
-                       style=_style_from_dict(d.get("style")))
+                       style=_style_from_dict(d.get("style")),
+                       build=_build_from_dict(d.get("build")))
     obj.contours = [_contour_from_dict(c) for c in d.get("contours", [])]
     return obj
 
