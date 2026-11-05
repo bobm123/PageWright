@@ -8,6 +8,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
+from ..core import naming
 from ..core.calibration import MM_PER_UNIT, parse_length_mm
 from ..model import Sheet
 
@@ -409,3 +410,126 @@ class SheetStockDialog(QDialog):
         self._sheets = sheets
         self._renames = renames
         self.accept()
+
+
+class NamingSchemeDialog(QDialog):
+    """Say what THIS plan's part numbers mean.
+
+    Plans do not agree. The usual convention is F-3 = third fuselage
+    former, R-2 = second wing rib. But a sheet may number its formers
+    1..9 and spend F1..F6 on longerons, with the higher F numbers on
+    cockpit details - where reading F as "former" would stand a
+    lengthwise member on end and build a cockpit detail as structure.
+
+    Two columns: the prefix as typed on the plan (blank means a bare
+    number like "6"), and the plane it implies. "nothing" is a real
+    answer, not an empty one - it is how a sheet declares that its F
+    numbers are NOT formers, and it is why a part must then be placed
+    by hand rather than guessed at.
+    """
+
+    #: the planes a prefix may imply, as (label, stored value)
+    CHOICES = (
+        ("nothing (place by hand)", ""),
+        ("YZ - across the fuselage (former)", "YZ"),
+        ("XZ - across the wing (rib)", "XZ"),
+        ("XY - flat on the sheet", "XY"),
+    )
+
+    def __init__(self, name_planes, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Part Numbering")
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "What this plan's part numbers mean. Leave the prefix blank"
+            + chr(10) +
+            "for bare numbers (\"6\"). Only used where a part has no"
+            + chr(10) + "plane of its own."))
+
+        self._table = QTableWidget(0, 2, self)
+        self._table.setHorizontalHeaderLabels(["Prefix", "Implies"])
+        self._table.horizontalHeader().setSectionResizeMode(
+            1, QHeaderView.Stretch)
+        self._table.verticalHeader().setVisible(False)
+        for prefix, plane in sorted((name_planes or {}).items()):
+            self._append(prefix, plane or "")
+        layout.addWidget(self._table, 1)
+
+        row = QHBoxLayout()
+        btn_add = QPushButton("Add", self)
+        btn_add.clicked.connect(lambda: self._append("", ""))
+        btn_del = QPushButton("Remove", self)
+        btn_del.clicked.connect(self._remove_current)
+        btn_usual = QPushButton("Usual convention", self)
+        btn_usual.setToolTip(
+            "F = former (YZ), R = rib (XZ) - what most plans use.")
+        btn_usual.clicked.connect(self._load_default)
+        row.addWidget(btn_add)
+        row.addWidget(btn_del)
+        row.addWidget(btn_usual)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons.accepted.connect(self._try_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._result = dict(name_planes or {})
+
+    def _append(self, prefix, plane):
+        r = self._table.rowCount()
+        self._table.insertRow(r)
+        self._table.setItem(r, 0, QTableWidgetItem(prefix))
+        combo = QComboBox(self._table)
+        for label, value in self.CHOICES:
+            combo.addItem(label, value)
+        wanted = (plane or "").upper()
+        for i in range(combo.count()):
+            if combo.itemData(i) == wanted:
+                combo.setCurrentIndex(i)
+                break
+        self._table.setCellWidget(r, 1, combo)
+
+    def _remove_current(self):
+        r = self._table.currentRow()
+        if r >= 0:
+            self._table.removeRow(r)
+
+    def _load_default(self):
+        while self._table.rowCount():
+            self._table.removeRow(0)
+        for prefix, plane in sorted(naming.DEFAULT_PREFIX_PLANES.items()):
+            self._append(prefix, plane)
+
+    def _prefix(self, row):
+        item = self._table.item(row, 0)
+        return ("" if item is None else item.text()).strip().lower()
+
+    def _try_accept(self):
+        out = {}
+        for r in range(self._table.rowCount()):
+            prefix = self._prefix(r)
+            combo = self._table.cellWidget(r, 1)
+            plane = "" if combo is None else combo.currentData()
+            if prefix in out:
+                # The prefix is the lookup key, so a duplicate would
+                # make the answer depend on row order.
+                QMessageBox.warning(
+                    self, "Part Numbering",
+                    "The prefix %r appears twice. Prefixes must differ."
+                    % (prefix,))
+                return
+            out[prefix] = plane or None
+        self._result = out
+        self.accept()
+
+    def name_planes(self):
+        """The convention as a {prefix: plane or None} dict.
+
+        Empty means "no convention recorded": the caller stores None and
+        the usual convention applies again.
+        """
+        return dict(self._result)

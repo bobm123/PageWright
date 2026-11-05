@@ -216,6 +216,15 @@ class Project:
         # name). Between the part's own thickness and the sheet-wide
         # default: most parts are 1/16, a couple come off a 1/8 offcut.
         self.sheets = []   # [Sheet]
+        # What THIS plan's part numbers mean: {prefix: plane name},
+        # with "" for bare numbers and a None value for "this prefix
+        # says nothing". Sheets disagree - one numbers formers
+        # F-1..F-9, the next numbers them 1..9 and spends F1..F6 on
+        # longerons, where reading F as "former" would stand a
+        # lengthwise member on end. None = use the usual convention.
+        # A plain dict, so the model stays dependency-free; the
+        # behaviour lives in core/naming.py.
+        self.name_planes = None
 
     def sheet_named(self, name):
         """The Sheet called `name`, or None."""

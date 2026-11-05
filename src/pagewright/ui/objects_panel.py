@@ -41,6 +41,7 @@ class ObjectsPanel(QWidget):
     newRequested = Signal()
     deleteRequested = Signal()
     renameRequested = Signal()
+    sortRequested = Signal()                    # order the list by name
     renameCommitted = Signal(object, str)      # (ObjectLayer, new name)
     rowsDirty = Signal()                       # redraw the rows as they are
     rowChanged = Signal(int)
@@ -79,9 +80,17 @@ class ObjectsPanel(QWidget):
         btn_del.clicked.connect(lambda: self.deleteRequested.emit())
         btn_ren = QPushButton("Rename", self)
         btn_ren.clicked.connect(lambda: self.renameRequested.emit())
+        # Sorting a two-dozen-part list is how you find the part you
+        # named twice - and the gaps where one is missing.
+        btn_sort = QPushButton("Sort", self)
+        btn_sort.setToolTip(
+            "Order the list by name, numerically: 2 before 10."
+            + chr(10) + "Duplicate names end up next to each other.")
+        btn_sort.clicked.connect(lambda: self.sortRequested.emit())
         row.addWidget(btn_new)
         row.addWidget(btn_del)
         row.addWidget(btn_ren)
+        row.addWidget(btn_sort)
         layout.addLayout(row)
 
         margin_row = QHBoxLayout()

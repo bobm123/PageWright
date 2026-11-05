@@ -230,3 +230,115 @@ def test_renaming_a_sheet_carries_its_parts_across(tmp_path):
             layer.build.sheet = new
     w._sync_model()
     assert w.project.part_thickness_mm(w.project.objects[0]) == 3.175
+
+
+# ----- sorting the list ----------------------------------------------------
+
+def _named(w, names):
+    for n in names:
+        _trace_into(w, TRI)
+        w._objects[-1].name = n
+    return w
+
+
+def test_sorting_orders_the_parts_numerically(tmp_path):
+    w = _named(_window_with_photo(tmp_path), ["F10", "6", "F2", "1", "10"])
+    w.sort_objects()
+    assert [lyr.name for lyr in w._objects] == [
+        "1", "6", "10", "F2", "F10"]
+
+
+def test_sorting_keeps_the_same_part_active(tmp_path):
+    # Rows are indices, so a sort that moved the selection would leave
+    # the placement fields editing a DIFFERENT part than the one shown.
+    w = _named(_window_with_photo(tmp_path), ["F10", "6", "F2", "1"])
+    w._active_index = 0                      # F10, which sorts last
+    active = w._objects[0]
+    w.sort_objects()
+    assert w._objects[w._active_index] is active
+    assert w._active_index == 3
+
+
+def test_sorting_is_undoable(tmp_path):
+    before = ["F10", "6", "F2", "1"]
+    w = _named(_window_with_photo(tmp_path), before)
+    w.sort_objects()
+    assert [lyr.name for lyr in w._objects] != before
+    w.undo_stack.undo()
+    assert [lyr.name for lyr in w._objects] == before
+
+
+def test_sorting_an_ordered_list_records_no_undo(tmp_path):
+    w = _named(_window_with_photo(tmp_path), ["1", "2", "3"])
+    depth = len(w.undo_stack._done)
+    w.sort_objects()
+    assert [lyr.name for lyr in w._objects] == ["1", "2", "3"]
+    # No change, so no undo step - otherwise Ctrl+Z would appear to do
+    # nothing and the user would press it again, losing a real edit.
+    assert len(w.undo_stack._done) == depth
+
+
+def test_sorting_reaches_the_saved_project(tmp_path):
+    # The order is worth persisting: it is how the list reads next time.
+    from pagewright.core import project_io
+    w = _named(_window_with_photo(tmp_path), ["F2", "1", "10"])
+    w.sort_objects()
+    w._sync_model()
+    path = str(tmp_path / "p.tiproj.json")
+    project_io.save_project(w.project, path)
+    assert [o.name for o in project_io.load_project(path).objects] == [
+        "1", "10", "F2"]
+
+
+def test_duplicate_names_are_reported(tmp_path):
+    w = _named(_window_with_photo(tmp_path), ["6", "F1", "6", "3"])
+    assert w._duplicate_names() == ["6"]
+
+
+def test_no_duplicates_reports_nothing(tmp_path):
+    w = _named(_window_with_photo(tmp_path), ["6", "F1", "3"])
+    assert w._duplicate_names() == []
+
+
+# ----- the numbering convention in the GUI ---------------------------------
+
+def test_the_numbering_dialog_round_trips_a_convention(tmp_path):
+    from pagewright.ui.dialogs import NamingSchemeDialog
+    _window_with_photo(tmp_path)                 # for the QApplication
+    scheme = {"": "YZ", "f": None, "t": None}
+    dlg = NamingSchemeDialog(scheme)
+    dlg._try_accept()
+    assert dlg.name_planes() == scheme
+
+
+def test_the_dialog_keeps_a_none_meaning_nothing(tmp_path):
+    # The None is the whole point: it is how a sheet says "F is not a
+    # former here". Turning it into a plane would stand longerons up.
+    from pagewright.ui.dialogs import NamingSchemeDialog
+    _window_with_photo(tmp_path)
+    dlg = NamingSchemeDialog({"f": None})
+    dlg._try_accept()
+    assert dlg.name_planes()["f"] is None
+
+
+def test_the_dialog_can_reload_the_usual_convention(tmp_path):
+    from pagewright.ui.dialogs import NamingSchemeDialog
+    _window_with_photo(tmp_path)
+    dlg = NamingSchemeDialog({"": "YZ"})
+    dlg._load_default()
+    dlg._try_accept()
+    out = dlg.name_planes()
+    assert out["f"] == "YZ" and out["r"] == "XZ"
+
+
+def test_an_empty_convention_restores_the_usual_one(tmp_path):
+    # Stored as None, not {}: an empty dict would claim "no name
+    # implies anything", which is a different statement.
+    from pagewright.ui.dialogs import NamingSchemeDialog
+    w = _window_with_photo(tmp_path)
+    w.project.name_planes = {"": "YZ"}
+    dlg = NamingSchemeDialog(w.project.name_planes)
+    while dlg._table.rowCount():
+        dlg._table.removeRow(0)
+    dlg._try_accept()
+    assert dlg.name_planes() == {}

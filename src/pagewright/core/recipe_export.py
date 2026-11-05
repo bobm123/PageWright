@@ -28,6 +28,8 @@ import json
 import math
 import os
 
+from . import naming
+
 ARCHIVER = {"name": "PageWright", "version": "1.3.0",
             "synthetic": "traced from a scanned plan by PageWright, "
                          "not exported from Fusion"}
@@ -53,39 +55,23 @@ DEFAULT_PLANE = "XY"
 # hand while annotating, so the convention is free information about
 # which way a part stands - a former across the fuselage (YZ), a rib
 # across the wing (XZ). Only used where no plane was set explicitly.
-NAME_PLANES = (
-    (("f", "former", "frame", "bulkhead", "fus"), "YZ"),
-    (("r", "rib", "w", "wing"), "XZ"),
-)
+#
+# Which letters mean what is NOT universal: a sheet that numbers its
+# formers 1..9 may spend F1..F6 on longerons, where reading F as
+# "former" would stand a lengthwise member on end. That is why the
+# mapping lives on the project as a NamingScheme and this is only the
+# default. See core/naming.py.
 
 
-def plane_from_name(name):
+def plane_from_name(name, scheme=None):
     """Guess a plane from a part name like "F-3" or "R2", or None.
 
     Deliberately narrow: it wants a letter (or a word) followed by a
     number, so "Rudder" and "Fin" do not read as a rib and a former.
+    `scheme` is a naming.NamingScheme; the default convention is used
+    when none is given.
     """
-    text = (name or "").strip().lower()
-    if not text:
-        return None
-    head = ""
-    for ch in text:
-        if ch.isdigit():
-            break
-        if ch.isalpha():
-            head += ch
-        elif ch in " -_.":
-            if head:
-                break
-        else:
-            return None
-    tail = text[len(head):].lstrip(" -_.")
-    if not head or not tail or not tail[0].isdigit():
-        return None
-    for prefixes, plane in NAME_PLANES:
-        if head in prefixes:
-            return plane
-    return None
+    return (scheme or naming.DEFAULT_SCHEME).plane_for(name)
 
 
 class RecipeError(Exception):
@@ -274,6 +260,15 @@ def _safe(name, used):
     characters, since names are used as reference keys."""
     base = "".join(ch if (ch.isalnum() or ch in "_-") else "_"
                    for ch in (name or "Part")).strip("_") or "Part"
+    # An ALL-DIGITS name is read as a timeline index, not a name, so
+    # `sketch.inspect {"sketch": "2"}` fails with "`2` is not a sketch"
+    # once a body exists. Plans really do number parts 1..10 (this
+    # sheet numbers its formers that way), so the name is kept and
+    # given a prefix rather than renumbered - the part keeps the
+    # identity the plan gave it. Verified against SolidCraft 0.30.1:
+    # "02" fails too, "2_" and "F2" do not.
+    if base.isdigit():
+        base = "p" + base
     out, n = base, 2
     while out in used:
         out, n = "%s_%d" % (base, n), n + 1
@@ -303,6 +298,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE,
     if not project.objects:
         raise RecipeError("nothing to export: no traced objects")
 
+    scheme = naming.scheme_for(project)
     timeline, skipped, used = [], [], set()
     groups = {}
     for obj in project.objects:
@@ -319,7 +315,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE,
 
         build = getattr(obj, "build", None)
         plane = (getattr(build, "plane", None)
-                 or plane_from_name(obj.name)
+                 or plane_from_name(obj.name, scheme)
                  or default_plane).upper()
         if plane not in PLANE_AXES:
             skipped.append((obj.name, "unknown plane %r" % (plane,)))

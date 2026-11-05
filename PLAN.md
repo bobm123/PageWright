@@ -1028,3 +1028,60 @@ is real work, and the identity-key design (tokens as identity only,
 AREA + CENTROID profile fallback) needs re-checking against how that
 schema names profiles. Worth asking the SolidCraft team rather than
 inferring.
+
+### 16.14  The plan's own numbering convention, and digit-only names
+
+Two defects, both found by building the F-86 sheet rather than by
+reading code. Both are about the same thing: a hand-typed part name is
+data from the plan, and the code had been treating its own guess about
+that name as fact.
+
+**The convention is per plan, not universal.** `plane_from_name` read
+`F3` as the third fuselage former, which is what most plans mean. This
+sheet means something else: it numbers its formers `1`..`10` and spends
+`F1`..`F6` on longerons, with the higher F numbers on cockpit details.
+Under the old rule the export put 5 parts on YZ - and they were exactly
+the wrong 5, every one of them a lengthwise member stood on end, while
+all ten real formers stayed flat. Measured on the real file:
+
+| convention | parts on YZ | which |
+|---|---|---|
+| the usual one | 5 | `F1 F2 F3 F4 F6` - longerons, wrong |
+| this sheet's | 10 | `1`..`10` - the formers, right |
+
+So the mapping moved onto the project (`Project.name_planes`, a plain
+`{prefix: plane}` dict so the model stays dependency-free) and the
+behaviour into `core/naming.py`. A `None` value is a real answer and
+the important one: it is how a sheet says "F is NOT a former here", and
+it is why those parts then wait to be placed by hand instead of being
+guessed at. `Tools > Part Numbering...` edits it; absent, the usual
+convention still applies, and a part's own plane always wins.
+
+**An all-digit name is not a usable CAD reference.** With the formers
+correctly named `1`..`10`, the rebuild failed at the second part,
+having already built the first: SolidCraft 0.30.1 reads an all-digit
+name as a timeline index, so `sketch.inspect {"sketch": "2"}` fails
+with "`2` is not a sketch" once a body exists. Reproduced in a 15-line
+script, which also fixed the exact rule - `02` fails too, `2_` and
+`F2` do not, so it is "only digits", not "starts with a digit".
+
+`_safe` now prefixes such a name (`2` -> `p2`). A prefix, not a
+renumber: the part keeps the identity the plan gave it, which is the
+whole point of having typed the name. Rebuild after the fix: **PASS,
+48 rebuilt, 0 differ**, 24 bodies all 1.5875 mm, 10 thin in X (the
+formers, on YZ) and 14 thin in Z (flat on the sheet) - the split the
+convention asked for.
+
+**Sorting.** The parts list sorts by name on request (`Sort`), using
+the existing `project_io.natural_key` so `2` comes before `10`. It
+reorders the real layer list, because rows ARE indices into it
+everywhere else and the order is worth persisting. Duplicate names are
+reported in the status bar, not fixed: which of two parts called `6` is
+really `7` is a question only the plan can answer.
+
+A near-miss worth recording: a second `natural_key` was written for
+this before checking, and the existing one turned out to handle every
+case including the mixed `6`/`F6` list - `re.split` keeps the type
+positions aligned, so the int/str comparison that looked like a bug
+cannot happen. The duplicate was deleted. Check for the function
+before writing it.

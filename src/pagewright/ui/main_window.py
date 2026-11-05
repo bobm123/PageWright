@@ -28,7 +28,8 @@ from . import app_actions
 from .canvas import Canvas
 from .dewarp_stage import DewarpStageWidget
 from .display import display_downscale, ndarray_to_qpixmap
-from .dialogs import (CalibrationDialog, PreferencesDialog,
+from .dialogs import (CalibrationDialog, NamingSchemeDialog,
+                      PreferencesDialog,
                       SheetStockDialog)
 from .ocr_stage import OcrStageWidget
 from .scale_stage import ScaleStageWidget
@@ -129,6 +130,7 @@ class MainWindow(QMainWindow):
         self.objects_panel.newRequested.connect(self.add_polygon)
         self.objects_panel.deleteRequested.connect(self.delete_active_object)
         self.objects_panel.renameRequested.connect(self.rename_active_object)
+        self.objects_panel.sortRequested.connect(self.sort_objects)
         self.objects_panel.renameCommitted.connect(self._on_rename_committed)
         self.objects_panel.rowsDirty.connect(self._refresh_object_list)
         self.objects_panel.rowChanged.connect(self._on_object_row_changed)
@@ -1509,6 +1511,85 @@ class MainWindow(QMainWindow):
         self._refresh_build_panel()
         self.statusBar().showMessage(
             "%d sheet(s) of stock." % (len(self.project.sheets),), 5000)
+
+    def sort_objects(self):
+        """Order the parts list by name, numerically.
+
+        Reorders the real layer list, not a view of it, because
+        rows ARE indices into it everywhere else (assignment takes
+        row numbers) and the saved file keeps this order - which is
+        the point: a sorted list is how a duplicate name shows
+        itself."""
+        from ..core.project_io import natural_key
+        if len(self._objects) < 2:
+            return
+        before = list(self._objects)
+        active = (self._objects[self._active_index]
+                  if 0 <= self._active_index < len(self._objects)
+                  else None)
+        after = sorted(before, key=lambda lyr: natural_key(lyr.name))
+        if after == before:
+            self.statusBar().showMessage(
+                "Already in order." , 4000)
+            return
+
+        def apply(order):
+            self._objects = list(order)
+            # the active PART stays active, wherever it landed
+            self._active_index = (self._objects.index(active)
+                                  if active is not None else -1)
+            self._refresh_object_list()
+            self._refresh_editability()
+            self._refresh_build_panel()
+
+        apply(after)
+        self.undo_stack.push(undo.FnCommand(
+            "sort parts", undo=lambda: apply(before),
+            redo=lambda: apply(after)))
+        dupes = self._duplicate_names()
+        msg = "%d part(s) sorted by name." % (len(self._objects),)
+        if dupes:
+            msg += "  Repeated name(s): " + ", ".join(dupes)
+        self.statusBar().showMessage(msg, 8000)
+
+    def _duplicate_names(self):
+        """Names used by more than one part, in list order.
+
+        Reported rather than fixed: which of two parts called 6 is
+        really 7 is a question only the plan can answer."""
+        seen, dupes = set(), []
+        for layer in self._objects:
+            key = (layer.name or "").strip().lower()
+            if key in seen:
+                if layer.name not in dupes:
+                    dupes.append(layer.name)
+            seen.add(key)
+        return dupes
+
+    def edit_naming_scheme(self):
+        """Tools > Part Numbering: what this plan's numbers mean.
+
+        Recorded per project because plans disagree - this sheet
+        numbers its formers 1..10 and uses F and T for longerons,
+        where the usual convention would stand a longeron on end.
+        Only consulted for parts with no plane of their own."""
+        dlg = NamingSchemeDialog(self.project.name_planes, self)
+        if dlg.exec() != NamingSchemeDialog.Accepted:
+            return
+        planes = dlg.name_planes()
+        # Nothing recorded means 'use the usual convention', which
+        # is None rather than an empty dict - an empty dict would
+        # mean 'no name implies anything', a different claim.
+        self.project.name_planes = planes or None
+        if not planes:
+            self.statusBar().showMessage(
+                "Part numbering: the usual convention (F = former, "
+                "R = rib).", 6000)
+            return
+        shown = ", ".join(
+            "%s = %s" % (key or "(number)", value or "nothing")
+            for key, value in sorted(planes.items()))
+        self.statusBar().showMessage("Part numbering: " + shown, 9000)
 
     def _on_assign_sheet(self, rows, name):
         """Put every selected part on sheet `name` ("" clears it)."""

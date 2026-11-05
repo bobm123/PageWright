@@ -132,6 +132,14 @@ def build_actions(w):
         "seeds (needs a calibrated scale). Select Area limits it.")
     w.act_find_parts.triggered.connect(w.find_parts)
 
+    w.act_naming = QAction("Part &Numbering...", w)
+    w.act_naming.setToolTip(
+        "What this plan's part numbers mean - whether F3 is a former, "
+        "a longeron or nothing." + chr(10) +
+        "Fills in the build plane for parts that have none, so the "
+        "usual convention can be corrected once instead of per part.")
+    w.act_naming.triggered.connect(w.edit_naming_scheme)
+
     w.act_clean_notches = QAction("Clean Up &Notches", w)
     w.act_clean_notches.setToolTip(
         "Square the straight notch edges of the selected object and snap "
@@ -271,6 +279,7 @@ def build_menus(w):
     m_tools.addAction(w.act_run_seg)
     m_tools.addAction(w.act_find_parts)
     m_tools.addAction(w.act_clean_notches)
+    m_tools.addAction(w.act_naming)
     m_tools.addAction(w.act_clear_seeds)
     m_tools.addAction(w.act_clear_roi)
 

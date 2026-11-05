@@ -131,6 +131,12 @@ def project_to_dict(project):
              "thickness_mm": (float(sh.thickness_mm)
                               if sh.thickness_mm is not None else None)}
             for sh in sheets]
+    # this plan's numbering convention, written only when it differs
+    # from the usual one, so unchanged projects stay byte-identical
+    planes = getattr(project, "name_planes", None)
+    if planes:
+        d["name_planes"] = {str(k): (str(v) if v else None)
+                            for k, v in planes.items()}
     return d
 
 
@@ -262,6 +268,19 @@ def project_from_dict(d):
                 raise ProjectIOError(
                     "sheet %r thickness must be positive: %r" % (name, mm))
         project.sheets.append(Sheet(str(name), mm))
+
+    planes = d.get("name_planes")
+    if planes is not None:
+        if not isinstance(planes, dict):
+            raise ProjectIOError("name_planes is not an object: %r"
+                                 % (planes,))
+        out = {}
+        for key, value in planes.items():
+            # A None/"" value is meaningful: it says this prefix
+            # implies no plane, which is how a sheet declares that its
+            # F numbers are longerons rather than formers.
+            out[str(key)] = str(value) if value else None
+        project.name_planes = out
 
     pages = d.get("pages")
     if pages:
