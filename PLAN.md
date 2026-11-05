@@ -991,32 +991,40 @@ default beats a part that cannot build; and renaming a sheet carries
 its parts across, because the name IS the key and a silent orphaning
 would drop every part back to the default with no visible sign.
 
-### 16.13 SolidCraft 0.30.1 changed the recipe schema (2026-11-05)
+### 16.13 SolidCraft 0.30.1: the pipeline still works (2026-11-05)
 
-Robert upgraded to 0.30.1 mid-session. Two findings:
+Robert upgraded to 0.30.1 mid-session. The pipeline is UNAFFECTED:
+`solidcraft_import.py` rebuilds our as-drawn recipe PASS, 30 rebuilt,
+0 differ, and the result measures 379.4 x 216.9 x 1.59 mm over 15
+bodies - identical to pre-upgrade. The design built earlier also still
+opens unchanged.
 
-GOOD: `solidcraft-cli recipe <recipe.json>` is now a first-class
-subcommand - the standalone `solidcraft_import.py` is gone because the
-importer is built in. And the design PageWright already produced still
-opens unchanged: 15 bodies, 379.4 x 216.9 mm, uniform 1.5875 mm. Nothing
-built so far is lost.
+A false alarm along the way, worth recording because the reasoning was
+wrong in an instructive way. 0.30.1 adds a `solidcraft-cli recipe`
+subcommand, which takes a DIFFERENT, flatter schema than ours:
+`features` instead of `timeline`, lowercase `op` (`sketch`, `extrude`)
+instead of `type`, and it prints commands rather than building. Finding
+that, plus a too-narrow search that failed to turn up
+`solidcraft_import.py`, led to the conclusion that the standalone
+importer was gone and our exporter needed a port. Both halves were
+wrong:
 
-BLOCKING: the recipe schema is no longer the Fusion-archive shape
-PageWright writes. It is flatter and command-oriented:
+  * the importer is alive at
+    `D:/Projects/ClaudeSessions/CadRoundTrip/SolidCraftImport/`
+    (the MyArchive round-trip project), and
+  * it does not use `solidcraft-cli recipe` at all. It drives the
+    command API directly (`sketch.create`, `solid.extrude`,
+    `timeline.inspect`), so the CLI's own recipe schema is simply a
+    different entry point and not our contract.
 
-  * `timeline` -> `features`
-  * each entry needs `op` (lowercase: `sketch`, `extrude`), not
-    `type` ("Sketch", "ExtrudeFeature")
-  * `op: sketch` emits `sketch.create` + `sketch.finish`;
-    `op: extrude` emits `solid.extrude` with
-    {sketch, distance, profiles, operation, direction, body_names, name}
-  * the recipe command PRINTS commands rather than building, so it
-    composes with `run`
+The lesson: a new CLI subcommand sharing a NAME with our file format is
+not evidence about our format. The probe that mattered - running the
+real importer - was available the whole time and settles it in one
+command. Prefer it over schema archaeology.
 
-Renaming `timeline` to `features` gets as far as "feature without `op`",
-so this is a port of `core/recipe_export.py`, not a field rename. Not
-attempted yet: the identity-key design (tokens as identity only, AREA +
-CENTROID profile fallback) is likely still right, but how profiles are
-named in the new schema decides that, and guessing would mean a silent
-mis-mapping rather than an error. Ask or read the 0.30.1 format before
-porting.
+Open question, unchanged by this: whether `solidcraft-cli recipe` is
+intended to become the supported path. If so the port described above
+is real work, and the identity-key design (tokens as identity only,
+AREA + CENTROID profile fallback) needs re-checking against how that
+schema names profiles. Worth asking the SolidCraft team rather than
+inferring.
