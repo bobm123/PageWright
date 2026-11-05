@@ -949,3 +949,74 @@ fuselage. `occurrence.move` takes translate and axis/angle, so the
 mechanism is there, but nothing on the plan states where a wing
 meets a fuselage. Per sec. 16.9 that is a placement the designer
 makes once in CAD, not something to guess.
+
+### 16.12 Tracing-workflow fixes from real use (Robert, 2026-11-05)
+
+Robert traced the F-86D parts sheet by hand - 20 parts, all renamed -
+and reported six things. Shipped in 3dedcaa. Worth recording WHY two of
+them were not what they first looked like.
+
+Already built, needed discoverability only: adding a vertex by
+double-clicking an outline edge had worked since the editable-contour
+work, and nothing in the UI said so. Two tooltips, no new code. The
+lesson is that an undiscoverable feature reads as a missing one, and the
+cheap fix is to say it exists.
+
+The real bug was the one nobody asked about. Making the trace area's
+border stand in for "outside" marks exposed a crash: the default brush
+is sized for a whole sheet (150 px), so boxing one small part gives a
+FOREGROUND stroke wider than the box. Painted in the normal order
+(bg, then fg so deliberate fg wins) the foreground buried the implied
+border, GrabCut got no background at all, and it died on
+`bgdSamples.empty()`. Implied seeds now paint last, because they are an
+inference and not an instruction - a brush that merely happens to be
+wide must not erase them, while between two DELIBERATE marks inside
+still wins.
+
+That only surfaced by driving the real `run_segmentation`. A unit test
+on `_with_border_background` passed throughout: the strokes were always
+correct, and they were correct when they reached `build_seed_mask` in
+isolation. What was wrong was the interaction with a brush radius the
+unit test had no reason to set. Offscreen Qt also hid it twice over -
+the failure arrives as a modal `QMessageBox` that blocks forever, so
+the first attempt looked like a hang rather than a crash.
+
+Named sheet stock answers "most parts are 1/16, two are 1/8". The
+thickness belongs to the SHEET and parts point at it by name, so
+correcting a sheet corrects every part on it. `part_thickness_mm` now
+resolves most-specific-first: the part own value, then its sheet, then
+the sheet-wide default. Two deliberate choices there: a dangling sheet
+name falls back rather than failing, because a buildable part at the
+default beats a part that cannot build; and renaming a sheet carries
+its parts across, because the name IS the key and a silent orphaning
+would drop every part back to the default with no visible sign.
+
+### 16.13 SolidCraft 0.30.1 changed the recipe schema (2026-11-05)
+
+Robert upgraded to 0.30.1 mid-session. Two findings:
+
+GOOD: `solidcraft-cli recipe <recipe.json>` is now a first-class
+subcommand - the standalone `solidcraft_import.py` is gone because the
+importer is built in. And the design PageWright already produced still
+opens unchanged: 15 bodies, 379.4 x 216.9 mm, uniform 1.5875 mm. Nothing
+built so far is lost.
+
+BLOCKING: the recipe schema is no longer the Fusion-archive shape
+PageWright writes. It is flatter and command-oriented:
+
+  * `timeline` -> `features`
+  * each entry needs `op` (lowercase: `sketch`, `extrude`), not
+    `type` ("Sketch", "ExtrudeFeature")
+  * `op: sketch` emits `sketch.create` + `sketch.finish`;
+    `op: extrude` emits `solid.extrude` with
+    {sketch, distance, profiles, operation, direction, body_names, name}
+  * the recipe command PRINTS commands rather than building, so it
+    composes with `run`
+
+Renaming `timeline` to `features` gets as far as "feature without `op`",
+so this is a port of `core/recipe_export.py`, not a field rename. Not
+attempted yet: the identity-key design (tokens as identity only, AREA +
+CENTROID profile fallback) is likely still right, but how profiles are
+named in the new schema decides that, and guessing would mean a silent
+mis-mapping rather than an error. Ask or read the 0.30.1 format before
+porting.
