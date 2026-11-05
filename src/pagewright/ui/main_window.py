@@ -28,7 +28,8 @@ from . import app_actions
 from .canvas import Canvas
 from .dewarp_stage import DewarpStageWidget
 from .display import display_downscale, ndarray_to_qpixmap
-from .dialogs import CalibrationDialog, PreferencesDialog
+from .dialogs import (CalibrationDialog, PreferencesDialog,
+                      SheetStockDialog)
 from .ocr_stage import OcrStageWidget
 from .scale_stage import ScaleStageWidget
 from .editing_controller import EditingController
@@ -128,6 +129,8 @@ class MainWindow(QMainWindow):
         self.objects_panel.newRequested.connect(self.add_polygon)
         self.objects_panel.deleteRequested.connect(self.delete_active_object)
         self.objects_panel.renameRequested.connect(self.rename_active_object)
+        self.objects_panel.renameCommitted.connect(self._on_rename_committed)
+        self.objects_panel.rowsDirty.connect(self._refresh_object_list)
         self.objects_panel.rowChanged.connect(self._on_object_row_changed)
         self.objects_panel.marginChanged.connect(self._on_margin_changed)
         self.objects_panel.traceToleranceChanged.connect(
@@ -137,6 +140,10 @@ class MainWindow(QMainWindow):
         self.objects_panel.visibilityToggled.connect(self._on_visibility_toggled)
         self.objects_panel.sheetThicknessChanged.connect(
             self._on_sheet_thickness_changed)
+        self.objects_panel.sheetsEditRequested.connect(
+            self.edit_sheet_stock)
+        self.objects_panel.assignSheetRequested.connect(
+            self._on_assign_sheet)
         self.objects_panel.buildChanged.connect(self._on_build_changed)
         layout.addWidget(self.objects_panel)
 
@@ -1184,6 +1191,20 @@ class MainWindow(QMainWindow):
             undo=lambda: contour.delete_vertex(index),
             redo=lambda: contour.insert_vertex_at(index, xy[0], xy[1])))
 
+    def record_select(self, contour):
+        """A click landed on `contour`: make its part the active one.
+
+        Setting the panel row drives the rest - the row change handler
+        owns _active_index, editability and the build panel, so there is
+        one path into selection whichever way the user got there."""
+        for i, layer in enumerate(self._objects):
+            if contour in layer.contours:
+                if i != self._active_index:
+                    self.objects_panel.set_current_row(i)
+                    self.statusBar().showMessage(
+                        "Selected '%s'." % (layer.name,), 4000)
+                return
+
     def record_delete(self, contour, index, xy):
         self.undo_stack.push(undo.FnCommand(
             "delete vertex",
@@ -1463,6 +1484,61 @@ class MainWindow(QMainWindow):
         if ok and name.strip():
             self._objects[self._active_index].name = name.strip()
             self._refresh_object_list()
+
+    def _on_rename_committed(self, layer, name):
+        """An in-place rename from clicking a row's name."""
+        layer.name = name
+        self._refresh_object_list()
+
+    def edit_sheet_stock(self):
+        """Stock...: edit the named sheets this model is cut from."""
+        dlg = SheetStockDialog(self.project.sheets, self)
+        if dlg.exec() != SheetStockDialog.Accepted:
+            return
+        renames = dlg.renames()
+        self.project.sheets = dlg.sheets()
+        # Parts point at sheets by name, so a rename has to be carried
+        # over or every part on that sheet would silently fall back to
+        # the sheet-wide default.
+        if renames:
+            for layer in self._objects:
+                new_name = renames.get(layer.build.sheet)
+                if new_name:
+                    layer.build.sheet = new_name
+        self.objects_panel.set_sheets(self.project.sheets)
+        self._refresh_build_panel()
+        self.statusBar().showMessage(
+            "%d sheet(s) of stock." % (len(self.project.sheets),), 5000)
+
+    def _on_assign_sheet(self, rows, name):
+        """Put every selected part on sheet `name` ("" clears it)."""
+        layers = [self._objects[r] for r in rows
+                  if 0 <= r < len(self._objects)]
+        if not layers:
+            return
+        before = [(lyr, lyr.build.sheet) for lyr in layers]
+        target = name or None
+
+        def apply(value):
+            for lyr in layers:
+                lyr.build.sheet = value
+            self._refresh_build_panel()
+
+        def undo_fn():
+            for lyr, old in before:
+                lyr.build.sheet = old
+            self._refresh_build_panel()
+
+        apply(target)
+        self.undo_stack.push(undo.FnCommand(
+            "assign sheet", undo=undo_fn, redo=lambda: apply(target)))
+        sheet = self.project.sheet_named(target)
+        mm = None if sheet is None else sheet.thickness_mm
+        self.statusBar().showMessage(
+            "%d part(s) %s%s." % (
+                len(layers),
+                ("on " + target) if target else "cleared of sheet stock",
+                "" if mm is None else " (%g mm)" % mm), 6000)
 
     def _on_sheet_thickness_changed(self, mm):
         """Sheet stock: the default thickness for every unset part."""

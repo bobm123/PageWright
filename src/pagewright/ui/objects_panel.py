@@ -5,12 +5,34 @@ A pure view. It renders whatever layer list it is handed and reports user
 intent via signals; MainWindow owns the layers and does the work.
 """
 
-from PySide6.QtCore import Signal
+from PySide6.QtCore import QEvent, Qt, Signal
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDoubleSpinBox, QGroupBox, QHBoxLayout, QLabel,
     QLineEdit, QListWidget, QListWidgetItem, QPushButton, QVBoxLayout,
     QWidget,
 )
+
+
+class _NameLabel(QLabel):
+    """The row's name, which a click turns into an edit box.
+
+    Clicking the name is how most lists rename, and the Rename button
+    stays for discoverability. Renaming matters more here than in a
+    typical list: a part's name decides its build plane on CAD export,
+    so it is data, not decoration."""
+
+    def __init__(self, text, on_rename):
+        super().__init__(text)
+        self._on_rename = on_rename
+
+    def mouseReleaseEvent(self, event):
+        # Release, not press: a press would fight the list's own
+        # row-selection click, and the row must still become current.
+        if event.button() == Qt.LeftButton:
+            self._on_rename()
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
 
 class ObjectsPanel(QWidget):
@@ -19,21 +41,31 @@ class ObjectsPanel(QWidget):
     newRequested = Signal()
     deleteRequested = Signal()
     renameRequested = Signal()
+    renameCommitted = Signal(object, str)      # (ObjectLayer, new name)
+    rowsDirty = Signal()                       # redraw the rows as they are
     rowChanged = Signal(int)
     marginChanged = Signal(float)
     traceToleranceChanged = Signal(float)      # mm
     traceKeepLargestChanged = Signal(bool)
     visibilityToggled = Signal(object, bool)   # (ObjectLayer, visible)
     sheetThicknessChanged = Signal(object)     # mm, or None to clear
+    sheetsEditRequested = Signal()             # open the stock manager
+    assignSheetRequested = Signal(list, object)  # (rows, sheet name or None)
     buildChanged = Signal(str, object)         # (field name, value or None)
 
     def __init__(self, margin_mm=5.0, trace_tol_mm=0.35,
                  keep_largest=True, parent=None):
         super().__init__(parent)
+        self._layers = []
+        self._escapes = {}     # editor -> its cancel callable
         layout = QVBoxLayout(self)
         layout.setContentsMargins(0, 0, 0, 0)
 
         self._list = QListWidget(self)
+        # Extended selection: "these six are off the 1/16 sheet" is one
+        # gesture, not six. currentRowChanged still drives which single
+        # part the placement fields edit.
+        self._list.setSelectionMode(QListWidget.ExtendedSelection)
         self._list.currentRowChanged.connect(self.rowChanged)
         # the list is the point of the panel, so it keeps the stretch
         # the stock/placement group would otherwise take
@@ -112,7 +144,25 @@ class ObjectsPanel(QWidget):
             "Leave empty if these parts are not being built.")
         self._sheet.editingFinished.connect(self._emit_sheet)
         sheet_row.addWidget(self._sheet)
+        btn_sheets = QPushButton("Stock…", self)
+        btn_sheets.setToolTip(
+            "Name the sheets this model is cut from, each with a "
+            "thickness, then assign parts to them.")
+        btn_sheets.clicked.connect(lambda: self.sheetsEditRequested.emit())
+        sheet_row.addWidget(btn_sheets)
         layout.addLayout(sheet_row)
+
+        # Assign the SELECTED parts (plural) to a named sheet. Sits
+        # outside the "Selected part" group because it acts on the whole
+        # selection, not on the one part the fields below describe.
+        assign_row = QHBoxLayout()
+        assign_row.addWidget(QLabel("Assign to:"))
+        self._assign = QComboBox(self)
+        self._assign.setToolTip(
+            "Put every selected part on this sheet.")
+        self._assign.activated.connect(self._emit_assign)
+        assign_row.addWidget(self._assign, 1)
+        layout.addLayout(assign_row)
 
         self._build_box = QGroupBox("Selected part", self)
         bl = QVBoxLayout(self._build_box)
@@ -175,6 +225,8 @@ class ObjectsPanel(QWidget):
 
     def set_layers(self, layers, active_index):
         """Rebuild the rows from `layers` and select `active_index`."""
+        self._layers = list(layers)
+        self._escapes.clear()
         self._list.blockSignals(True)
         self._list.clear()
         for layer in layers:
@@ -187,11 +239,18 @@ class ObjectsPanel(QWidget):
         self._list.blockSignals(False)
 
     def _make_row(self, layer):
-        """A row: the polygon name plus a right-aligned show/hide box."""
+        """A row: the polygon name plus a right-aligned show/hide box.
+
+        The name is a _NameLabel, so clicking it swaps in a line edit and
+        the rename happens in place."""
         w = QWidget()
         h = QHBoxLayout(w)
         h.setContentsMargins(4, 1, 4, 1)
-        h.addWidget(QLabel(layer.name))
+        name = _NameLabel(
+            layer.name,
+            lambda lyr=layer: self._begin_inline_rename(lyr))
+        name.setToolTip("Click to rename")
+        h.addWidget(name)
         h.addStretch(1)
         cb = QCheckBox(w)
         cb.setChecked(layer.visible)
@@ -201,6 +260,75 @@ class ObjectsPanel(QWidget):
             self.visibilityToggled.emit(lyr, checked))
         h.addWidget(cb)
         return w
+
+    def set_current_row(self, row):
+        """Select `row` as if the user had clicked it (signal included).
+
+        The signal is deliberate: canvas clicks come in this way, and the
+        window's row handler is the single place that owns which part is
+        active."""
+        if 0 <= row < self._list.count():
+            self._list.setCurrentRow(row)
+
+    def _begin_inline_rename(self, layer):
+        """Swap the clicked row's name for an edit box."""
+        row = self._row_of(layer)
+        if row < 0:
+            return
+        # Make it current first: renaming a row the user has not selected
+        # would rename one part while another stays active.
+        if self._list.currentRow() != row:
+            self._list.setCurrentRow(row)
+        widget = self._list.itemWidget(self._list.item(row))
+        if widget is None:
+            return
+        label = widget.layout().itemAt(0).widget()
+        editor = QLineEdit(layer.name, widget)
+        editor.selectAll()
+        widget.layout().replaceWidget(label, editor)
+        label.hide()
+        label.deleteLater()
+
+        done = {"n": False}
+
+        def commit():
+            # editingFinished fires on both Return and focus-out, and
+            # Return moves focus - so without this guard the rename is
+            # applied twice and the row rebuilt mid-signal.
+            if done["n"]:
+                return
+            done["n"] = True
+            text = editor.text().strip()
+            if text and text != layer.name:
+                self.renameCommitted.emit(layer, text)
+            else:
+                self.rowsDirty.emit()
+
+        def cancel():
+            if done["n"]:
+                return
+            done["n"] = True
+            self.rowsDirty.emit()
+
+        editor.editingFinished.connect(commit)
+        editor.returnPressed.connect(commit)
+        self._escapes[editor] = cancel
+        editor.installEventFilter(self)
+        editor.setFocus()
+
+    def eventFilter(self, obj, event):
+        cancel = self._escapes.get(obj)
+        if (cancel is not None and event.type() == QEvent.KeyPress
+                and event.key() == Qt.Key_Escape):
+            cancel()
+            return True
+        return super().eventFilter(obj, event)
+
+    def _row_of(self, layer):
+        for i, lyr in enumerate(self._layers):
+            if lyr is layer:
+                return i
+        return -1
 
     def set_margin(self, value):
         self._margin_spin.blockSignals(True)
@@ -257,6 +385,31 @@ class ObjectsPanel(QWidget):
 
     def _emit_plane(self, _index):
         self.buildChanged.emit("plane", self._plane.currentData())
+
+    def _emit_assign(self, index):
+        rows = sorted(i.row() for i in self._list.selectedIndexes())
+        if not rows:
+            rows = ([self._list.currentRow()]
+                    if self._list.currentRow() >= 0 else [])
+        if rows:
+            self.assignSheetRequested.emit(rows, self._assign.itemData(index))
+        # Back to the prompt: this is an action, not a displayed state -
+        # a selection of parts from several sheets has no one value.
+        self._assign.setCurrentIndex(0)
+
+    def set_sheets(self, sheets):
+        """Refresh the assign list from [model.Sheet]."""
+        self._assign.blockSignals(True)
+        self._assign.clear()
+        self._assign.addItem("(choose sheet…)", None)
+        for sh in sheets:
+            label = (sh.name if sh.thickness_mm is None
+                     else "%s  (%g mm)" % (sh.name, sh.thickness_mm))
+            self._assign.addItem(label, sh.name)
+        self._assign.addItem("(none)", "")
+        self._assign.setCurrentIndex(0)
+        self._assign.setEnabled(bool(sheets))
+        self._assign.blockSignals(False)
 
     def set_sheet_thickness(self, mm):
         self._sheet.blockSignals(True)

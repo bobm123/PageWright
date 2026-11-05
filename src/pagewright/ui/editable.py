@@ -20,7 +20,8 @@ never re-record.
 """
 
 from PySide6.QtCore import QPointF, QRectF, Qt
-from PySide6.QtGui import QColor, QPainterPath, QPen
+from PySide6.QtGui import (QColor, QPainterPath, QPainterPathStroker,
+                           QPen)
 from PySide6.QtWidgets import (QGraphicsEllipseItem, QGraphicsLineItem,
                                QGraphicsPathItem)
 
@@ -204,12 +205,40 @@ class RulerBody(QGraphicsLineItem):
 
 
 class _OutlineItem(QGraphicsPathItem):
-    """The polygon outline; double-clicking an edge inserts a vertex."""
+    """The polygon outline: click to select the part, double-click an edge
+    to insert a vertex.
+
+    A single click selects whichever part the line belongs to, so the
+    drawing itself is a way in - on a sheet of twenty parts, finding the
+    right row in the list means knowing which "6" you traced, while the
+    outline is right under the cursor.
+
+    `shape()` widens the clickable band well past the 2 px pen. A
+    cosmetic hairline is a hard target at any zoom, and the band costs
+    nothing: an outline that is merely NEAR the cursor is still the one
+    the user meant."""
+
+    # Half-width of the clickable band, in scene (image pixel) units.
+    _PICK_WIDTH = 4.0
 
     def __init__(self, owner):
         super().__init__()
         self._owner = owner
         self.setZValue(10)
+
+    def shape(self):
+        """Widen the hit area to a band around the stroke."""
+        stroker = QPainterPathStroker()
+        stroker.setWidth(2.0 * self._PICK_WIDTH)
+        return stroker.createStroke(self.path())
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton:
+            # Report the click, then fall through: in edit mode the press
+            # may also begin a drag, and selecting the part it belongs to
+            # does not conflict with that.
+            self._owner._select_interactive()
+        super().mousePressEvent(event)
 
     def mouseDoubleClickEvent(self, event):
         # event.pos() is in item coords; the item sits at the scene origin.
@@ -314,6 +343,13 @@ class EditableContour:
         if self._sink is not None:
             self._sink.record_delete(self, index, xy)
 
+    def _select_interactive(self):
+        """Tell the sink this contour's part was clicked on the canvas."""
+        if self._sink is not None:
+            select = getattr(self._sink, "record_select", None)
+            if select is not None:
+                select(self)
+
     def _insert_vertex_interactive(self, scene_pos):
         if not self._editable or len(self._handles) < 2:
             return
@@ -348,9 +384,12 @@ class EditableContour:
             h.setVisible(show)
 
     def _update_mouse_buttons(self):
-        active = self._editable and self._visible
+        # Visible, NOT editable: an inactive part's outline must still take
+        # clicks, because clicking it is how it becomes the active one.
+        # Vertex dragging stays gated on `editable` via the handles, which
+        # are hidden unless editable.
         self._outline.setAcceptedMouseButtons(
-            Qt.AllButtons if active else Qt.NoButton)
+            Qt.AllButtons if self._visible else Qt.NoButton)
 
     def _add_handle(self, scene_point, index=None):
         handle = VertexHandle(self, scene_point)

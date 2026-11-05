@@ -13,6 +13,7 @@ stored, and the UI reloads the image from that path when opening a project.
 import json
 
 from ..model import (Build, Calibration, Contour, PageEntry, Project,
+                     Sheet,
                      Style, TracedObject, default_tiling)
 
 FORMAT_VERSION = 1
@@ -60,6 +61,8 @@ def _build_to_dict(build):
         d["rotate_deg"] = float(build.rotate_deg)
     if build.assembly:
         d["assembly"] = str(build.assembly)
+    if build.sheet:
+        d["sheet"] = str(build.sheet)
     return d
 
 
@@ -121,6 +124,13 @@ def project_to_dict(project):
     # sheet stock thickness: written only when the user set one
     if getattr(project, "sheet_thickness_mm", None):
         d["sheet_thickness_mm"] = float(project.sheet_thickness_mm)
+    sheets = getattr(project, "sheets", None)
+    if sheets:
+        d["sheets"] = [
+            {"name": sh.name,
+             "thickness_mm": (float(sh.thickness_mm)
+                              if sh.thickness_mm is not None else None)}
+            for sh in sheets]
     return d
 
 
@@ -178,11 +188,13 @@ def _build_from_dict(d):
         return v
 
     assembly = d.get("assembly")
+    sheet = d.get("sheet")
     return Build(thickness_mm=_num("thickness_mm", positive=True),
                  plane=plane,
                  station_mm=_num("station_mm"),
                  rotate_deg=_num("rotate_deg"),
-                 assembly=str(assembly) if assembly else None)
+                 assembly=str(assembly) if assembly else None,
+                 sheet=str(sheet) if sheet else None)
 
 
 def _object_from_dict(d):
@@ -233,6 +245,23 @@ def project_from_dict(d):
             raise ProjectIOError("sheet_thickness_mm must be positive: %r"
                                  % (thick,))
         project.sheet_thickness_mm = thick
+
+    for entry in (d.get("sheets") or []):
+        name = (entry or {}).get("name")
+        if not name:
+            raise ProjectIOError("a sheet has no name: %r" % (entry,))
+        raw = entry.get("thickness_mm")
+        mm = None
+        if raw is not None:
+            try:
+                mm = float(raw)
+            except (TypeError, ValueError):
+                raise ProjectIOError(
+                    "sheet %r thickness is not a number: %r" % (name, raw))
+            if mm <= 0.0:
+                raise ProjectIOError(
+                    "sheet %r thickness must be positive: %r" % (name, mm))
+        project.sheets.append(Sheet(str(name), mm))
 
     pages = d.get("pages")
     if pages:

@@ -17,6 +17,46 @@ from .editable import VertexHandle
 
 MIN_VERTICES = 3   # fewer than this is not a polygon -> drop the contour
 
+# How far inside the trace area's edge the implied background runs, as a
+# fraction of the area's shorter side. Just inside rather than exactly on
+# the edge, so a part drawn hard against the box still has paper between
+# it and the seed.
+_BORDER_INSET = 0.02
+
+
+def _with_border_background(strokes, width, height):
+    """Add background seeds round the trace area when none were marked.
+
+    Drawing a box round one part already says where that part ends:
+    everything outside the box is somebody else's. Making the user then
+    paint "outside" is asking twice, so the border supplies it.
+
+    Only when the user marked NO background at all. One deliberate
+    outside stroke means they are steering the segmenter - often to push
+    a boundary the border seeds would fight - and silently adding four
+    more would override them.
+    """
+    if any(s.label == "bg" for s in strokes):
+        return strokes
+    if width < 8 or height < 8:
+        return strokes          # no room for a border that is not the part
+
+    inset = max(1, int(round(_BORDER_INSET * min(width, height))))
+    x0, y0 = inset, inset
+    x1, y1 = width - 1 - inset, height - 1 - inset
+    if x1 <= x0 or y1 <= y0:
+        return strokes
+
+    # One stroke per edge: a closed loop would also work, but four edges
+    # keep each seed line straight and easy to reason about.
+    edges = [[(x, y0) for x in range(x0, x1 + 1)],
+             [(x, y1) for x in range(x0, x1 + 1)],
+             [(x0, y) for y in range(y0, y1 + 1)],
+             [(x1, y) for y in range(y0, y1 + 1)]]
+    radius = max(1.0, inset / 2.0)
+    return list(strokes) + [seg.Stroke("bg", pts, radius, implied=True)
+                            for pts in edges]
+
 
 class EditingController:
     def __init__(self, window):
@@ -73,10 +113,14 @@ class EditingController:
                 return img, strokes, 0, 0
             QMessageBox.warning(
                 w, "Trace Poly",
-                "Mark some foreground inside the selected trace area first.")
+                "Mark some inside (foreground) in the selected trace "
+                "area first." + chr(10) + chr(10) +
+                "The area's border is taken as outside, so marking "
+                "outside is optional.")
             return None
         strokes = [seg.Stroke(l, [(x - x0, y - y0) for (x, y) in pts], r)
                    for (l, pts, r) in raw_strokes]
+        strokes = _with_border_background(strokes, x1 - x0, y1 - y0)
         return img[y0:y1, x0:x1], strokes, x0, y0
 
     def run_segmentation(self):
@@ -136,7 +180,13 @@ class EditingController:
             results = [([(x + x0, y + y0) for (x, y) in pts], role)
                        for (pts, role) in results]
 
-        if w._active_index < 0:
+        # Tracing NEVER overwrites a polygon that already has geometry:
+        # a trace is cheap to repeat and a traced outline is expensive to
+        # redraw, so the safe default is a new object. The one exception
+        # is an empty active object - that is what New Polygon just made,
+        # and filling it is the whole point of having made it.
+        if (w._active_index < 0
+                or not w._objects[w._active_index].is_empty()):
             w.new_object()
         w._objects[w._active_index].set_contours(results)
         w.canvas.clear_seeds()

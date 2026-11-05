@@ -30,10 +30,17 @@ class Stroke:
     radius_px: brush radius in pixels.
     """
 
-    def __init__(self, label, points, radius_px):
+    def __init__(self, label, points, radius_px, implied=False):
         self.label = label
         self.points = list(points)
         self.radius_px = float(radius_px)
+        # True for seeds the program inferred rather than the user
+        # painting them (the trace area border standing in for
+        # "outside"). They paint LAST, so an oversized foreground brush
+        # cannot bury them - without that, a brush wider than the trace
+        # area leaves GrabCut with no background at all and it fails
+        # with "bgdSamples.empty()".
+        self.implied = bool(implied)
 
 
 def _paint_stroke(mask, stroke, value):
@@ -65,13 +72,20 @@ def build_seed_mask(shape_hw, strokes):
     """
     h, w = shape_hw
     mask = np.full((h, w), LABEL_PR_BG, dtype=np.uint8)
-    # Paint background first, then foreground, so overlapping fg wins.
+    # Paint background first, then foreground, so overlapping fg wins:
+    # between two DELIBERATE marks the inside one is the later word.
     for s in strokes:
-        if s.label == "bg":
+        if s.label == "bg" and not getattr(s, "implied", False):
             _paint_stroke(mask, s, LABEL_BG)
     for s in strokes:
         if s.label == "fg":
             _paint_stroke(mask, s, LABEL_FG)
+    # Implied seeds last. They are an inference, not an instruction, so
+    # they must not be erased by a foreground brush that happens to be
+    # wider than the part - the user never asked for foreground there.
+    for s in strokes:
+        if s.label == "bg" and getattr(s, "implied", False):
+            _paint_stroke(mask, s, LABEL_BG)
     return mask
 
 
@@ -105,7 +119,8 @@ def _scaled_strokes(strokes, scale):
     out = []
     for s in strokes:
         pts = [(x * scale, y * scale) for (x, y) in s.points]
-        out.append(Stroke(s.label, pts, max(1.0, s.radius_px * scale)))
+        out.append(Stroke(s.label, pts, max(1.0, s.radius_px * scale),
+                          implied=getattr(s, "implied", False)))
     return out
 
 

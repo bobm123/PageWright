@@ -4,10 +4,12 @@ Tiling/print dialogs are added in later phases.
 
 from PySide6.QtWidgets import (
     QCheckBox, QComboBox, QDialog, QDialogButtonBox, QDoubleSpinBox,
-    QFormLayout, QLabel, QSpinBox,
+    QFormLayout, QHBoxLayout, QHeaderView, QLabel, QMessageBox,
+    QPushButton, QSpinBox, QTableWidget, QTableWidgetItem, QVBoxLayout,
 )
 
-from ..core.calibration import MM_PER_UNIT
+from ..core.calibration import MM_PER_UNIT, parse_length_mm
+from ..model import Sheet
 
 
 class CalibrationDialog(QDialog):
@@ -285,3 +287,125 @@ class PreferencesDialog(QDialog):
         """("#rrggbb", opacity 0..1)."""
         c = self._mark_color
         return (c.name(), round(c.alphaF(), 3))
+
+
+class SheetStockDialog(QDialog):
+    """Name the stock sheets a model is cut from, with a thickness each.
+
+    Two columns, free text in both: thickness is entered the way plans
+    and suppliers state it ("1/16 in", "3/32"), and parsed on OK so a
+    half-typed fraction never reaches the model.
+
+    Sheets are matched to parts BY NAME, so renaming one here would
+    orphan its parts. The window therefore reports renames alongside
+    the new list and lets the caller carry the parts across - the sheet
+    list is not the system of record for which part is on which sheet.
+    """
+
+    def __init__(self, sheets, parent=None):
+        super().__init__(parent)
+        self.setWindowTitle("Sheet Stock")
+        self._original = [sh.name for sh in sheets]
+
+        layout = QVBoxLayout(self)
+        layout.addWidget(QLabel(
+            "Sheets this model is cut from. Thickness accepts "
+            "fractions: 1/16 in, 3/32, 1.5 mm."))
+
+        self._table = QTableWidget(0, 2, self)
+        self._table.setHorizontalHeaderLabels(["Sheet", "Thickness"])
+        self._table.horizontalHeader().setSectionResizeMode(
+            0, QHeaderView.Stretch)
+        self._table.verticalHeader().setVisible(False)
+        for sh in sheets:
+            self._append(sh.name,
+                         "" if sh.thickness_mm is None
+                         else "%g mm" % sh.thickness_mm)
+        layout.addWidget(self._table, 1)
+
+        row = QHBoxLayout()
+        btn_add = QPushButton("Add", self)
+        btn_add.clicked.connect(lambda: self._append("", ""))
+        btn_del = QPushButton("Remove", self)
+        btn_del.clicked.connect(self._remove_current)
+        row.addWidget(btn_add)
+        row.addWidget(btn_del)
+        row.addStretch(1)
+        layout.addLayout(row)
+
+        buttons = QDialogButtonBox(
+            QDialogButtonBox.Ok | QDialogButtonBox.Cancel, parent=self)
+        buttons.accepted.connect(self._try_accept)
+        buttons.rejected.connect(self.reject)
+        layout.addWidget(buttons)
+
+        self._sheets = list(sheets)
+        self._renames = {}
+        self.resize(360, 260)
+
+    # ----- results ---------------------------------------------------------
+
+    def sheets(self):
+        """The edited [Sheet] list (valid after accept())."""
+        return self._sheets
+
+    def renames(self):
+        """{old name: new name} for sheets the user renamed in place.
+
+        Positional: row i was row i, so a changed name in that row is a
+        rename rather than a delete plus an add. The caller uses this to
+        move the parts over."""
+        return self._renames
+
+    # ----- internals -------------------------------------------------------
+
+    def _append(self, name, thickness):
+        r = self._table.rowCount()
+        self._table.insertRow(r)
+        self._table.setItem(r, 0, QTableWidgetItem(name))
+        self._table.setItem(r, 1, QTableWidgetItem(thickness))
+
+    def _remove_current(self):
+        r = self._table.currentRow()
+        if r >= 0:
+            self._table.removeRow(r)
+
+    def _cell(self, row, col):
+        item = self._table.item(row, col)
+        return "" if item is None else item.text().strip()
+
+    def _try_accept(self):
+        sheets, renames, seen = [], {}, set()
+        for r in range(self._table.rowCount()):
+            name = self._cell(r, 0)
+            raw = self._cell(r, 1)
+            if not name and not raw:
+                continue                      # an untouched blank row
+            if not name:
+                QMessageBox.warning(self, "Sheet Stock",
+                                    "Row %d has a thickness but no name."
+                                    % (r + 1,))
+                return
+            if name in seen:
+                # Names are the key parts point at, so duplicates would
+                # make the assignment ambiguous.
+                QMessageBox.warning(
+                    self, "Sheet Stock",
+                    "There are two sheets called %r. Names must differ."
+                    % (name,))
+                return
+            seen.add(name)
+            mm = None
+            if raw:
+                try:
+                    mm = parse_length_mm(raw)
+                except ValueError as exc:
+                    QMessageBox.warning(
+                        self, "Sheet Stock", "Sheet %r: %s" % (name, exc))
+                    return
+            sheets.append(Sheet(name, mm))
+            if r < len(self._original) and self._original[r] != name:
+                renames[self._original[r]] = name
+        self._sheets = sheets
+        self._renames = renames
+        self.accept()

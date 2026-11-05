@@ -158,6 +158,11 @@ def build_actions(w):
     w.act_mode_bg = QAction("Mark &Background (outside)", w, checkable=True)
     w.act_mode_bg.triggered.connect(w._mode_seed_bg)
     w.act_mode_edit = QAction("&Edit Vertices", w, checkable=True)
+    w.act_mode_edit.setToolTip(
+        "Drag vertices to adjust an outline." + chr(10) +
+        "Double-click an outline to ADD a vertex; right-click one to "
+        "delete it." + chr(10) +
+        "Click any outline to select that part.")
     w.act_mode_edit.triggered.connect(w._mode_edit)
     w.act_mode_roi = QAction("Select &Area", w, checkable=True)
     w.act_mode_roi.setToolTip(
@@ -172,7 +177,12 @@ def build_actions(w):
     w.act_clear_roi.triggered.connect(w.clear_roi)
 
     w.act_run_seg = QAction("Trace &Poly", w)
-    w.act_run_seg.setToolTip("Trace a polygon from the seeds (GrabCut)")
+    w.act_run_seg.setToolTip(
+        "Trace a polygon from the seeds (GrabCut)." + chr(10) +
+        "Always adds a NEW polygon, so an existing one is never "
+        "overwritten." + chr(10) +
+        "With a trace area and no outside marks, the area's border is "
+        "taken as outside.")
     w.act_run_seg.triggered.connect(w.run_segmentation)
 
     w.act_new_object = QAction("New &Polygon", w)
