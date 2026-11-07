@@ -25,3 +25,6 @@ venv/
 Thumbs.db
 .idea/
 .vscode/
+
+# Rust build output (PlaneCraft core)
+target/

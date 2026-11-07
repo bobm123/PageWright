@@ -1,0 +1,165 @@
+"""PlaneCraft's Python layer: reading parts and building airframes.
+
+The Rust core has its own tests (`cargo test`). These cover the seam -
+that PageWright's project really is readable from here, and that the
+station helpers refuse to guess.
+"""
+
+import os
+import sys
+
+import pytest
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+sys.path.insert(0, os.path.join(HERE, "..", "src"))
+
+from planecraft import core, stations          # noqa: E402
+
+CORE_BUILT = core.core_path() is not None
+needs_core = pytest.mark.skipif(
+    not CORE_BUILT, reason="planecraft-core not built (cargo build)")
+
+
+# ----- stations ------------------------------------------------------------
+
+def test_frames_at_puts_each_part_at_its_own_station():
+    f = stations.frames_at(["1", "2"], [0.0, 25.4])
+    assert [x["name"] for x in f] == ["1", "2"]
+    assert f[1]["def"] == {"kind": "offset", "base": "YZ",
+                           "offset_mm": 25.4}
+
+
+def test_a_missing_station_is_refused_not_guessed():
+    """A frame with a guessed station is worse than no frame: it
+    builds a fuselage that looks right and is not."""
+    with pytest.raises(ValueError) as e:
+        stations.frames_at(["1", "2", "3"], [0.0, 25.4])
+    assert "one station per part" in str(e.value)
+
+
+def test_frames_every_spaces_them_evenly():
+    f = stations.frames_every(["1", "2", "3"], 25.0)
+    assert [x["def"]["offset_mm"] for x in f] == [0.0, 25.0, 50.0]
+
+
+def test_frames_every_can_start_somewhere_other_than_zero():
+    f = stations.frames_every(["a", "b"], 10.0, start_mm=5.0)
+    assert [x["def"]["offset_mm"] for x in f] == [5.0, 15.0]
+
+
+def test_a_prefix_keeps_frame_names_clear_of_part_names():
+    # Parts are called "1".."10"; frames named the same would be
+    # unreadable next to a plan.
+    f = stations.frames_every(["1", "2"], 25.0, prefix="Former-")
+    assert [x["name"] for x in f] == ["Former-1", "Former-2"]
+
+
+def test_an_unknown_base_plane_is_refused():
+    with pytest.raises(ValueError):
+        stations.frames_at(["1"], [0.0], base="ZZ")
+
+
+def test_ribs_can_go_on_their_own_base_plane():
+    f = stations.frames_at(["R1"], [50.8], base="XZ")
+    assert f[0]["def"]["base"] == "XZ"
+
+
+def test_place_omits_what_was_never_set():
+    p = stations.place({"1": "Former-1"})
+    assert p == [{"part": "1", "frame": "Former-1"}]
+
+
+def test_place_records_rotation_and_mirroring():
+    p = stations.place({"R1": "Rib-1"}, rotate_deg={"R1": 90},
+                       mirrored=["R1"])
+    assert p[0]["rotate_deg"] == 90.0
+    assert p[0]["mirrored"] is True
+
+
+# ----- the Rust core, over the subprocess seam -----------------------------
+
+@needs_core
+def test_a_clean_airframe_checks_out():
+    air = {
+        "frames": stations.frames_every(["1", "2"], 25.4, prefix="F-"),
+        "placements": [{"part": "1", "frame": "F-1"},
+                       {"part": "2", "frame": "F-2"}],
+    }
+    assert core.check(air)["ok"] is True
+    assert len(core.plan(air)) == 2
+
+
+@needs_core
+def test_a_part_on_a_missing_frame_is_named_and_left_out():
+    air = {
+        "frames": stations.frames_every(["1"], 25.4, prefix="F-"),
+        "placements": [{"part": "1", "frame": "F-1"},
+                       {"part": "R1", "frame": "Rib-Sta-1"}],
+    }
+    report = core.check(air)
+    assert report["ok"] is False
+    assert any("Rib-Sta-1" in m for m in report["problems"])
+    assert [p["part"] for p in core.plan(air)] == ["1"]
+
+
+@needs_core
+def test_a_reference_frame_plans_as_not_buildable():
+    """PlaneCraft cannot build an angled plane, but naming one must
+    still work - that is what keeps an unforeseen construction from
+    being a blocker."""
+    air = {
+        "frames": [{"name": "FirewallAngled"}],
+        "placements": [{"part": "B", "frame": "FirewallAngled"}],
+    }
+    assert core.check(air)["ok"] is True
+    item = core.plan(air)[0]
+    assert item["buildable"] is False
+    assert item["base"] is None
+
+
+@needs_core
+def test_the_station_reaches_the_plan():
+    air = {
+        "frames": stations.frames_at(["3"], [76.2], prefix="F-"),
+        "placements": [{"part": "3", "frame": "F-3"}],
+    }
+    assert core.plan(air)[0]["offset_mm"] == 76.2
+
+
+# ----- reading a PageWright project ----------------------------------------
+
+def _pagewright_available():
+    try:
+        from planecraft import parts
+        parts._ensure_pagewright()
+        import pagewright.core.project_io  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+@pytest.mark.skipif(not _pagewright_available(),
+                    reason="PageWright not importable")
+def test_a_traced_project_reads_back_with_its_convention(tmp_path):
+    from planecraft import parts
+    from pagewright.core import project_io
+    from pagewright.model import Build, Contour, Project, TracedObject
+
+    p = Project()
+    p.pixel_width = p.pixel_height = 400
+    p.calibration.mm_per_pixel = 0.5
+    p.sheet_thickness_mm = 1.5875
+    p.name_planes = {"": "YZ", "r": "XZ", "f": None}
+    for name in ("1", "R1", "F1"):
+        o = TracedObject(name=name, build=Build())
+        o.contours.append(Contour(points=[(0, 0), (10, 0), (10, 10)]))
+        p.objects.append(o)
+    path = str(tmp_path / "p.tiproj.json")
+    project_io.save_project(p, path)
+
+    q = parts.load(path)
+    assert parts.part_names(q) == ["1", "R1", "F1"]
+    # the plan's own convention, read by PageWright - not re-guessed
+    assert parts.implied_planes(q) == {"1": "YZ", "R1": "XZ", "F1": None}
+    rows = {r["part"]: r for r in parts.summary(q)}
+    assert rows["1"]["thickness_mm"] == 1.5875
