@@ -1323,3 +1323,38 @@ showing a part the way the plan draws it.
 tail, per the user. Nine of ten lines measured (16.18); the missing
 one is in the widest gap, 2.250 in between the 5th and 6th found
 lines, where the "YF-578" lettering crosses the fuselage.
+
+### 16.20  All ten former stations, confirmed against the plan
+
+The missing former was not where 16.18 guessed. The user confirmed
+former 6 sits "about 5.4 inches back, right behind the cockpit",
+which matched the measured line at 5.448 in - and that fixed the
+whole mapping, because it pinned the 5th FOUND line to the 6th
+FORMER. One of 1..5 was missing, not one in the widest gap.
+
+It was at the nose. Formers 1 and 2 sit only 0.215 in apart, and the
+pairing algorithm had rejected former 1 because its two edges read 36
+px apart rather than the usual 19 (1/16 in): the fuselage curves
+there, so the former is seen at an angle and its drawn width opens
+up. Zooming the nose 3x showed two separate leader arrows, one per
+former, which settled it.
+
+    former   1      2      3      4      5      6      7      8      9     10
+    inches   0.273  0.488  1.793  2.393  3.622  5.448  7.698  8.730  9.982 12.127
+    mm       6.94  12.40  45.55  60.79  91.99 138.39 195.54 221.74 253.53 308.02
+
+Spacings run 0.215 to 2.250 in - emphatically not evenly spaced, so
+`frames_at` and never `frames_every`.
+
+Recorded in `planecraft/samples/f86-stations-measured.json`, with
+former 1 flagged as the least certain centre for the reason above.
+The datum is still the crop's left edge, not a chosen aircraft datum.
+
+Built and checked end to end: ten frames, ten placements, no
+problems, and every former name matches a part already traced in the
+PageWright project.
+
+The lesson worth keeping: the algorithm found nine lines and would
+have happily reported nine formers. What caught the tenth was one
+sentence from someone who knows the aeroplane, used to anchor the
+numbering - not a better threshold.
