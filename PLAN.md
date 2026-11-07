@@ -1450,3 +1450,48 @@ already. Deferred until there is a second file to point at.
 
 Nothing is being changed for this yet. It is recorded so the next
 design decision is made knowing where it leads.
+
+### 16.23  The former stations, settled
+
+Formers 1-10, nose to tail, sequential - confirmed by the user and
+now consistent with every reading of the drawing:
+
+    former   1     2     3     4     5     6      7      8      9     10
+    inches   0.273 0.488 1.793 2.393 3.622 5.448  7.698  8.730  9.982 12.127
+    mm       6.93 12.40 45.54 60.78 92.00 138.38 195.53 221.74 253.54 308.03
+
+Recorded in `planecraft/samples/f86-stations.json`, and built as
+`f86-fuselage.airframe.json`: ten frames, ten placements, no
+problems, every former traced, formers 1 and 2 on 1/8 stock and the
+rest on 1/16 - which matches what the user read off the parts sheet
+independently.
+
+**The line at 8.73 in is former 8, not a paint line.** Both of us
+doubted it: the USAF roundel and the FUSELAGE MARKING RED and AIR
+BRAKE SEPARATION annotations cross there, and the circled 8 sits
+between two lines rather than beside one. The checks that settled it:
+exactly ten lines exist (gaps B-C, F-G and I-J re-scanned at lower
+thresholds, all empty), formers 1 and 2 have separate leader arrows
+to two distinct lines behind the radar housing, and ten numbered
+formers are traced on the parts sheet. Ten formers, ten lines, no
+room for a paint line among them.
+
+What went wrong three times in a row was always the same thing:
+reading a LABEL off a crowded drawing and treating it as settled. F6
+was read as former 6 (it is the cockpit floor). Leader directions
+were read as uniformly rightward (they vary). An arrow landing was
+measured to the wrong line where leaders are long. The positions, by
+contrast, were measured three independent ways and never moved.
+
+The general lesson for this pipeline: geometry measured from the
+scan is reliable; identity read off the scan is not. Where the two
+disagree, re-read the identity. And a count that has to balance - ten
+traced parts, ten lines - is worth more than any single reading of a
+label.
+
+**Inventory.** Roughly half the parts sheet is still untraced: wing
+ribs A, C, D, E (two each), W1/W2/W3, T1, T2, F5 (two), S2, S3,
+L1-L3, and the small parts (rudder pedals, brake drums, dihedral
+braces, blocks C/F/G/H). Nothing on the sheet is unaccounted for on
+the plan - there is simply more of it to trace, which is the
+iterative workflow of 16.22 rather than a problem.

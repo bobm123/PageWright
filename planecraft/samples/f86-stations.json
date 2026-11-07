@@ -1,0 +1,26 @@
+{
+  "_what": "Fuselage former stations for the F-86D Sabre (Comet kit R5), read off sheet 1's side view. Formers 1-10, nose to tail, confirmed sequential by the user.",
+  "source": "D:/Projects/Airplanes/F86-Sabre/3DModels/plan_sheet1_300dpi.png",
+  "method": "A former is drawn as two lines ~1/16 in apart (its own thickness); the station is the pair's centre. Found by column darkness on the rotated side-view crop at 300 dpi, then numbered 1-10 nose to tail.",
+  "crop": {"origin_px": [7626, 155], "rotation": "90 clockwise", "dpi": 300},
+  "datum": "The crop's left edge, just ahead of former 1 (the radar housing nose is forward of it). NOT a chosen aircraft datum: rebase before building if the nose tip should be zero.",
+  "checks": [
+    "Exactly 10 lines exist: the gaps B-C, F-G and I-J were re-scanned at lower thresholds and are empty.",
+    "Formers 1 and 2 have separate leader arrows to two distinct lines at the nose, just behind the RADAR EQUIPMENT HOUSING.",
+    "All 10 numbered formers are traced in the PageWright project, so the counts agree.",
+    "Spacings are uneven (0.215 to 2.250 in), so frames_at, never frames_every."
+  ],
+  "formers": [
+    {"n": 1,  "in": 0.273,  "mm": 6.93,   "px": 82.0},
+    {"n": 2,  "in": 0.488,  "mm": 12.40,  "px": 146.5},
+    {"n": 3,  "in": 1.793,  "mm": 45.54,  "px": 538.0},
+    {"n": 4,  "in": 2.393,  "mm": 60.78,  "px": 718.0},
+    {"n": 5,  "in": 3.622,  "mm": 92.00,  "px": 1086.5},
+    {"n": 6,  "in": 5.448,  "mm": 138.38, "px": 1634.5},
+    {"n": 7,  "in": 7.698,  "mm": 195.53, "px": 2309.5},
+    {"n": 8,  "in": 8.730,  "mm": 221.74, "px": 2619.0, "note": "the USAF roundel and FUSELAGE MARKING RED annotations cross here, which made this line hard to read"},
+    {"n": 9,  "in": 9.982,  "mm": 253.54, "px": 2994.5},
+    {"n": 10, "in": 12.127, "mm": 308.03, "px": 3638.0}
+  ],
+  "do_not_confuse": "F1-F6 on this plan are longerons and cockpit structure, NOT formers. F6 is the cockpit floor. The formers are the circled numbers."
+}
