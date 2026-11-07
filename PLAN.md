@@ -1273,3 +1273,53 @@ project, `Frame.note` holds free text off the plan, and no lookup
 anywhere depends on list order. Each earns its place today, and
 together they are enough to hang a metadata layer on later without
 re-cutting the model.
+
+### 16.19  The wing is mirrored: one traced part, many bodies
+
+Sheet 1's wing plan is symmetric, and the plan says so in words:
+"BUILD BOTH WINGS OVER SHADED LAYOUT". Measured on the 300 dpi scan,
+the rib lines pair up across the centreline to within 0.01-0.04 in:
+
+    right -3.231  -1.750  -0.825        centreline 6.925 in
+    left  +3.241  +1.771  +0.864
+
+and an independent check - correlating the wing band against its own
+mirror and taking the axis of best agreement - lands at 6.940 in, 87%
+pixel agreement, 0.015 in from the line-derived centreline. So the
+symmetry is real, not a reading artefact.
+
+**This was a corner, and it was closed.** `Problem::DuplicatePart`
+rejected one part placed twice, which would have rejected nearly
+every part of a symmetric structure. The key is now (part, frame):
+one traced outline on SEVERAL frames is the normal case, while the
+same part on the SAME frame is still wrong - two bodies in one place
+is a mistake, not a mirror. `placement_of` became `placements_of`
+returning a list, with `count_of` beside it, because one outline
+becomes many bodies. `Placement.mirrored` already existed.
+
+Verified end to end: one rib B, two frames at -21 and +21 mm, the
+left one mirrored, builds two bodies and checks clean.
+
+Known limit, pinned by a test so it is not mistaken for a bug: the
+`place` helper takes {part: frame} so it cannot express this. The
+mirrored case builds its placement list directly, and a helper can
+come when a caller needs one.
+
+**Circled plan labels.** This plan labels formers with circled
+numbers and ribs with circled letters. Useful for matching a part
+back to the drawing, so worth keeping as a LABEL - never as a key.
+Nobody should have to type a circled A, and under Windows cp1252
+`print` of U+24B6 raises UnicodeEncodeError, which would break the
+CLI, the status bar and every log line naming the part.
+
+`planecraft/plan_names.py` normalises on the way in, using NFKC,
+which already maps the circled forms to plain ones and circled ten to
+the two characters "10" - no table to fall out of date. Checked
+against the real project: circled 1..10 join straight onto the parts
+the user typed as plain numbers. `label_and_name` keeps both, for
+showing a part the way the plan draws it.
+
+**Fuselage stations confirmed sequential**, formers 1..10 nose to
+tail, per the user. Nine of ten lines measured (16.18); the missing
+one is in the widest gap, 2.250 in between the 5th and 6th found
+lines, where the "YF-578" lettering crosses the fuselage.

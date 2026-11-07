@@ -79,6 +79,33 @@ geometry drawn in CAD already is. A longeron drawn 1.70 mm tall and
 too far from a multiple is left as drawn and counted in the report,
 never dragged to a size nobody asked for.
 
+## One traced part, many bodies
+
+A plan draws one rib and the wing uses it on both sides, mirrored -
+the F-86 sheet says "BUILD BOTH WINGS OVER SHADED LAYOUT". So a
+`Placement` is keyed on (part, frame), not on part: one outline may
+be placed on as many frames as the structure needs, each with its own
+rotation, offset and `mirrored` flag. The same part on the SAME frame
+is still an error, because two bodies in one place is a mistake
+rather than a mirror.
+
+```python
+placements = [
+    {"part": "B", "frame": "Rib-B-R"},
+    {"part": "B", "frame": "Rib-B-L", "mirrored": True},
+]
+```
+
+## Circled plan labels
+
+This plan numbers its formers with circled digits and its ribs with
+circled letters. Those are kept as LABELS, for matching a part back
+to the drawing, and never used as keys - nobody should have to type
+a circled A, and a Windows console cannot even print one.
+`plan_names.normalise` maps them to plain text with NFKC, so the
+circled 1 on the plan and the "1" typed in PageWright are the same
+part.
+
 ## Refusing to guess
 
 A placement whose frame does not exist is **reported and left out**,

@@ -220,3 +220,105 @@ def test_stock_names_are_the_ones_a_plan_uses():
     from planecraft import stock
     assert stock.stock_mm("1/16") == pytest.approx(25.4 / 16.0)
     assert stock.stock_mm('1/8"') == pytest.approx(25.4 / 8.0)
+
+
+# ----- one traced part, many bodies ----------------------------------------
+
+@needs_core
+def test_one_traced_rib_can_be_built_on_both_wings():
+    """The plan draws ONE rib B and says BUILD BOTH WINGS OVER SHADED
+    LAYOUT. Rejecting a part placed twice would reject nearly every
+    part of a symmetric structure."""
+    air = {
+        "frames": [
+            {"name": "Rib-B-R",
+             "def": {"kind": "offset", "base": "XZ", "offset_mm": -21.0}},
+            {"name": "Rib-B-L",
+             "def": {"kind": "offset", "base": "XZ", "offset_mm": 21.0}},
+        ],
+        "placements": [
+            {"part": "B", "frame": "Rib-B-R"},
+            {"part": "B", "frame": "Rib-B-L", "mirrored": True},
+        ],
+    }
+    assert core.check(air)["ok"] is True
+    built = core.plan(air)
+    assert len(built) == 2
+    assert [b["offset_mm"] for b in built] == [-21.0, 21.0]
+    assert [b["mirrored"] for b in built] == [False, True]
+
+
+@needs_core
+def test_the_same_part_on_the_same_frame_is_still_an_error():
+    # Two bodies in one place is a mistake, not a mirror.
+    air = {
+        "frames": [{"name": "F-1",
+                    "def": {"kind": "offset", "base": "YZ",
+                            "offset_mm": 0.0}}],
+        "placements": [{"part": "1", "frame": "F-1"},
+                       {"part": "1", "frame": "F-1"}],
+    }
+    report = core.check(air)
+    assert report["ok"] is False
+    assert "twice" in report["problems"][0]
+
+
+def test_place_cannot_express_one_part_on_two_frames():
+    """A known limit, pinned so it is not mistaken for a bug: the
+    `place` helper takes {part: frame}, so a part appears once. The
+    mirrored-rib case builds its placement list directly, and a
+    helper for it can come when there is a caller that needs one."""
+    p = stations.place({"B": "Rib-B-R"})
+    assert len(p) == 1
+
+
+# ----- circled plan labels -------------------------------------------------
+
+def test_a_circled_number_becomes_a_typeable_name():
+    """The plan labels formers with circled numbers. Nobody should
+    have to type one - and on Windows the console codepage cannot even
+    PRINT U+24B6, so a circled name would break the CLI and the logs."""
+    from planecraft import plan_names
+    assert plan_names.normalise("\u2460") == "1"      # circled 1
+    assert plan_names.normalise("\u2469") == "10"     # circled 10
+    assert plan_names.normalise("\u24b6") == "A"      # circled A
+    assert plan_names.normalise("\u24d0") == "a"
+
+
+def test_an_ordinary_name_is_left_exactly_alone():
+    # A name is the user's; normalising must not tidy it.
+    from planecraft import plan_names
+    for name in ["R1", "Former-3", "F6", "Stabilizer-2", "B"]:
+        assert plan_names.normalise(name) == name
+
+
+def test_surrounding_space_goes_but_inner_space_stays():
+    from planecraft import plan_names
+    assert plan_names.normalise("  Rib B  ") == "Rib B"
+
+
+def test_a_decorated_label_is_detectable():
+    from planecraft import plan_names
+    assert plan_names.is_decorated("\u24b6") is True
+    assert plan_names.is_decorated("A") is False
+    assert plan_names.is_decorated(None) is False
+
+
+def test_the_label_is_kept_beside_the_name():
+    """Matching a part back to the drawing is the reason the circled
+    form is worth keeping at all - as a label, never as the key."""
+    from planecraft import plan_names
+    label, name = plan_names.label_and_name("\u2460")
+    assert label == "\u2460"
+    assert name == "1"
+    # equal for an ordinary name, which is the common case
+    assert plan_names.label_and_name("R1") == ("R1", "R1")
+
+
+def test_a_normalised_name_matches_what_pagewright_already_has():
+    """The join that makes this worth doing: the user typed "1" in
+    PageWright, the plan draws a circled 1, and they must be the same
+    part."""
+    from planecraft import plan_names
+    assert plan_names.normalise("\u2460") == "1"
+    assert plan_names.normalise("\u24b7") == "B"

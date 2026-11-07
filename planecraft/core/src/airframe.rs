@@ -66,8 +66,12 @@ pub enum Problem {
     /// rather than dropped onto a default: a part in the wrong place
     /// is worse than a part obviously still flat.
     MissingFrame { part: String, frame: String },
-    /// Two placements claim the same part.
-    DuplicatePart { part: String },
+    /// Two placements put the same part on the same frame. Placing
+    /// one traced part on SEVERAL frames is the normal case - a plan
+    /// draws one rib and the wing uses it a dozen times, mirrored for
+    /// the other side - so what must be unique is the placement, not
+    /// the part.
+    DuplicatePlacement { part: String, frame: String },
     /// Two frames share a name, so a placement naming it is ambiguous.
     DuplicateFrame { name: String },
 }
@@ -78,8 +82,8 @@ impl Problem {
             Problem::MissingFrame { part, frame } => format!(
                 "{part}: no frame called {frame:?} - it stays flat until one exists"
             ),
-            Problem::DuplicatePart { part } => {
-                format!("{part}: placed more than once")
+            Problem::DuplicatePlacement { part, frame } => {
+                format!("{part}: placed on {frame:?} twice")
             }
             Problem::DuplicateFrame { name } => {
                 format!("two frames called {name:?}; names must differ")
@@ -113,8 +117,17 @@ impl Airframe {
         self.frames.iter().find(|f| f.name == name)
     }
 
-    pub fn placement_of(&self, part: &str) -> Option<&Placement> {
-        self.placements.iter().find(|p| p.part == part)
+    /// Every place this part is built, in file order.
+    ///
+    /// A list, not an option: one traced outline becomes many bodies.
+    /// The plan draws one rib B and the wing uses it on both sides.
+    pub fn placements_of(&self, part: &str) -> Vec<&Placement> {
+        self.placements.iter().filter(|p| p.part == part).collect()
+    }
+
+    /// How many times `part` is built.
+    pub fn count_of(&self, part: &str) -> usize {
+        self.placements_of(part).len()
     }
 
     /// Everything wrong with this airframe, in a stable order.
@@ -134,13 +147,19 @@ impl Airframe {
             }
         }
 
-        let mut seen_parts: BTreeMap<&str, usize> = BTreeMap::new();
+        // Keyed on (part, frame), not part: one traced outline may be
+        // built many times. The same part on the SAME frame is still
+        // wrong - two bodies in one place.
+        let mut seen: BTreeMap<(&str, &str), usize> = BTreeMap::new();
         for p in &self.placements {
-            *seen_parts.entry(p.part.as_str()).or_insert(0) += 1;
+            *seen.entry((p.part.as_str(), p.frame.as_str())).or_insert(0) += 1;
         }
-        for (part, n) in &seen_parts {
+        for ((part, frame), n) in &seen {
             if *n > 1 {
-                out.push(Problem::DuplicatePart { part: (*part).to_string() });
+                out.push(Problem::DuplicatePlacement {
+                    part: (*part).to_string(),
+                    frame: (*frame).to_string(),
+                });
             }
         }
 
@@ -200,13 +219,49 @@ mod tests {
     }
 
     #[test]
-    fn placing_a_part_twice_is_reported() {
+    fn one_part_may_be_built_on_many_frames() {
+        // The wing case: the plan draws ONE rib B and the wing uses
+        // it on both sides, mirrored. Rejecting that would reject
+        // nearly every part on a symmetric structure.
         let mut a = f86();
-        a.placements.push(Placement::new("1", "Former-2"));
-        assert!(a
-            .problems()
-            .iter()
-            .any(|p| matches!(p, Problem::DuplicatePart { .. })));
+        a.frames.push(Frame::station("Rib-B-R", BasePlane::XZ, -21.0));
+        a.frames.push(Frame::station("Rib-B-L", BasePlane::XZ, 21.0));
+        a.placements.push(Placement::new("B", "Rib-B-R"));
+        let mut left = Placement::new("B", "Rib-B-L");
+        left.mirrored = true;
+        a.placements.push(left);
+
+        assert!(a.problems().is_empty(), "{:?}", a.problems());
+        assert_eq!(a.count_of("B"), 2);
+        assert_eq!(a.resolved().len(), 4);
+    }
+
+    #[test]
+    fn the_same_part_on_the_same_frame_is_still_wrong() {
+        // Two bodies in one place is a mistake, not a mirror.
+        let mut a = f86();
+        a.placements.push(Placement::new("1", "Former-1"));
+        let probs = a.problems();
+        assert_eq!(probs.len(), 1);
+        assert!(matches!(probs[0], Problem::DuplicatePlacement { .. }));
+        assert!(probs[0].message().contains("Former-1"));
+    }
+
+    #[test]
+    fn a_part_on_two_frames_keeps_each_placements_own_settings() {
+        let mut a = f86();
+        a.frames.push(Frame::station("Rib-R", BasePlane::XZ, -21.0));
+        a.frames.push(Frame::station("Rib-L", BasePlane::XZ, 21.0));
+        a.placements.push(Placement::new("B", "Rib-R"));
+        let mut left = Placement::new("B", "Rib-L");
+        left.mirrored = true;
+        left.rotate_deg = 3.0;
+        a.placements.push(left);
+
+        let ps = a.placements_of("B");
+        assert_eq!(ps.len(), 2);
+        assert!(!ps[0].mirrored && ps[0].rotate_deg == 0.0);
+        assert!(ps[1].mirrored && ps[1].rotate_deg == 3.0);
     }
 
     #[test]
@@ -225,8 +280,8 @@ mod tests {
     fn every_problem_is_reported_not_just_the_first() {
         let mut a = f86();
         a.placements.push(Placement::new("R1", "nope"));
-        a.placements.push(Placement::new("1", "Former-2"));
-        assert_eq!(a.problems().len(), 2);
+        a.placements.push(Placement::new("1", "Former-1"));   // same frame
+        assert_eq!(a.problems().len(), 2, "{:?}", a.problems());
     }
 
     #[test]
@@ -286,8 +341,8 @@ mod order_tests {
 
         assert_eq!(a.problems(), b.problems());
         for part in ["1", "2", "R1"] {
-            let fa = a.placement_of(part).unwrap();
-            let fb = b.placement_of(part).unwrap();
+            let fa = a.placements_of(part)[0];
+            let fb = b.placements_of(part)[0];
             assert_eq!(fa, fb);
             assert_eq!(
                 a.frame_named(&fa.frame).unwrap(),
@@ -310,7 +365,7 @@ mod order_tests {
         b.placements.reverse();
         let text = serde_json::to_string(&b).unwrap();
         let back: Airframe = serde_json::from_str(&text).unwrap();
-        assert_eq!(back.placement_of("R1").unwrap().frame, "Wing");
+        assert_eq!(back.placements_of("R1")[0].frame, "Wing");
         assert!(back.problems().is_empty());
     }
 }
