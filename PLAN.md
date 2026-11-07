@@ -1085,3 +1085,54 @@ case including the mixed `6`/`F6` list - `re.split` keeps the type
 positions aligned, so the int/str comparison that looked like a bug
 cannot happen. The duplicate was deleted. Check for the function
 before writing it.
+
+### 16.15  Holes reach the recipe: a part with a cutout
+
+A traced hole was detected (§9788e10) but then dropped on the way to
+CAD: `build_recipe` took the first non-hole contour and built the
+sketch from that one loop. A lightening hole or a spar slot never got
+cut, and the recorded profile `area` was the GROSS outline area.
+
+Fixed by carrying the holes with the outline:
+
+  * `_centred_mm` takes `holes=` and returns `(outline, [holes])`. The
+    centring offset and the rotation are computed ONCE from the
+    outline and applied to every loop. Centring each loop on its own
+    centroid would stack the hole in the middle of the part.
+  * `_net_area_centroid` subtracts each hole as a true first moment,
+    so the CENTROID moves too, not only the area.
+  * the sketch gets `[outline] + holes`; `_sketch_item` and
+    `_extrude_item` were already loop-generic and needed no change.
+
+Why the area and centroid have to be right, not nearly right: the
+importer finds a profile by token first, and a synthetic recipe has no
+Fusion tokens, so the AREA + CENTROID fallback is the path that
+actually runs - at 1e-4 relative tolerance. A gross area therefore
+matches the wrong profile or none. Verified end to end on former 2 of
+the F-86 sheet (a 16-point hole):
+
+    gross 1199.37 mm2, hole 306.47 mm2, net 892.91 mm2
+    net x 3.175 mm = 2835.0 mm3  ==  measured 2835.0 mm3
+    (gross would have been 3808.0 mm3)
+
+and the rebuild gave **27 bodies, not 28** - the hole is a cutout
+through the solid, not a second solid sitting in the opening. Body 2
+has 48 faces against body 1's 34; the extra 14 are the hole wall.
+
+The format's own rule, from the round-trip project's exporter:
+`loops[0]` is the outer boundary and `loops[1:]` are its holes. One
+extrude is one profile is one outer plus its holes - a hole must never
+become its own sketch/extrude pair. Winding does not need
+normalising: the OpenSCAD converter sorts loops by descending absolute
+area and differences the rest from the largest, so the only
+requirement is that a hole is never bigger than its outline.
+
+**Several outlines in one part are reported, not built.**
+`extract_contours` guarantees a hole follows its own outer, so a
+second outer means a second PIECE. Collecting every hole in the object
+and attaching it to the first outline cut a hole where there was none
+AND dropped the other piece silently - measured on a two-piece
+fixture: 14.0 cm2 where piece A alone is 15.0. Nothing in PageWright
+makes such an object today (one polygon is one outline), so this
+guards the format rather than a current caller, and it reports instead
+of guessing because a wrong cutout is a wasted part.

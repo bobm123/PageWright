@@ -388,3 +388,74 @@ def test_as_drawn_does_not_disturb_a_placed_part():
     a = [q["xyz"] for q in plain["timeline"][0]["sketch"]["points"]]
     b = [q["xyz"] for q in drawn["timeline"][0]["sketch"]["points"]]
     assert a == b
+
+
+def test_a_hole_becomes_a_second_loop_of_the_profile():
+    """A former with a lightening hole: the hole is cut, not filled, so
+    it goes in the sketch and the profile's area is net of it."""
+    p = _project([Build(thickness_mm=1.6)], size=(100, 80))
+    p.objects[0].contours.append(Contour(
+        points=[(30, 30), (50, 30), (50, 50), (30, 50)], role="hole"))
+    doc, _ = rx.build_recipe(p)
+    prof = doc["timeline"][1]["extrude"]["profile"]
+    assert len(prof["loops"]) == 2
+    assert prof["area"] == pytest.approx(5.0 * 4.0 - 1.0 * 1.0)   # cm^2
+    assert len(doc["timeline"][0]["sketch"]["curves"]) == 8
+
+
+def test_a_hole_moves_with_its_part_when_the_part_is_centred():
+    """Centring subtracts the OUTLINE's centroid from every loop. If a
+    hole were centred on its own centroid it would jump to the middle
+    of the part."""
+    p = _project([Build(thickness_mm=1.6)], size=(100, 80))
+    p.objects[0].contours.append(Contour(
+        points=[(20, 20), (40, 20), (40, 40), (20, 40)], role="hole"))
+    doc, _ = rx.build_recipe(p)
+    pts = doc["timeline"][0]["sketch"]["points"]
+    outline = [q["xyz"] for q in pts[:4]]
+    hole = [q["xyz"] for q in pts[4:]]
+    # the hole sits off-centre, nearer one corner, exactly as drawn
+    hx = sum(q[0] for q in hole) / 4.0
+    ox = sum(q[0] for q in outline) / 4.0
+    assert hx < ox - 0.5          # still offset, not collapsed onto centre
+
+
+def test_the_profile_centroid_shifts_with_the_hole():
+    """The importer falls back to AREA + CENTROID to find the profile,
+    at 1e-4 relative tolerance, so the centroid must be the net one -
+    a true first-moment subtraction, not the outline's."""
+    p = _project([Build(thickness_mm=1.6)], size=(100, 80))
+    plain, _ = rx.build_recipe(p)
+    p.objects[0].contours.append(Contour(
+        points=[(20, 20), (40, 20), (40, 40), (20, 40)], role="hole"))
+    holed, _ = rx.build_recipe(p)
+    a = plain["timeline"][1]["extrude"]["profile"]["centroid"]
+    b = holed["timeline"][1]["extrude"]["profile"]["centroid"]
+    assert a != b                 # an off-centre hole moves the centroid
+
+
+def test_several_outlines_in_one_part_are_reported_not_built():
+    """A hole belongs to the outline it sits inside. Two outlines mean
+    two pieces, and attaching the second piece's holes to the first
+    would cut a hole where there is none AND drop the other piece."""
+    p = _project([Build(thickness_mm=1.6)], size=(40, 40))
+    o = p.objects[0]
+    o.contours.append(Contour(points=[(10, 10), (20, 10), (20, 20),
+                                      (10, 20)], role="hole"))
+    o.contours.append(Contour(points=[(100, 10), (140, 10), (140, 50),
+                                      (100, 50)]))
+    o.contours.append(Contour(points=[(110, 20), (120, 20), (120, 30),
+                                      (110, 30)], role="hole"))
+    with pytest.raises(rx.RecipeError):
+        rx.build_recipe(p)        # the only part, so nothing is left
+
+
+def test_one_bad_part_does_not_stop_the_others():
+    p = _project([Build(thickness_mm=1.6), Build(thickness_mm=1.6)],
+                 size=(40, 40))
+    p.objects[0].contours.append(Contour(
+        points=[(100, 10), (140, 10), (140, 50), (100, 50)]))
+    doc, skipped = rx.build_recipe(p)
+    assert [n for n, _r in skipped] == ["Part 1"]
+    assert "separate outlines" in skipped[0][1]
+    assert len(doc["timeline"]) == 2          # Part 2 still built

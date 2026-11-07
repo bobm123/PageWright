@@ -110,8 +110,11 @@ def _rotate(points, degrees):
 
 
 def _centred_mm(contour, mm_per_pixel, pixel_height, rotate_deg=None,
-                centre=True):
-    """Contour pixels -> mm in the sketch plane.
+                centre=True, holes=()):
+    """Contour pixels -> mm in the sketch plane, as (outline, [holes]).
+
+    The holes move with the outline, so they stay where they are in the
+    part.
 
     Image y grows downward and CAD y grows up, so the row is flipped.
 
@@ -125,12 +128,29 @@ def _centred_mm(contour, mm_per_pixel, pixel_height, rotate_deg=None,
     solids (measured: 15 parts of the F-86D sheet, all at z 0..1.6).
     Laid out as drawn they are at least separate, pickable bodies.
     """
-    pts = [(x * mm_per_pixel, (pixel_height - y) * mm_per_pixel)
-           for x, y in contour.points]
+    def mm(c):
+        return [(x * mm_per_pixel, (pixel_height - y) * mm_per_pixel)
+                for x, y in c.points]
+    loops = [mm(contour)] + [mm(h) for h in holes]
     if centre:
-        _area, cx, cy = polygon_area_centroid(pts)
-        pts = [(x - cx, y - cy) for x, y in pts]
-    return _rotate(pts, rotate_deg)
+        _area, cx, cy = polygon_area_centroid(loops[0])
+        loops = [[(x - cx, y - cy) for x, y in loop] for loop in loops]
+    loops = [_rotate(loop, rotate_deg) for loop in loops]
+    return loops[0], loops[1:]
+
+
+def _net_area_centroid(outline, holes):
+    """Area and centroid of an outline less its holes, as
+    polygon_area_centroid gives them: the profile Fusion and SolidCraft
+    see is the region between the loops."""
+    area, cx, cy = polygon_area_centroid(outline)
+    mx, my = area * cx, area * cy
+    for h in holes:
+        ha, hx, hy = polygon_area_centroid(h)
+        area, mx, my = area - ha, mx - ha * hx, my - ha * hy
+    if area <= 0:
+        return 0.0, 0.0, 0.0
+    return area, mx / area, my / area
 
 
 def _to_world_cm(points_mm, plane, station_mm):
@@ -327,10 +347,31 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE,
         # An unplaced part keeps its sheet position unless it is being
         # placed: otherwise they all stack on the origin.
         keep = as_drawn and not getattr(build, "plane", None)
-        pts_mm = _centred_mm(outer, mpp, project.pixel_height, rotate,
-                             centre=not keep)
-        area_mm2, cx, cy = polygon_area_centroid(pts_mm)
-        loop_cm = _to_world_cm(pts_mm, plane, station)
+        # Holes belong to the outline they sit inside. extract_contours
+        # guarantees a hole follows its own outer, so a second outer
+        # means a second PIECE and its holes are not this one's. That
+        # case is reported rather than built: attaching them here would
+        # cut a hole where there is none and drop the other piece
+        # silently. Nothing in PageWright makes such an object today -
+        # one polygon is one outline - so this guards the format, not a
+        # current caller.
+        outers = [c for c in obj.contours
+                  if getattr(c, "role", "outer") != "hole"
+                  and len(c.points) >= 3]
+        if len(outers) > 1:
+            skipped.append((obj.name,
+                            "%d separate outlines in one part: split "
+                            "them into a part each" % (len(outers),)))
+            continue
+        holes = [c for c in obj.contours
+                 if getattr(c, "role", "outer") == "hole"
+                 and len(c.points) >= 3]
+        pts_mm, holes_mm = _centred_mm(outer, mpp, project.pixel_height,
+                                       rotate, centre=not keep,
+                                       holes=holes)
+        area_mm2, cx, cy = _net_area_centroid(pts_mm, holes_mm)
+        loops_cm = [_to_world_cm(loop, plane, station)
+                    for loop in [pts_mm] + holes_mm]
         centroid_cm = _to_world_cm([(cx, cy)], plane, station)[0]
 
         name = _safe(obj.name, used)
@@ -341,7 +382,7 @@ def build_recipe(project, design=None, default_plane=DEFAULT_PLANE,
             groups.setdefault(assembly, []).append(
                 "Body%d" % (index // 2 + 1))
         sketch, loop_tokens = _sketch_item(index, name, plane, station,
-                                           [loop_cm], assembly)
+                                           loops_cm, assembly)
         timeline.append(sketch)
         timeline.append(_extrude_item(
             index + 1, "%s_extrude" % name, name, loop_tokens,
