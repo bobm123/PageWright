@@ -1358,3 +1358,38 @@ The lesson worth keeping: the algorithm found nine lines and would
 have happily reported nine formers. What caught the tenth was one
 sentence from someone who knows the aeroplane, used to anchor the
 numbering - not a better threshold.
+
+### 16.21  Correction: the former numbering is not settled
+
+16.20 claimed all ten former stations were confirmed. That was wrong,
+and the error is worth recording because it was made twice.
+
+**F6 is not former 6.** On this plan F1..F6 are longerons and cockpit
+structure - F6 is the cockpit floor, the horizontal line under the
+seat. The formers are the CIRCLED numbers. "Former 6 is about 5.4 in
+back, behind the cockpit" was read as confirming the line at 5.448
+in, but the user was describing a different part entirely, so the
+anchor that fixed the whole mapping never existed.
+
+**The leader arrows do not all point the same way.** Measured by
+walking the leader runs: the circled 6 and 7 leaders run LEFT to the
+lines at 3.62 and 5.45 in, while the one at 2.04 in runs RIGHT.
+Direction varies to avoid clutter, so "each number labels the line to
+its right" - the assumption behind 16.20 - is simply not a rule.
+
+Taking the left-pointing reading at face value shifts everything by
+one and leaves a "former 0", which means the nose pair A/B is
+probably ONE former drawn where the fuselage curves, not two. That
+also explains why its edges read 36 px apart instead of the usual 19.
+
+What survives: the ten LINE POSITIONS, which three independent scans
+agree on. The sample file now letters them A..J and records the
+mapping as an open question rather than asserting one.
+
+The lesson is narrower than 16.20's. Anchoring a machine reading on
+one human sentence worked - it correctly revealed the mapping was
+wrong - but only because the sentence was checked against the
+drawing. The failure was taking "former 6" to mean the part the
+algorithm had labelled 6, when the plan has both an F6 and a circled
+6 and they are different things. Where a plan names parts in two
+schemes, a name alone is not an identifier.
