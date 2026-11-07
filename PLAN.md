@@ -1136,3 +1136,62 @@ fixture: 14.0 cm2 where piece A alone is 15.0. Nothing in PageWright
 makes such an object today (one polygon is one outline), so this
 guards the format rather than a current caller, and it reports instead
 of guessing because a wrong cutout is a wasted part.
+
+### 16.16  R = rib, and why placement becomes a separate app (PlaneCraft)
+
+`R -> XZ` added to the F-86 project's convention, so R1..R3 stand as
+wing ribs (verified: 10 YZ formers, 3 XZ ribs, 14 left flat). No code
+change was needed - the per-plan convention from §16.14 already covers
+it, which is the evidence that the naming mechanism is in the right
+shape.
+
+The question behind it was bigger: parts will eventually sit on offset
+planes, angled planes, and construction geometry nobody has designed
+yet, so the convention should map a name class to a PLANE REFERENCE
+rather than to one of three hardcoded base planes. That is true, but
+it is not the whole requirement, and chasing it inside PageWright
+would be building the wrong half.
+
+**What the plan sheets actually say.** Sheet 2 is the parts sheet:
+what shape a part is and what stock it is cut from. Sheet 1 is the
+assembly drawing, and it carries everything placement needs:
+
+  * formers 1..10 as circled numbers AT THEIR STATIONS - the
+    `station_mm` that `Build` has always had and nothing has ever
+    filled in,
+  * F1..F6 and T3 drawn as LINES ALONG the side view, which is the
+    visual confirmation that the F numbers are longerons,
+  * stock callouts that belong to the structure rather than to a
+    traced outline: "1/8 SQ LEADING EDGE", "SPAR 1/16 x 3/16",
+  * and assembly instructions in prose ("CEMENT 1/16 SQ STRIP TO
+    INDICATED POSITION ON FORMER 7 TO FORM CHANNEL FOR WING SPAR").
+
+So placement is not "pick a plane for this polygon". It is reading a
+SECOND drawing and matching its parts, stations and orientations
+against the first. Nothing about that is tracing.
+
+**The decision: a separate app, PlaneCraft.** It owns the workflow
+2D tracing -> 3D model -> modify -> back to 2D for the cutter:
+placement and planes (including offset, angled and construction),
+components, structure the plan draws but no polygon exists for
+(stringers, spars, leading edges), the modifications that are the
+POINT of going to 3D (motor mounts, servo bays, linkage and rubber-
+motor runs), and flattening the result back to sheets.
+
+PageWright stays what it is: scan -> true-scale outline -> print or
+export. That keeps it honest for the dewarp and OCR work still
+queued (§M4), which has nothing to do with aeroplanes.
+
+**The seam is already clean**, which is why now is the time. The CAD
+leg - `recipe_export.py` (461), `notches.py` (319), `dxf_import.py`
+(278) - is reached only through `core/jobs.py`, never from the UI.
+`Build`/`Sheet`/`name_planes` are the handover: PageWright records what
+the PARTS sheet can tell you (outline, stock, the plan's own numbering
+convention) and PlaneCraft reads the ASSEMBLY sheet for the rest.
+Whether those modules move or PlaneCraft imports PageWright as a
+library is the first thing to settle when it starts.
+
+Open, deliberately not guessed at now: whether a placed part becomes
+its own component or stays grouped by `assembly` (today's behaviour).
+Decide it after the first real motor-mount or servo-bay edit, when
+there is something to judge it against.
