@@ -1,0 +1,13 @@
+{
+  "_what": "Former lines measured off sheet 1's side view. NOT yet an airframe: nothing maps a former NUMBER to a line, so these are measurements awaiting that mapping.",
+  "source": "D:/Projects/Airplanes/F86-Sabre/3DModels/plan_sheet1_300dpi.png",
+  "method": "Each former is drawn as two lines ~1/16 in apart (its own thickness); the station is the pair's centre. Found by column darkness over y 230..420 of the rotated side-view crop at 300 dpi.",
+  "crop": {"origin_px": [7626, 155], "rotation": "90 clockwise", "dpi": 300},
+  "expected_formers": 10,
+  "found": 9,
+  "why_incomplete": "The 'YF-578' lettering crosses the fuselage and breaks line detection there. Number-to-line mapping needs the circled digits read, which Hough circles cannot do (it also matches the glyphs '8' and '0').",
+  "stations_in_from_crop_left": [0.488, 1.793, 2.393, 3.622, 5.448, 7.698, 8.730, 9.982, 12.127],
+  "stations_mm_from_crop_left": [12.40, 45.54, 60.78, 91.99, 138.38, 195.54, 221.74, 253.54, 308.03],
+  "spacings_in": [1.305, 0.600, 1.228, 1.827, 2.250, 1.032, 1.252, 2.145],
+  "note": "Spacings run 0.60 to 2.25 in, so the formers are NOT evenly spaced: use frames_at, never frames_every. The datum is the crop's left edge, not the aircraft nose; a real airframe needs the datum chosen and the numbers rebased."
+}

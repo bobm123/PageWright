@@ -105,3 +105,45 @@ from stations. Not yet written: emitting to CAD (the SolidCraft
 recipe and the Fusion MCP are both reachable), structure the plan
 draws but no polygon exists for, and flattening a modified model back
 to sheets.
+
+## The return leg, noted and not yet built
+
+A modified 3D model has to come back to 2D for the cutter, and the
+target is not one app:
+
+* **PageWright** again, to print 1:1 or re-tile,
+* **Inkscape** or **VectorCraft** via SVG, which is what laser
+  cutters take, to re-nest parts for grain direction, stock
+  thickness or a different wood.
+
+Re-nesting is the operation that makes this more than a file format
+question. A part moved to another sheet keeps its identity, its stock
+and the plan's name for it, and that only survives if the export
+carries it. Losing it means the part comes back as an anonymous
+outline and the match to the plan has to be made by eye again.
+
+So the metadata worth preserving is roughly: the part's name as the
+plan gives it, its stock (thickness and material), its frame and
+placement, and what it came from - the traced project and the
+airframe. A laser also cares about cut-vs-score-vs-engrave, and grain
+direction is a per-part property a nester must not silently rotate
+away.
+
+**Not designed yet, deliberately.** There is no 3D model to export,
+so any format now would be guessed against a use case nobody has run.
+What IS worth doing meanwhile is not painting into a corner:
+
+* `Placement` and `Frame` carry a `name` and serialise by it, so a
+  part is identifiable without positional indexes;
+* `Airframe.parts_source` records which PageWright project the parts
+  came from, so the pair can be matched up again;
+* `Frame.note` exists for free text off the plan;
+* nothing is keyed on list ORDER anywhere - `frame_named` and
+  `placement_of` look up by name, so re-ordering or re-nesting a
+  sheet cannot break a reference.
+
+Those four are enough to attach a metadata layer later without
+re-cutting the model, and they each earn their place today. SVG has
+somewhere obvious to put it when the time comes (`id`, `inkscape:label`,
+a private namespace, or a sidecar JSON beside the SVG); picking
+between those is a decision for when there is something to carry.

@@ -258,3 +258,59 @@ mod tests {
         assert!(!text.contains("mirrored"), "{text}");
     }
 }
+
+#[cfg(test)]
+mod order_tests {
+    use super::*;
+    use crate::frame::BasePlane;
+
+    fn air() -> Airframe {
+        let mut a = Airframe::new();
+        a.frames.push(Frame::station("F-1", BasePlane::YZ, 0.0));
+        a.frames.push(Frame::station("F-2", BasePlane::YZ, 25.4));
+        a.frames.push(Frame::reference("Wing"));
+        a.placements.push(Placement::new("1", "F-1"));
+        a.placements.push(Placement::new("2", "F-2"));
+        a.placements.push(Placement::new("R1", "Wing"));
+        a
+    }
+
+    /// Re-nesting a sheet re-orders parts. Nothing may be keyed on
+    /// that order, or a part moved to another sheet loses its frame.
+    #[test]
+    fn reordering_changes_nothing_that_matters() {
+        let a = air();
+        let mut b = air();
+        b.frames.reverse();
+        b.placements.reverse();
+
+        assert_eq!(a.problems(), b.problems());
+        for part in ["1", "2", "R1"] {
+            let fa = a.placement_of(part).unwrap();
+            let fb = b.placement_of(part).unwrap();
+            assert_eq!(fa, fb);
+            assert_eq!(
+                a.frame_named(&fa.frame).unwrap(),
+                b.frame_named(&fb.frame).unwrap()
+            );
+        }
+        // same set of resolved pairs, whatever the order
+        let mut ra: Vec<_> = a.resolved().iter().map(|(p, f)| (&p.part, &f.name)).collect();
+        let mut rb: Vec<_> = b.resolved().iter().map(|(p, f)| (&p.part, &f.name)).collect();
+        ra.sort();
+        rb.sort();
+        assert_eq!(ra, rb);
+    }
+
+    /// A part keeps its identity across a round trip, so a nester may
+    /// rewrite the file wholesale without breaking references.
+    #[test]
+    fn identity_survives_a_json_round_trip_in_any_order() {
+        let mut b = air();
+        b.placements.reverse();
+        let text = serde_json::to_string(&b).unwrap();
+        let back: Airframe = serde_json::from_str(&text).unwrap();
+        assert_eq!(back.placement_of("R1").unwrap().frame, "Wing");
+        assert!(back.problems().is_empty());
+    }
+}

@@ -1230,3 +1230,46 @@ The division:
 If PageWright is ever ported or PlaneCraft outlives it, `notches.py`
 moves to whichever one still needs a scale - it has no other
 dependency to untangle.
+
+### 16.18  Stations off sheet 1, and a note about the return leg
+
+**Stations.** Sheet 1's side view draws each former as TWO lines
+about 1/16 in apart - the former's own thickness, not a spacing - so
+the station is the pair's centre. Detected on the 300 dpi scan by
+column darkness, nine pairs came out at (inches from the crop's left
+edge):
+
+    0.488  1.793  2.393  3.622  5.448  7.698  8.730  9.982  12.127
+
+Spacings run 0.60 to 2.25 in, which settles one thing: the formers
+are NOT evenly spaced, so `frames_every` would have been wrong here
+and `frames_at` is the right tool.
+
+Two things stop this being finished. Ten formers are expected and
+nine pairs were found - the "YF-578" lettering crosses the fuselage
+and breaks the line detection in that region. And nothing yet maps a
+NUMBER to a line: Hough circles finds eleven ring-like marks in the
+number row, but several are glyphs ("8", "0") rather than circled
+part numbers, and no amount of geometry tells you which circle holds
+which digit. Reading the digits is an OCR problem on a 1952 scan.
+
+That mapping is exactly what `frames_at` refuses to guess at, so it
+is being put to the user with the measurements shown rather than
+assumed. The measuring is the tedious part and it is done.
+
+**The return leg, noted not solved.** A modified 3D model has to come
+back to 2D, and the target may be PageWright (print 1:1) or SVG for
+Inkscape or VectorCraft (re-nest for grain, stock or material). That
+re-nesting is what makes it more than a format question: a part moved
+to another sheet must keep its name, stock, frame and provenance, or
+it returns as an anonymous outline and the match to the plan has to
+be made by eye again.
+
+Deliberately NOT designed yet - there is no 3D model to export, so
+any format now would be guessed. What is being done instead is
+avoiding the corner: `Frame` and `Placement` are keyed by NAME and
+serialise by it, `Airframe.parts_source` records the originating
+project, `Frame.note` holds free text off the plan, and no lookup
+anywhere depends on list order. Each earns its place today, and
+together they are enough to hang a metadata layer on later without
+re-cutting the model.
