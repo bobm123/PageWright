@@ -1195,3 +1195,38 @@ Open, deliberately not guessed at now: whether a placed part becomes
 its own component or stays grouped by `assembly` (today's behaviour).
 Decide it after the first real motor-mount or servo-bay edit, when
 there is something to judge it against.
+
+### 16.17  Which app snaps to 1/16: PageWright, used by both
+
+`core/notches.py` stays in PageWright. The reason is not ownership but
+what snapping NEEDS: a scale. Without mm per pixel there is no 1/16
+inch to snap to, and a calibrated scan is PageWright's whole business.
+
+It is already reusable as it stands, which is the part worth
+recording. The module imports `math` and `numpy` and references no
+PageWright model type at all - zero mentions of Contour,
+TracedObject, Project or cv2. `snap_notches` is points in, points
+out, with the scale as an argument.
+
+So a part drawn in CAD snaps by passing `mm_per_pixel=1.0`, which
+makes the "pixels" millimetres. Measured: a longeron drawn 1.70 mm
+tall and 0.12 mm out of square comes back at exactly 1.5875 mm and
+square. `step_mm` is a parameter too, so 3/32 and 1/8 stock work the
+same way - and a 3.30 mm edge is correctly LEFT ALONE against a 3/32
+step, being too far from a multiple to snap honestly.
+
+That covers the case this came from: someone adds a custom longeron
+while working the 3D model and wants it true to stock size. PlaneCraft
+calls PageWright's function rather than growing its own, which is also
+why PlaneCraft imports PageWright as a library instead of copying it.
+
+The division:
+
+  * PageWright OWNS the algorithm and the GUI action, because it owns
+    tracing and calibration.
+  * PlaneCraft CALLS it, in millimetres, for geometry that never came
+    off a scan.
+
+If PageWright is ever ported or PlaneCraft outlives it, `notches.py`
+moves to whichever one still needs a scale - it has no other
+dependency to untangle.

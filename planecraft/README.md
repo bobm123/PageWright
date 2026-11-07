@@ -60,6 +60,25 @@ possible even when defining it here is not, so an angled plane, a
 plane through three points, or whatever a CAD tool offers next is
 never a blocker.
 
+## Stock sizes: PageWright's algorithm, called from here
+
+Snapping an edge to 1/16 in needs a scale, and a calibrated scan is
+PageWright's business, so `core/notches.py` stays there. It is
+already scale-agnostic - points in, points out, with the scale as an
+argument, and no PageWright model type anywhere in it - so
+`planecraft.stock` calls it rather than growing a second copy:
+
+```python
+from planecraft import stock
+pts, report = stock.snap_mm(longeron_mm, stock="1/16")
+```
+
+`mm_per_pixel=1.0` makes the "pixels" millimetres, which is what
+geometry drawn in CAD already is. A longeron drawn 1.70 mm tall and
+0.12 mm out of square comes back square at exactly 1.5875 mm. An edge
+too far from a multiple is left as drawn and counted in the report,
+never dragged to a size nobody asked for.
+
 ## Refusing to guess
 
 A placement whose frame does not exist is **reported and left out**,

@@ -181,3 +181,42 @@ def test_a_degenerate_contour_is_safe():
         out, report = nt.snap_notches(pts, MMPP)
         assert len(out) == len(pts)
         assert report.snapped == 0
+
+
+# ----- used from CAD, not from a scan --------------------------------------
+
+def test_snapping_works_in_millimetres_for_geometry_with_no_scan():
+    """PlaneCraft's case: a longeron drawn in the 3D model, wanted
+    true to stock size. mm_per_pixel=1.0 makes the "pixels" mm, so
+    the same function serves without a copy of it living elsewhere."""
+    stock = 25.4 / 16.0
+    pts = [(0.0, 0.0), (60.0, 0.12), (60.0, 1.70), (0.0, 1.72)]
+    out, report = nt.snap_notches(pts, mm_per_pixel=1.0)
+    height = abs(out[3][1] - out[0][1])
+    assert height == pytest.approx(stock, abs=1e-6)
+    assert report.squared == 4          # and it was squared up too
+
+
+def test_other_stock_sizes_snap_to_their_own_step():
+    pts = [(0.0, 0.0), (40.0, 0.0), (40.0, 3.30), (0.0, 3.30)]
+    out, _r = nt.snap_notches(pts, 1.0, step_mm=25.4 / 8.0)
+    assert abs(out[3][1] - out[0][1]) == pytest.approx(25.4 / 8.0,
+                                                       abs=1e-6)
+
+
+def test_an_edge_too_far_from_a_multiple_is_left_alone():
+    """3.30 mm against a 3/32 step is not an honest snap, so the
+    tolerance declines it rather than inventing a dimension."""
+    pts = [(0.0, 0.0), (40.0, 0.0), (40.0, 3.30), (0.0, 3.30)]
+    out, _r = nt.snap_notches(pts, 1.0, step_mm=25.4 * 3 / 32.0)
+    assert abs(out[3][1] - out[0][1]) == pytest.approx(3.30, abs=1e-6)
+
+
+def test_the_module_needs_nothing_from_pagewrights_model():
+    """The property that makes it shareable: points in, points out.
+    A model import here would tie it to one app."""
+    import io
+    src = io.open(nt.__file__.replace(".pyc", ".py"),
+                  encoding="utf-8").read()
+    for name in ("Contour", "TracedObject", "Project", "cv2", "PySide"):
+        assert name not in src, "notches.py now depends on %s" % name

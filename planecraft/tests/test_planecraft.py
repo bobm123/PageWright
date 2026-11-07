@@ -163,3 +163,60 @@ def test_a_traced_project_reads_back_with_its_convention(tmp_path):
     assert parts.implied_planes(q) == {"1": "YZ", "R1": "XZ", "F1": None}
     rows = {r["part"]: r for r in parts.summary(q)}
     assert rows["1"]["thickness_mm"] == 1.5875
+
+
+# ----- snapping CAD geometry to stock size ---------------------------------
+
+def _pw():
+    try:
+        from planecraft import parts
+        parts._ensure_pagewright()
+        import pagewright.core.notches  # noqa: F401
+        return True
+    except Exception:
+        return False
+
+
+needs_pagewright = pytest.mark.skipif(
+    not _pw(), reason="PageWright not importable")
+
+
+@needs_pagewright
+def test_a_longeron_drawn_in_cad_snaps_to_stock():
+    """The case this exists for: someone adds a custom longeron while
+    working the 3D model and wants it true to 1/16 in stock."""
+    from planecraft import stock
+    pts = [(0.0, 0.0), (60.0, 0.12), (60.0, 1.70), (0.0, 1.72)]
+    out, report = stock.snap_mm(pts, stock="1/16")
+    height = abs(out[3][1] - out[0][1])
+    assert height == pytest.approx(25.4 / 16.0, abs=1e-6)
+    assert report.squared == 4
+
+
+@needs_pagewright
+def test_other_stock_sizes_are_named_not_computed_by_the_caller():
+    from planecraft import stock
+    pts = [(0.0, 0.0), (40.0, 0.0), (40.0, 3.30), (0.0, 3.30)]
+    out, _r = stock.snap_mm(pts, stock="1/8")
+    assert abs(out[3][1] - out[0][1]) == pytest.approx(25.4 / 8.0,
+                                                       abs=1e-6)
+
+
+@needs_pagewright
+def test_an_edge_too_far_from_a_multiple_is_left_as_drawn():
+    from planecraft import stock
+    pts = [(0.0, 0.0), (40.0, 0.0), (40.0, 3.30), (0.0, 3.30)]
+    out, _r = stock.snap_mm(pts, stock="3/32")
+    assert abs(out[3][1] - out[0][1]) == pytest.approx(3.30, abs=1e-6)
+
+
+def test_an_unknown_stock_name_is_refused():
+    from planecraft import stock
+    with pytest.raises(ValueError):
+        stock.stock_mm("1/7")
+
+
+def test_stock_names_are_the_ones_a_plan_uses():
+    from planecraft import stock
+    assert stock.stock_mm("1/16") == pytest.approx(25.4 / 16.0)
+    assert stock.stock_mm('1/8"') == pytest.approx(25.4 / 8.0)
