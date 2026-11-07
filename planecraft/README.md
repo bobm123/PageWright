@@ -133,6 +133,27 @@ recipe and the Fusion MCP are both reachable), structure the plan
 draws but no polygon exists for, and flattening a modified model back
 to sheets.
 
+## Iterative, not a pipeline (noted, not built)
+
+2D -> 3D runs many times over one project's life. Trace the main
+parts, build, then go back for the landing gear, update the sheets,
+update the model - possibly placing the new parts by hand in CAD -
+and round again. Detail accretes until the model is ready to modify.
+
+KiCad's "update from schematic" is the same shape of problem: the
+schematic says WHAT exists, the layout says WHERE it physically sits,
+and an update reconciles them without discarding placement work.
+Here, PageWright owns outlines and stock, the airframe owns intended
+placement, and the CAD model owns where a part actually ended up
+after someone moved it to fit a servo.
+
+The gap: `Placement` has no transform field, so there is nowhere to
+record "moved in CAD, now here". Not needed yet - there is no model
+to re-import from - but when it comes it will want a stable identity
+per placement (names already serve), somewhere to hold the as-built
+transform beside the intended one, and a reconcile report shaped like
+`problems()`: added, moved, missing.
+
 ## The return leg, noted and not yet built
 
 A modified 3D model has to come back to 2D for the cutter, and the

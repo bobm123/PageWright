@@ -1393,3 +1393,60 @@ drawing. The failure was taking "former 6" to mean the part the
 algorithm had labelled 6, when the plan has both an F6 and a circled
 6 and they are different things. Where a plan names parts in two
 schemes, a name alone is not an identifier.
+
+### 16.22  The workflow is iterative, not a pipeline (noted, not built)
+
+The user's framing, recorded because it changes what "done" means and
+because one part of it would be expensive to retrofit.
+
+**It is not trace-once-then-build.** The target is roughly 80% of the
+main parts located, with a path for adding the rest later: go back and
+trace L1/L2/L3 (the landing gear), update the sheets, update the 3D
+model with the new parts, possibly placing those by hand in the CAD
+tool. Then round again. Detail accretes until the model is ready to
+modify, and only then does it flatten back to 2D.
+
+So 2D -> 3D runs many times over one project's life, and the second
+run must not destroy what the first produced.
+
+**The KiCad analogy is the precise one.** Schematic -> PCB "update
+from schematic" is the same shape of problem: the schematic is
+authoritative for WHAT exists and how it connects, the layout is
+authoritative for WHERE things physically sit, and an update
+reconciles the two without throwing away placement work. Footprints
+already placed stay put; new ones arrive to be positioned; removed
+ones are called out rather than silently deleted.
+
+Mapped onto this: PageWright's project is authoritative for part
+OUTLINES and stock, the airframe for INTENDED placement, and the CAD
+model for where a part ACTUALLY ended up after someone moved it to
+fit a servo. A re-import must add the newly traced parts without
+resetting the ones already positioned by hand.
+
+**The gap that matters.** `Placement` has no transform field, so
+there is nowhere to record "this part was moved in CAD, and here is
+where it went". Checked: no transform, matrix or moved_* anywhere in
+the core. Everything today is intent flowing one way.
+
+That is the piece worth not painting over. It does NOT need building
+now - there is no 3D model to re-import from - but when it comes it
+will want:
+
+  * a stable identity per placement, so a part can be matched across
+    a round trip even after it moves. Names already serve: parts and
+    frames are keyed by name, nothing by list order (16.18).
+  * somewhere to record the as-built transform beside the intended
+    one, so the two can disagree and the difference be shown.
+  * a reconcile report in the shape of `problems()`: added, moved,
+    missing - the "update from schematic" summary - rather than a
+    silent overwrite.
+
+**Project file.** The user raised KiCad-style project files to hold
+this together. Plausible: a project would name the PageWright
+`.tiproj.json`, the airframe, the CAD document and the export target,
+so the set travels together instead of being re-matched by hand each
+session. `Airframe.parts_source` is the one-field version of this
+already. Deferred until there is a second file to point at.
+
+Nothing is being changed for this yet. It is recorded so the next
+design decision is made knowing where it leads.
