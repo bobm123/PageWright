@@ -1495,3 +1495,47 @@ L1-L3, and the small parts (rudder pedals, brake drums, dihedral
 braces, blocks C/F/G/H). Nothing on the sheet is unaccounted for on
 the plan - there is simply more of it to trace, which is the
 iterative workflow of 16.22 rather than a problem.
+
+### 16.24  Laminations are normal, not a measurement error
+
+Formers 1 and 2 are both 1/8 in, glued face to face, and the pair
+then glued to former 3 in 1/16 in. That is a standard construction on
+these models: several laminations near the nose give the builder
+material to sand the compound curves from, or structure to carry a
+rubber-power propeller assembly.
+
+This explains an anomaly §16.20 misread. At the nose the two lines
+read 36 px apart instead of the 19 px (1/16 in) every other former
+shows, and that was attributed to the fuselage curving. It is simpler
+than that: 36 px is about 0.12 in, which is ONE 1/8 in thickness, so
+the two lines are the outer faces of the laminated stack - two
+formers - rather than the two edges of one.
+
+The shapes agree. Former 1 is 32.7 x 34.5 mm and solid; former 2 is
+33.4 x 42.7 mm with the wheel-well opening. A stepped stack with the
+smaller disc forward, which is what you sand to a nose.
+
+**Consequence for the stations.** The measured centres are 5.47 mm
+apart, but two laminated 1/8 parts have centres ONE THICKNESS apart,
+3.175 mm. The measured pair-centre is not the part centre where parts
+are laminated. Left as measured for now and flagged in the sample
+file: the error is under 2 mm on a 308 mm fuselage and touches only
+the nose pair. It is worth fixing properly rather than by nudging a
+number, because the right fix records the LAMINATION, not a corrected
+station.
+
+**What the model cannot yet say.** "1 is glued to 2, and the pair to
+3" is assembly structure, not placement. Today those are three
+independent bodies at three stations that happen to touch.
+`Build.assembly` groups parts into a component, which is a different
+idea from "this face is glued to that face".
+
+Not building it now - same category as the transform tracking of
+§16.22, and better designed against a real model. But the shape of it
+is visible already: a lamination is a part placed relative to ANOTHER
+PART rather than to a frame, with a face and a stacking direction.
+Frames are named and parts are named, so a placement that refers to a
+part instead of a frame is expressible without changing the file
+format. Worth remembering when the transform work happens, since both
+want the same thing: a placement whose reference is not always a
+fixed plane.
