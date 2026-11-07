@@ -12,6 +12,8 @@
 
 use std::io::{self, Read, Write};
 
+use std::collections::HashMap;
+
 use planecraft_core::Airframe;
 
 fn main() {
@@ -41,6 +43,18 @@ fn main() {
             }
         }
         "plan" => {
+            // Thicknesses, when the caller supplied them, let a
+            // lamination resolve to a real station. Without them a
+            // laminated placement still reports, but at its base
+            // part's station - which is visibly wrong rather than
+            // quietly wrong.
+            let thick: HashMap<String, f64> = serde_json::from_str(&text)
+                .ok()
+                .and_then(|v: serde_json::Value| {
+                    v.get("thickness_mm").cloned()
+                })
+                .and_then(|v| serde_json::from_value(v).ok())
+                .unwrap_or_default();
             // What to build, with each placement's frame resolved.
             // A placement whose frame is missing is absent here and
             // named by `check` - never silently defaulted.
@@ -48,15 +62,20 @@ fn main() {
                 .resolved()
                 .into_iter()
                 .map(|(p, f)| {
+                    let base = f.offset_mm();
+                    let station = base.map(|b| b + air.laminate_shift(
+                        &p.part, &thick));
                     serde_json::json!({
                         "part": p.part,
                         "frame": f.name,
                         "buildable": f.is_buildable(),
                         "base": f.base().map(|b| b.as_str()),
-                        "offset_mm": f.offset_mm(),
+                        "offset_mm": station,
+                        "frame_offset_mm": base,
                         "rotate_deg": p.rotate_deg,
                         "in_plane_mm": p.offset_mm,
                         "mirrored": p.mirrored,
+                        "laminated_on": p.laminate.as_ref().map(|l| &l.on),
                     })
                 })
                 .collect();

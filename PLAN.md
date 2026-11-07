@@ -1539,3 +1539,60 @@ part instead of a frame is expressible without changing the file
 format. Worth remembering when the transform work happens, since both
 want the same thing: a placement whose reference is not always a
 fixed plane.
+
+### 16.25  The fuselage is built, and the recipe route cannot carry a station
+
+Ten formers at their measured stations, built in SolidCraft from the
+traced project plus the airframe. 302.7 mm nose to tail, and the nose
+laminations share a face exactly: former 1 occupies 6.93..10.11 mm
+and former 2 occupies 10.11..13.28.
+
+**Laminations are a placement option now.** A `Placement` may carry
+`laminate: {on, face}` - glued to the FACE of another placement
+rather than sitting on the frame's own plane. The station is then
+derived: half the base part's thickness plus half its own, repeating
+for a deeper stack. `Face` is `positive`/`negative` along the frame
+normal rather than "front"/"back", because which of those is forward
+depends on the plane.
+
+That also fixes the nose station properly, as §16.24 said it should.
+Former 2 was MEASURED at 12.40 mm - the pair reads as one thick line
+on the drawing, so the centre was wrong - and now comes out at 10.105
+mm, derived from former 1's station and the 1/8 in stock. The
+construction fact replaces the unreliable measurement rather than a
+hand-nudged number replacing it.
+
+Validation is in the core: gluing to a part that is not placed, and
+lamination loops, are both reported; `laminate_depth` is bounded so a
+cycle cannot spin.
+
+**The recipe route cannot carry a station.** Discovered by building
+it: the first attempt produced a fuselage 3.2 mm long with all ten
+formers at x = 0. The recipe was correct - sketch offsets 0.693 to
+30.803 cm, and the point coordinates carried them too - but
+`solidcraft_import.py:421 sketch_plane` returns `ref['name']` for a
+ConstructionPlane and never reads `ref['offset']`, so every sketch
+lands on the base plane.
+
+So `planecraft/solidcraft.py` drives the command API directly,
+emitting one `construct.plane.offset` per station and sketching on
+that. Verified in a 9-line probe before writing it: a sketch on an
+offset plane puts its body at the offset.
+
+This is the better division anyway. A FRAME is PlaneCraft's own idea
+and `construct.plane.offset` is exactly it, so there is no reason to
+launder it through a format that cannot hold it. `build3d.py` keeps
+the recipe path for the as-drawn case, where every part is at zero
+and the limitation does not bite.
+
+Two smaller decisions worth recording. `apply_airframe` works on a
+COPY of the project: placement is PlaneCraft's opinion about a traced
+file, and writing planes back would make a tracing tool's file depend
+on an assembly decision taken elsewhere. And a part built more than
+once becomes one object per placement named `<part>@<frame>`, since
+a recipe and a CAD document are both flat lists where the part name
+alone would collide.
+
+Not yet done: SolidCraft's own renderer segfaults headless
+(`snapshot` exits 139), so the model is verified by `inspect` and
+drawn from the measured bodies rather than rendered.

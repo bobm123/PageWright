@@ -33,6 +33,52 @@ pub struct Placement {
     /// from the right wing's outline.
     #[serde(default, skip_serializing_if = "is_false")]
     pub mirrored: bool,
+    /// Glued to the face of another placement rather than sitting on
+    /// the frame's own plane.
+    ///
+    /// Laminations are ordinary construction near a nose: several
+    /// 1/8 in discs face to face give the builder material to sand
+    /// the compound curves from, or structure for a rubber-power
+    /// propeller. Recording it as "stacked on THAT part's front face"
+    /// keeps the stack together when the part it is glued to moves -
+    /// which a hand-copied station does not.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub laminate: Option<Laminate>,
+}
+
+/// Which face of which placement this part is glued to.
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct Laminate {
+    /// The part it is glued to, by name. That part's own placement
+    /// supplies the station; this one is offset from it.
+    pub on: String,
+    /// Which way the stack grows from that part.
+    pub face: Face,
+}
+
+/// The side of a part a lamination is glued to.
+///
+/// Named by the frame's normal rather than by "front" and "back",
+/// because which of those is forward depends on the plane: a former
+/// on YZ has its normal down the fuselage, a rib on XZ across the
+/// span.
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum Face {
+    /// The face the frame normal points towards.
+    Positive,
+    /// The other one.
+    Negative,
+}
+
+impl Face {
+    /// +1 or -1: the direction a stack grows along the frame normal.
+    pub fn sign(self) -> f64 {
+        match self {
+            Face::Positive => 1.0,
+            Face::Negative => -1.0,
+        }
+    }
 }
 
 fn is_zero(v: &f64) -> bool {
@@ -55,6 +101,7 @@ impl Placement {
             rotate_deg: 0.0,
             offset_mm: [0.0, 0.0],
             mirrored: false,
+            laminate: None,
         }
     }
 }
@@ -74,6 +121,11 @@ pub enum Problem {
     DuplicatePlacement { part: String, frame: String },
     /// Two frames share a name, so a placement naming it is ambiguous.
     DuplicateFrame { name: String },
+    /// A lamination is glued to a part that is not placed anywhere.
+    LaminateMissing { part: String, on: String },
+    /// Laminations that refer to each other in a loop, so no station
+    /// can be worked out for any of them.
+    LaminateCycle { part: String },
 }
 
 impl Problem {
@@ -88,6 +140,12 @@ impl Problem {
             Problem::DuplicateFrame { name } => {
                 format!("two frames called {name:?}; names must differ")
             }
+            Problem::LaminateMissing { part, on } => format!(
+                "{part}: laminated to {on:?}, which is not placed"
+            ),
+            Problem::LaminateCycle { part } => format!(
+                "{part}: laminations refer to each other in a loop"
+            ),
         }
     }
 }
@@ -170,9 +228,40 @@ impl Airframe {
                     frame: p.frame.clone(),
                 });
             }
+            if let Some(lam) = &p.laminate {
+                if self.placements_of(&lam.on).is_empty() {
+                    out.push(Problem::LaminateMissing {
+                        part: p.part.clone(),
+                        on: lam.on.clone(),
+                    });
+                } else if self.laminate_depth(&p.part, 0).is_none() {
+                    out.push(Problem::LaminateCycle {
+                        part: p.part.clone(),
+                    });
+                }
+            }
         }
         out.sort();
+        out.dedup();
         out
+    }
+
+    /// How many laminations deep `part` sits, or None if the chain
+    /// loops. Bounded so a cycle cannot spin forever.
+    fn laminate_depth(&self, part: &str, seen: usize) -> Option<usize> {
+        if seen > self.placements.len() {
+            return None;
+        }
+        let p = self.placements.iter().find(|p| p.part == part)?;
+        match &p.laminate {
+            None => Some(seen),
+            Some(lam) => {
+                if lam.on == part {
+                    return None;          // glued to itself
+                }
+                self.laminate_depth(&lam.on, seen + 1)
+            }
+        }
     }
 
     /// The placements that can actually be built, paired with their
@@ -367,5 +456,167 @@ mod order_tests {
         let back: Airframe = serde_json::from_str(&text).unwrap();
         assert_eq!(back.placements_of("R1")[0].frame, "Wing");
         assert!(back.problems().is_empty());
+    }
+}
+
+impl Airframe {
+    /// How far a laminated placement sits from its frame, in mm.
+    ///
+    /// A lamination is glued to the FACE of another part, so it is
+    /// offset by half that part's thickness plus half its own - the
+    /// gap between two centres of touching sheets - and the chain
+    /// repeats for a stack more than two deep.
+    ///
+    /// `thickness_mm` maps part name to stock thickness. A part
+    /// missing from it contributes nothing, which keeps a stack that
+    /// is only partly specified from collapsing onto one station
+    /// silently: the shift is simply smaller and visibly so.
+    pub fn laminate_shift(
+        &self,
+        part: &str,
+        thickness_mm: &std::collections::HashMap<String, f64>,
+    ) -> f64 {
+        self.shift_inner(part, thickness_mm, 0)
+    }
+
+    fn shift_inner(
+        &self,
+        part: &str,
+        thick: &std::collections::HashMap<String, f64>,
+        depth: usize,
+    ) -> f64 {
+        if depth > self.placements.len() {
+            return 0.0;                     // a cycle; problems() reports it
+        }
+        let p = match self.placements.iter().find(|p| p.part == part) {
+            Some(p) => p,
+            None => return 0.0,
+        };
+        let lam = match &p.laminate {
+            Some(l) => l,
+            None => return 0.0,
+        };
+        if lam.on == part {
+            return 0.0;
+        }
+        let half_base = thick.get(&lam.on).copied().unwrap_or(0.0) / 2.0;
+        let half_self = thick.get(part).copied().unwrap_or(0.0) / 2.0;
+        lam.face.sign() * (half_base + half_self)
+            + self.shift_inner(&lam.on, thick, depth + 1)
+    }
+}
+
+#[cfg(test)]
+mod laminate_tests {
+    use super::*;
+    use crate::frame::BasePlane;
+    use std::collections::HashMap;
+
+    fn thick() -> HashMap<String, f64> {
+        // the F-86 nose: 1 and 2 are 1/8 in, 3 is 1/16 in
+        [("1", 3.175), ("2", 3.175), ("3", 1.5875)]
+            .into_iter()
+            .map(|(k, v)| (k.to_string(), v))
+            .collect()
+    }
+
+    fn nose() -> Airframe {
+        let mut a = Airframe::new();
+        a.frames.push(Frame::station("Former-1", BasePlane::YZ, 6.93));
+        a.placements.push(Placement::new("1", "Former-1"));
+        let mut two = Placement::new("2", "Former-1");
+        two.laminate = Some(Laminate {
+            on: "1".into(),
+            face: Face::Positive,
+        });
+        a.placements.push(two);
+        a
+    }
+
+    #[test]
+    fn a_lamination_sits_one_thickness_from_what_it_is_glued_to() {
+        // Two 1/8 in parts face to face: centres half+half = 3.175 mm
+        // apart, which is one thickness.
+        let a = nose();
+        assert_eq!(a.laminate_shift("1", &thick()), 0.0);
+        assert!((a.laminate_shift("2", &thick()) - 3.175).abs() < 1e-9);
+    }
+
+    #[test]
+    fn the_face_decides_which_way_the_stack_grows() {
+        let mut a = nose();
+        a.placements[1].laminate.as_mut().unwrap().face = Face::Negative;
+        assert!((a.laminate_shift("2", &thick()) + 3.175).abs() < 1e-9);
+    }
+
+    #[test]
+    fn a_stack_three_deep_accumulates() {
+        // 1 (1/8) + 2 (1/8) + 3 (1/16): 3's centre sits
+        // 3.175 + (3.175/2 + 1.5875/2) = 5.556 mm from 1's.
+        let mut a = nose();
+        a.placements.push({
+            let mut p = Placement::new("3", "Former-1");
+            p.laminate = Some(Laminate { on: "2".into(), face: Face::Positive });
+            p
+        });
+        let want = 3.175 + (3.175 / 2.0 + 1.5875 / 2.0);
+        assert!((a.laminate_shift("3", &thick()) - want).abs() < 1e-9);
+        assert!(a.problems().is_empty(), "{:?}", a.problems());
+    }
+
+    #[test]
+    fn a_missing_thickness_shrinks_the_shift_rather_than_guessing() {
+        // Half a stack specified must not collapse to one station
+        // silently; it comes out visibly short instead.
+        let a = nose();
+        let partial: HashMap<String, f64> =
+            [("1".to_string(), 3.175)].into_iter().collect();
+        let s = a.laminate_shift("2", &partial);
+        assert!((s - 3.175 / 2.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn gluing_to_a_part_that_is_not_placed_is_reported() {
+        let mut a = nose();
+        a.placements[1].laminate.as_mut().unwrap().on = "99".into();
+        assert!(a.problems().iter().any(
+            |p| matches!(p, Problem::LaminateMissing { .. })));
+    }
+
+    #[test]
+    fn a_lamination_loop_is_reported_not_spun_on() {
+        let mut a = nose();
+        a.placements[0].laminate = Some(Laminate {
+            on: "2".into(),
+            face: Face::Positive,
+        });
+        let probs = a.problems();
+        assert!(probs.iter().any(
+            |p| matches!(p, Problem::LaminateCycle { .. })), "{probs:?}");
+        // and it terminates
+        let _ = a.laminate_shift("1", &thick());
+    }
+
+    #[test]
+    fn gluing_a_part_to_itself_is_a_loop() {
+        let mut a = nose();
+        a.placements[1].laminate.as_mut().unwrap().on = "2".into();
+        assert!(!a.problems().is_empty());
+        assert_eq!(a.laminate_shift("2", &thick()), 0.0);
+    }
+
+    #[test]
+    fn an_ordinary_placement_serialises_without_a_laminate_field() {
+        let text = serde_json::to_string(&Placement::new("5", "F-5")).unwrap();
+        assert!(!text.contains("laminate"), "{text}");
+    }
+
+    #[test]
+    fn a_laminate_round_trips_through_json() {
+        let a = nose();
+        let text = serde_json::to_string(&a).unwrap();
+        let back: Airframe = serde_json::from_str(&text).unwrap();
+        assert_eq!(back, a);
+        assert!((back.laminate_shift("2", &thick()) - 3.175).abs() < 1e-9);
     }
 }
