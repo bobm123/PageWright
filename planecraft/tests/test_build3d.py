@@ -363,3 +363,44 @@ def test_a_hole_turns_with_its_part():
     assert (hx90, hy90) != (pytest.approx(hx0), pytest.approx(hy0))
     assert hx90 == pytest.approx(-hy0)
     assert hy90 == pytest.approx(hx0)
+
+
+@needs_pw
+@needs_core
+def test_an_in_plane_offset_reaches_the_sketch():
+    """A part is centred on its own centroid, so it straddles the
+    frame origin. `offset_mm` is how a keel gets carried back to
+    where the fuselage actually is - and solidcraft.py was dropping
+    it, the same way it dropped rotate_deg."""
+    from planecraft import solidcraft
+    def span(off):
+        air = {"frames": [_frame("F", 0.0, "XZ")],
+               "placements": [{"part": "1", "frame": "F",
+                               "offset_mm": off}]}
+        pts = [c["params"]["points"] for c in solidcraft.commands(
+            _project(), air) if c["command"] == "sketch.line"]
+        xs = [q[0][0] for q in pts]; ys = [q[0][1] for q in pts]
+        return min(xs), max(xs), min(ys), max(ys)
+    x0, x1, y0, y1 = span([0.0, 0.0])
+    sx0, sx1, sy0, sy1 = span([100.0, -17.0])
+    assert sx0 == pytest.approx(x0 + 100.0)
+    assert sx1 == pytest.approx(x1 + 100.0)
+    assert sy0 == pytest.approx(y0 - 17.0)
+    assert sy1 == pytest.approx(y1 - 17.0)
+
+
+@needs_pw
+@needs_core
+def test_the_offset_is_applied_after_the_rotation():
+    """Otherwise the rotation would turn the offset too, and a part
+    nudged along the fuselage would swing sideways instead."""
+    from planecraft import solidcraft
+    air = {"frames": [_frame("F", 0.0, "XZ")],
+           "placements": [{"part": "1", "frame": "F",
+                           "rotate_deg": 90.0,
+                           "offset_mm": [50.0, 0.0]}]}
+    pts = [c["params"]["points"] for c in solidcraft.commands(
+        _project(), air) if c["command"] == "sketch.line"]
+    xs = [q[0][0] for q in pts]
+    # the 20x20 fixture turned and then moved +50 in u
+    assert sum(xs) / len(xs) == pytest.approx(50.0, abs=1e-6)

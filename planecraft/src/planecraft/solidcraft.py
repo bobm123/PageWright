@@ -38,7 +38,7 @@ def _rotate(loop, degrees):
 
 
 def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
-                rotate_deg=0.0):
+                rotate_deg=0.0, shift_mm=(0.0, 0.0)):
     """A traced contour as sketch-plane millimetres.
 
     Image y grows downward and CAD y grows up, so the row is flipped -
@@ -67,6 +67,13 @@ def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
     _a, cx, cy = polygon_area_centroid(loops[0])
     loops = [[(x - cx, y - cy) for x, y in loop] for loop in loops]
     loops = [_rotate(loop, rotate_deg) for loop in loops]
+    # Shift LAST, so it is a move in the frame's own plane rather than
+    # something the rotation turns. A part centred on its centroid
+    # straddles the origin; this is how a keel gets carried back to
+    # where the fuselage actually is.
+    dx, dy = shift_mm
+    if dx or dy:
+        loops = [[(x + dx, y + dy) for x, y in loop] for loop in loops]
     return loops[0], loops[1:]
 
 
@@ -130,7 +137,8 @@ def commands(project, airframe, units="mm"):
         outline, holes = _outline_mm(
             obj, mpp, project.pixel_height,
             mirrored=p.get("mirrored", False),
-            rotate_deg=p.get("rotate_deg") or 0.0)
+            rotate_deg=p.get("rotate_deg") or 0.0,
+            shift_mm=tuple(p.get("in_plane_mm") or (0.0, 0.0)))
         if outline is None:
             raise ScriptError("%s has no closed outline" % p["part"])
 

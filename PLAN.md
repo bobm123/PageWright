@@ -1652,3 +1652,49 @@ The general point for this pipeline: a parts sheet is a nesting, not
 an assembly drawing. Orientation on the sheet carries no information
 about orientation in the aeroplane, and anything read from it has to
 be corrected per part.
+
+### 16.28  The keels, and notches as an orientation check
+
+The user's suggestion: place F1-F3 before chasing the swept wing,
+because matching them to the long slots in the formers checks the
+orientation rather than assuming it. It worked, and it did more than
+intended.
+
+**The notches confirm the rotation of 16.27 independently.** Every
+former from 3 to 10 carries two deep slots (~5 mm) on its vertical
+centreline, one top and one bottom - the keel slots. Measuring the
+mean |x| of those slots, with and without the 90 degree correction:
+
+    former 7:   as drawn 21.3 mm  ->  rotated  0.6 mm
+    former 10:  as drawn 12.4 mm  ->  rotated  1.0 mm
+    former 5:   as drawn  6.1 mm  ->  rotated  3.6 mm
+    former 6:   as drawn  1.8 mm  ->  rotated 17.9 mm   (NOT rotated)
+
+So the three parts that needed turning snap onto the centreline, and
+one that did not need it moves off. That is a physical check on an
+orientation that had only been inferred from aspect ratio before.
+
+**The keels are sheet profiles on the centre plane.** Confirmed with
+the user: F1-F3 are cut from 1/16 in sheet to a side profile, not
+square strip, so the traced outline IS the part. They sit on a frame
+with base XZ and offset 0 - the fuselage vertical centre plane - and
+extrude across their thickness. No new concept was needed; a frame
+already expresses this.
+
+Lengths corroborate: F3 is 303.5 mm against a 308 mm fuselage (99%),
+and the bottom slot line runs smoothly from former 3 to former 10.
+
+**A second dropped field, same shape as the last.** `solidcraft.py`
+ignored `in_plane_mm` exactly as it had ignored `rotate_deg`. A part
+is centred on its own centroid, so a 303 mm keel straddled the origin
+and floated ahead of the nose. Now applied, and applied AFTER the
+rotation so a nudge along the fuselage cannot be swung sideways by it.
+
+Two bugs of one kind in two sessions suggests the script generator
+should be checked against `Placement` field by field rather than
+feature by feature. Worth doing when the next field is added.
+
+Still inferred, not read off the plan: where F1 and F2 START along
+the fuselage. Their lengths and the slot lines pin F3 (full length)
+but the other two were placed from the slot pattern, and the airframe
+records that in a `note`.

@@ -81,6 +81,15 @@
         "base": "YZ",
         "offset_mm": 308.03
       }
+    },
+    {
+      "name": "Keel-centre",
+      "def": {
+        "kind": "offset",
+        "base": "XZ",
+        "offset_mm": 0.0
+      },
+      "note": "fuselage vertical centre plane; the keels F1-F3 lie in it"
     }
   ],
   "placements": [
@@ -130,6 +139,33 @@
       "part": "10",
       "frame": "Former-10",
       "rotate_deg": 90.0
+    },
+    {
+      "part": "F1",
+      "frame": "Keel-centre",
+      "offset_mm": [
+        31.9,
+        19.0
+      ],
+      "note": "span inferred from strip length and slot line, not read off the plan"
+    },
+    {
+      "part": "F2",
+      "frame": "Keel-centre",
+      "offset_mm": [
+        208.3,
+        19.5
+      ],
+      "note": "span inferred from strip length and slot line, not read off the plan"
+    },
+    {
+      "part": "F3",
+      "frame": "Keel-centre",
+      "offset_mm": [
+        158.25,
+        -17.0
+      ],
+      "note": "span inferred from strip length and slot line, not read off the plan"
     }
   ],
   "thickness_mm": {
