@@ -1698,3 +1698,40 @@ Still inferred, not read off the plan: where F1 and F2 START along
 the fuselage. Their lengths and the slot lines pin F3 (full length)
 but the other two were placed from the slot pattern, and the airframe
 records that in a `note`.
+
+### 16.29  The three Craft MCP servers, registered per project
+
+`.mcp.json` in the repo root registers solidcraft (0.30.1),
+vectorcraft (0.22.0) and pdfcraft (0.19.0). All three were probed
+with a real `initialize` handshake before being committed, not just
+written and hoped for.
+
+**Project-level rather than global.** `solidcraft-cli mcp setup
+--client claude-code` exists, but a dry run showed it writes
+`~/.claude.json` - the user's global config, for every project. A
+`.mcp.json` here is per-project, travels with the repo and leaves the
+global setup alone.
+
+**Scoped to the directories the work actually touches**, not the
+whole filesystem: the PageWright repo, `D:\Projects\Airplanes` (the
+plans and models) and the CadRoundTrip project. Each server has its
+own flag spelling, which a probe found rather than documentation:
+
+  * solidcraft: `--allow-path DIR`, repeatable
+  * vectorcraft: `--automation-read-root` / `--automation-write-root`,
+    repeatable
+  * pdfcraft: the same two flag NAMES but ONE directory each - giving
+    either twice fails with "given twice". Scoped to the Airplanes
+    tree, where the plan PDFs live.
+
+Why these three are the right set for this pipeline: pdfcraft reads
+the plan PDF that everything starts from, vectorcraft is where a
+re-nested sheet would go for the laser (and already produced the
+F86_formers_ribs extraction), and solidcraft builds the model.
+Together they cover the 2D -> 3D -> 2D loop of 16.22 without leaving
+the agent.
+
+Note that this does not change how PlaneCraft BUILDS: `solidcraft.py`
+still drives the CLI directly, because a script run is reproducible
+and diffable in a way a conversation with an MCP server is not. The
+MCP servers are for inspection and one-off work.
