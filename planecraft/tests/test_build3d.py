@@ -278,3 +278,88 @@ def test_an_uncalibrated_project_is_refused():
            "placements": [{"part": "1", "frame": "F"}]}
     with pytest.raises(solidcraft.ScriptError):
         solidcraft.commands(p, air)
+
+
+# ----- rotation ------------------------------------------------------------
+
+@needs_pw
+@needs_core
+def test_a_placements_rotation_reaches_the_sketch():
+    """A plan sheet is nested to save balsa, so some parts are printed
+    sideways: formers 5, 7 and 10 of the F-86 are. The rotation was
+    being DROPPED here - solidcraft.py read `mirrored` and never
+    looked at `rotate_deg` - so those three were built lying down."""
+    from planecraft import solidcraft
+    air = {"frames": [_frame("F", 0.0)],
+           "placements": [{"part": "1", "frame": "F", "rotate_deg": 90.0}]}
+    cmds = solidcraft.commands(_project(), air)
+    pts = [c["params"]["points"] for c in cmds
+           if c["command"] == "sketch.line"]
+    xs = [p[0][0] for p in pts] + [p[1][0] for p in pts]
+    ys = [p[0][1] for p in pts] + [p[1][1] for p in pts]
+    # the fixture is a 20 x 20 square, so turning it must still give a
+    # square - but every vertex has moved
+    assert max(xs) - min(xs) == pytest.approx(20.0)
+    assert max(ys) - min(ys) == pytest.approx(20.0)
+    plain = solidcraft.commands(_project(), {
+        "frames": [_frame("F", 0.0)],
+        "placements": [{"part": "1", "frame": "F"}]})
+    plain_pts = [c["params"]["points"] for c in plain
+                 if c["command"] == "sketch.line"]
+    assert pts != plain_pts
+
+
+@needs_pw
+@needs_core
+def test_rotation_turns_a_non_square_part_through_ninety_degrees():
+    from planecraft import solidcraft
+    from pagewright.model import Contour
+    p = _project()
+    # a 40 wide x 10 tall part
+    p.objects[0].contours = [Contour(points=[(0, 0), (40, 0), (40, 10),
+                                             (0, 10)])]
+    def spans(rot):
+        air = {"frames": [_frame("F", 0.0)],
+               "placements": [{"part": "1", "frame": "F",
+                               "rotate_deg": rot}]}
+        pts = [c["params"]["points"] for c in solidcraft.commands(p, air)
+               if c["command"] == "sketch.line"]
+        xs = [q[0][0] for q in pts]; ys = [q[0][1] for q in pts]
+        return max(xs) - min(xs), max(ys) - min(ys)
+    w0, h0 = spans(0)
+    w90, h90 = spans(90)
+    assert (w0, h0) == (pytest.approx(40.0), pytest.approx(10.0))
+    assert (w90, h90) == (pytest.approx(10.0), pytest.approx(40.0))
+
+
+@needs_pw
+@needs_core
+def test_a_hole_turns_with_its_part():
+    """The hole must keep its place in the part, not stay put while
+    the outline turns around it."""
+    from planecraft import solidcraft
+    from pagewright.model import Contour
+    p = _project()
+    p.objects[0].contours = [
+        Contour(points=[(0, 0), (40, 0), (40, 40), (0, 40)]),
+        Contour(points=[(2, 2), (10, 2), (10, 10), (2, 10)], role="hole"),
+    ]
+    def hole_centre(rot):
+        air = {"frames": [_frame("F", 0.0)],
+               "placements": [{"part": "1", "frame": "F",
+                               "rotate_deg": rot}]}
+        cmds = solidcraft.commands(p, air)
+        pts = [c["params"]["points"] for c in cmds
+               if c["command"] == "sketch.line"]
+        assert len(pts) == 8          # 4 outline edges + 4 hole edges
+        hole = pts[4:]                # holes follow the outline
+        xs = [q[0][0] for q in hole]; ys = [q[0][1] for q in hole]
+        return (sum(xs) / 4.0, sum(ys) / 4.0)
+
+    hx0, hy0 = hole_centre(0)
+    hx90, hy90 = hole_centre(90)
+    # the hole sits in one corner; turning the part must carry it
+    # round, not leave it where it was
+    assert (hx90, hy90) != (pytest.approx(hx0), pytest.approx(hy0))
+    assert hx90 == pytest.approx(-hy0)
+    assert hy90 == pytest.approx(hx0)

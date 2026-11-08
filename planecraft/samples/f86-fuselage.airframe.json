@@ -106,7 +106,8 @@
     },
     {
       "part": "5",
-      "frame": "Former-5"
+      "frame": "Former-5",
+      "rotate_deg": 90.0
     },
     {
       "part": "6",
@@ -114,7 +115,8 @@
     },
     {
       "part": "7",
-      "frame": "Former-7"
+      "frame": "Former-7",
+      "rotate_deg": 90.0
     },
     {
       "part": "8",
@@ -126,7 +128,8 @@
     },
     {
       "part": "10",
-      "frame": "Former-10"
+      "frame": "Former-10",
+      "rotate_deg": 90.0
     }
   ],
   "thickness_mm": {

@@ -16,6 +16,7 @@ that cannot hold it.
 """
 
 import json
+import math
 
 from .core import plan as core_plan
 from .parts import _ensure_pagewright
@@ -27,7 +28,17 @@ class ScriptError(Exception):
     """The airframe cannot be turned into a script, and why."""
 
 
-def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False):
+def _rotate(loop, degrees):
+    """Turn a loop about the sketch origin, degrees counter-clockwise."""
+    if not degrees:
+        return loop
+    r = math.radians(degrees)
+    c, s = math.cos(r), math.sin(r)
+    return [(x * c - y * s, x * s + y * c) for x, y in loop]
+
+
+def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
+                rotate_deg=0.0):
     """A traced contour as sketch-plane millimetres.
 
     Image y grows downward and CAD y grows up, so the row is flipped -
@@ -51,8 +62,11 @@ def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False):
     loops = [mm(outer)] + [mm(h) for h in obj.contours
                            if getattr(h, "role", "outer") == "hole"
                            and len(h.points) >= 3]
+    # Centre on the OUTLINE, then turn every loop by the same angle,
+    # so a hole keeps its place in the part.
     _a, cx, cy = polygon_area_centroid(loops[0])
     loops = [[(x - cx, y - cy) for x, y in loop] for loop in loops]
+    loops = [_rotate(loop, rotate_deg) for loop in loops]
     return loops[0], loops[1:]
 
 
@@ -113,8 +127,10 @@ def commands(project, airframe, units="mm"):
         if not thickness:
             raise ScriptError(
                 "%s has no thickness: set its sheet stock" % p["part"])
-        outline, holes = _outline_mm(obj, mpp, project.pixel_height,
-                                     mirrored=p.get("mirrored", False))
+        outline, holes = _outline_mm(
+            obj, mpp, project.pixel_height,
+            mirrored=p.get("mirrored", False),
+            rotate_deg=p.get("rotate_deg") or 0.0)
         if outline is None:
             raise ScriptError("%s has no closed outline" % p["part"])
 

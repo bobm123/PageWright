@@ -1614,3 +1614,41 @@ reported 21328.8 mm3, matching `inspect`, so the export is faithful.
 Worth keeping as the house method for showing a model: it also means
 a picture can be produced from any STEP or STL the pipeline touches,
 including one that has been through CAD by hand.
+
+### 16.27  Nested parts come off the sheet rotated
+
+The user spotted it in the render: some formers were lying on their
+sides. Formers 5, 7 and 10 are printed SIDEWAYS on the parts sheet -
+the nester turned them to save balsa, which is ordinary - and
+`--as-drawn` faithfully kept that rotation into the model.
+
+Two independent checks agree on which three. Their traced bounding
+box is wider than it is tall while every other former is taller than
+wide; and comparing each former's traced height against the fuselage
+depth read off the side view at its own station, those same three
+match on their WIDTH instead. Former 7 settles it visually: "SPAR
+POSITION" is printed running vertically down the part.
+
+Note that aspect ratio alone is not the test. Former 5 is a shallow
+U - the cockpit former, open at the top - and is genuinely wider than
+tall even when upright. The station-depth comparison is the one that
+decides.
+
+**The real bug was in PlaneCraft.** `solidcraft.py` read `mirrored`
+and never looked at `rotate_deg`, so a rotation set on a placement
+was DROPPED without a word. `Build.rotate_deg` has existed since the
+model was first written and PageWright's own recipe exporter honours
+it; only the command-script path ignored it. Now applied, to the
+holes as well as the outline, so a hole keeps its place in the part.
+
+Three tests cover it, each verified against the reverted fix. The
+hole one needed a second pass: counting edges passed either way, so
+it now checks that the hole's CENTRE moves (x,y) -> (-y,x).
+
+Formers upright, volumes unchanged at 21328.8 mm3 as a rotation
+requires, and all ten sections now taller than wide.
+
+The general point for this pipeline: a parts sheet is a nesting, not
+an assembly drawing. Orientation on the sheet carries no information
+about orientation in the aeroplane, and anything read from it has to
+be corrected per part.
