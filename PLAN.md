@@ -1596,3 +1596,21 @@ alone would collide.
 Not yet done: SolidCraft's own renderer segfaults headless
 (`snapshot` exits 139), so the model is verified by `inspect` and
 drawn from the measured bodies rather than rendered.
+
+### 16.26  Seeing the model: STL out, render here
+
+SolidCraft 0.30.1 cannot produce a picture in this environment.
+`snapshot` segfaults (exit 139, reproducible with and without
+`--view`), and `render` fails later with "could not export completed
+png: Incorrect function (os error 1)". Both look like the headless
+GPU path rather than anything about the model.
+
+The way round it, which is better anyway: `solidcraft-cli run --in
+design.solidcraft --out model.stl` writes geometry, and that renders
+locally with numpy and a painter's-algorithm fill - no GPU, no
+dependency beyond what PageWright already has. The exported STL
+reported 21328.8 mm3, matching `inspect`, so the export is faithful.
+
+Worth keeping as the house method for showing a model: it also means
+a picture can be produced from any STEP or STL the pipeline touches,
+including one that has been through CAD by hand.
