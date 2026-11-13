@@ -1699,39 +1699,37 @@ the fuselage. Their lengths and the slot lines pin F3 (full length)
 but the other two were placed from the slot pattern, and the airframe
 records that in a `note`.
 
-### 16.29  The three Craft MCP servers, registered per project
+### 16.29  Craft MCP servers: user scope, not per project
 
-`.mcp.json` in the repo root registers solidcraft (0.30.1),
-vectorcraft (0.22.0) and pdfcraft (0.19.0). All three were probed
-with a real `initialize` handshake before being committed, not just
-written and hoped for.
+Corrected. A project `.mcp.json` was added here registering
+solidcraft, vectorcraft and pdfcraft, scoped to this project's
+directories. That was the wrong mechanism for this machine and has
+been removed.
 
-**Project-level rather than global.** `solidcraft-cli mcp setup
---client claude-code` exists, but a dry run showed it writes
-`~/.claude.json` - the user's global config, for every project. A
-`.mcp.json` here is per-project, travels with the repo and leaves the
-global setup alone.
+The Craft apps are registered at USER scope by
+`D:\Programsegister-craft-mcp.ps1`, which is idempotent and adds
+every `D:\Programs\<App>\<app>-cli.exe` it finds. A project-level
+copy duplicates them, and `claude mcp list` reports it as a
+"conflicting scopes" warning for each server, because the endpoints
+differ. The script's own comments say to avoid exactly this: it
+pushes to $HOME before running so it does not pick up a project
+`.mcp.json`.
 
-**Scoped to the directories the work actually touches**, not the
-whole filesystem: the PageWright repo, `D:\Projects\Airplanes` (the
-plans and models) and the CadRoundTrip project. Each server has its
-own flag spelling, which a probe found rather than documentation:
+Available at user scope: solidcraft, solidcraft-live (--connect
+127.0.0.1:7878), vectorcraft, pdfcraft, deckcraft, deckcraft-live
+(7676, only while the app runs with --control). Never use an app's
+own `mcp setup`: it rewrites the whole ~/.claude.json.
+
+What survives from the attempt is the flag knowledge, found by
+probing rather than from docs, in case a scoped server is ever
+wanted:
 
   * solidcraft: `--allow-path DIR`, repeatable
   * vectorcraft: `--automation-read-root` / `--automation-write-root`,
     repeatable
   * pdfcraft: the same two flag NAMES but ONE directory each - giving
-    either twice fails with "given twice". Scoped to the Airplanes
-    tree, where the plan PDFs live.
+    either twice fails with "given twice"
 
-Why these three are the right set for this pipeline: pdfcraft reads
-the plan PDF that everything starts from, vectorcraft is where a
-re-nested sheet would go for the laser (and already produced the
-F86_formers_ribs extraction), and solidcraft builds the model.
-Together they cover the 2D -> 3D -> 2D loop of 16.22 without leaving
-the agent.
-
-Note that this does not change how PlaneCraft BUILDS: `solidcraft.py`
-still drives the CLI directly, because a script run is reproducible
-and diffable in a way a conversation with an MCP server is not. The
-MCP servers are for inspection and one-off work.
+Unchanged either way: PlaneCraft still builds through the SolidCraft
+CLI, not the MCP server, because a script run is reproducible and
+diffable in a way a conversation is not.
