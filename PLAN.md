@@ -1767,3 +1767,41 @@ The user's other suggestion - select several parts and align or snap
 them to a 1/16 in grid - is NOT built. It serves re-nesting a sheet
 for the cutter, which is the return leg, and there is no modified
 model to re-nest yet.
+
+### 16.31  The swept wing needs no sweep: the ribs are streamwise
+
+Measured before building anything, and it cancels the work that was
+queued. A Hough scan of the wing plan at 300 dpi finds two families
+of line:
+
+    ribs          89.68 deg   87 segments,  31185 px
+    LE/TE/spar   146.50 deg  142 segments,  84115 px
+
+The ribs sit **0.32 degrees off vertical** - they run STREAMWISE,
+parallel to the fuselage centreline, not perpendicular to the sweep.
+Only the leading edge, trailing edge and spar are swept, at 33.5
+degrees. The drawing says as much once read properly: ribs A..E and
+R1..R3 are all parallel to each other.
+
+So a rib is a plain XZ offset after all. No rotation, no oriented
+frame, no planform polygon needed to place them - the frame
+machinery from §16.16 already covers it, and the `Oriented` frame
+variant stays unused for now.
+
+What the planform polygon WOULD still be good for is the structure
+the plan draws but no polygon exists for: `1/8 SQ LEADING EDGE`,
+`1/8 x 1/2 TRAILING EDGE`, `SPAR 1/16 x 3/16`. Those are strip stock
+following the 33.5 degree sweep, and they are the case that needs a
+path rather than a station. Left for when they are wanted.
+
+Rib stations, from paired lines 1/16 in apart as on the fuselage:
+**0, +-21, +-45, +-82, +-102 mm** from the centreline, five per side
+counting the root.
+
+Not settled: which rib letter sits at which station. The traced
+chords taper cleanly (A 70.5, B 66.0, C 54.8, D 43.8 mm) so the
+inboard-to-outboard ORDER is A B C D E, but measuring the wing's
+chord at each station does not separate them - the column scan picks
+up the whole outline including the swept trailing edge, giving 67,
+72, 64, 63, 62 mm, which does not taper. That needs reading off the
+plan. **E is also not traced yet** - it is the tip rib.
