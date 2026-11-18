@@ -140,6 +140,41 @@ def build_actions(w):
         "usual convention can be corrected once instead of per part.")
     w.act_naming.triggered.connect(w.edit_naming_scheme)
 
+    # A parts sheet is a nesting, so a traced outline often does not
+    # sit the way the part does on the aeroplane.
+    w.act_rot_cw = QAction("Rotate 90 C&W", w)
+    w.act_rot_cw.setToolTip(
+        "Turn the selected polygon a quarter turn clockwise."
+        + chr(10) +
+        "Right angles are exact, so turning four times is exactly "
+        "where it started.")
+    w.act_rot_cw.triggered.connect(w.rotate_active_cw)
+
+    w.act_rot_ccw = QAction("Rotate 90 CC&W", w)
+    w.act_rot_ccw.setToolTip(
+        "Turn the selected polygon a quarter turn anticlockwise.")
+    w.act_rot_ccw.triggered.connect(w.rotate_active_ccw)
+
+    w.act_flip_h = QAction("Flip &Horizontal", w)
+    w.act_flip_h.setToolTip(
+        "Mirror the selected polygon left to right."
+        + chr(10) +
+        "This is how a left wing rib is made from a right one.")
+    w.act_flip_h.triggered.connect(w.flip_active_horizontal)
+
+    w.act_flip_v = QAction("Flip &Vertical", w)
+    w.act_flip_v.setToolTip(
+        "Mirror the selected polygon top to bottom.")
+    w.act_flip_v.triggered.connect(w.flip_active_vertical)
+
+    w.act_duplicate = QAction("D&uplicate Polygon", w)
+    w.act_duplicate.setToolTip(
+        "Copy the selected polygon as a new part, offset so it is "
+        "visible."
+        + chr(10) +
+        "The sheet prints two of many parts; a copy and a flip "
+        "beats tracing it again.")
+    w.act_duplicate.triggered.connect(w.duplicate_active_object)
     w.act_clean_notches = QAction("Clean Up &Notches", w)
     w.act_clean_notches.setToolTip(
         "Square the straight notch edges of the selected object and snap "
@@ -279,6 +314,12 @@ def build_menus(w):
     m_tools.addAction(w.act_run_seg)
     m_tools.addAction(w.act_find_parts)
     m_tools.addAction(w.act_clean_notches)
+    m_tools.addSeparator()
+    m_tools.addAction(w.act_rot_cw)
+    m_tools.addAction(w.act_rot_ccw)
+    m_tools.addAction(w.act_flip_h)
+    m_tools.addAction(w.act_flip_v)
+    m_tools.addAction(w.act_duplicate)
     m_tools.addAction(w.act_naming)
     m_tools.addAction(w.act_clear_seeds)
     m_tools.addAction(w.act_clear_roi)

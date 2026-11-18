@@ -1429,6 +1429,82 @@ class MainWindow(QMainWindow):
             % (sum(r.squared for r in reports), total_snapped, skipped,
                worst, layer.name), 9000)
 
+    def _transform_active(self, label, fn):
+        """Apply a geometry transform to the active object, undoably.
+
+        A parts sheet is a nesting: the draughtsman turned and
+        mirrored parts to save material, so a traced outline often
+        does not sit the way the part does on the aeroplane. Putting
+        that right HERE means the user sees the result against the
+        drawing, instead of the correction being carried as a
+        placement setting by whatever reads the file later."""
+        if not (0 <= self._active_index < len(self._objects)):
+            self.statusBar().showMessage("Select an object first.", 4000)
+            return
+        layer = self._objects[self._active_index]
+        before = [list(c.points()) for c in layer.contours]
+        if not before:
+            self.statusBar().showMessage(
+                "'%s' has no outline to transform." % layer.name, 5000)
+            return
+        after = fn(before)
+        self._apply_contour_points(layer, after)
+        self.undo_stack.push(undo.FnCommand(
+            label,
+            undo=lambda: self._apply_contour_points(layer, before),
+            redo=lambda: self._apply_contour_points(layer, after)))
+        self.statusBar().showMessage(
+            "%s '%s'." % (label.capitalize(), layer.name), 5000)
+
+    def rotate_active_cw(self):
+        from ..core import transform as tx
+        self._transform_active("rotated 90 CW",
+                               lambda lp: tx.rotate(lp, 1))
+
+    def rotate_active_ccw(self):
+        from ..core import transform as tx
+        self._transform_active("rotated 90 CCW",
+                               lambda lp: tx.rotate(lp, 3))
+
+    def flip_active_horizontal(self):
+        from ..core import transform as tx
+        self._transform_active("flipped horizontally",
+                               lambda lp: tx.flip(lp, horizontal=True))
+
+    def flip_active_vertical(self):
+        from ..core import transform as tx
+        self._transform_active("flipped vertically",
+                               lambda lp: tx.flip(lp, horizontal=False))
+
+    def duplicate_active_object(self):
+        """Copy the active object as a new part, offset so it is
+        visible rather than hidden exactly under the original.
+
+        The sheet prints two of many parts - a left and a right rib -
+        and a model needs more copies still. Tracing each one again
+        is wasted work when a copy and a flip says the same thing."""
+        from ..core import transform as tx
+        if not (0 <= self._active_index < len(self._objects)):
+            self.statusBar().showMessage("Select an object first.", 4000)
+            return
+        src = self._objects[self._active_index]
+        model_obj = src.to_model()
+        self._polygon_counter += 1
+        model_obj.name = "%s copy" % src.name
+        # a visible nudge: a tenth of the part, at least 10 px
+        pts = [list(c.points()) for c in src.contours]
+        if pts:
+            xs = [x for lp in pts for x, _y in lp]
+            step = max(10.0, (max(xs) - min(xs)) / 10.0)
+            moved = tx.translate(pts, step, step)
+            for contour, loop in zip(model_obj.contours, moved):
+                contour.points = [(float(x), float(y)) for x, y in loop]
+        index = self._active_index + 1
+        self._insert_layer_from_model(index, model_obj)
+        # Structural change, as delete_active_object does.
+        self.undo_stack.clear()
+        self.statusBar().showMessage(
+            "Duplicated '%s' as '%s'." % (src.name, model_obj.name), 6000)
     def _apply_contour_points(self, layer, point_lists):
         """Replace a layer's contour points and refresh what depends on
         them. Used by Clean Up Notches and by its undo."""

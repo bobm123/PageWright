@@ -342,3 +342,91 @@ def test_an_empty_convention_restores_the_usual_one(tmp_path):
         dlg._table.removeRow(0)
     dlg._try_accept()
     assert dlg.name_planes() == {}
+
+
+# ----- rotate, flip, duplicate ---------------------------------------------
+
+def _wide(w):
+    """A 40 x 10 part, so a quarter turn is visible."""
+    return _trace_into(w, [(10.0, 10.0), (50.0, 10.0),
+                           (50.0, 20.0), (10.0, 20.0)])
+
+
+def _box(layer):
+    pts = list(layer.contours[0].points())
+    xs = [p[0] for p in pts]; ys = [p[1] for p in pts]
+    return round(max(xs) - min(xs), 3), round(max(ys) - min(ys), 3)
+
+
+def test_rotating_the_active_part_swaps_its_width_and_height(tmp_path):
+    w = _window_with_photo(tmp_path)
+    layer = _wide(w)
+    assert _box(layer) == (40.0, 10.0)
+    w.rotate_active_cw()
+    assert _box(layer) == (10.0, 40.0)
+
+
+def test_a_rotation_is_undoable(tmp_path):
+    w = _window_with_photo(tmp_path)
+    layer = _wide(w)
+    before = list(layer.contours[0].points())
+    w.rotate_active_cw()
+    assert list(layer.contours[0].points()) != before
+    w.undo_stack.undo()
+    assert list(layer.contours[0].points()) == before
+
+
+def test_flipping_is_undoable_and_keeps_the_bounding_box(tmp_path):
+    w = _window_with_photo(tmp_path)
+    layer = _wide(w)
+    before = list(layer.contours[0].points())
+    w.flip_active_horizontal()
+    assert _box(layer) == (40.0, 10.0)        # mirror, not a move
+    assert list(layer.contours[0].points()) != before
+    w.undo_stack.undo()
+    assert list(layer.contours[0].points()) == before
+
+
+def test_duplicating_adds_a_named_copy_next_to_the_original(tmp_path):
+    """The sheet prints two of many parts and a model needs more
+    still; tracing each again is wasted work."""
+    w = _window_with_photo(tmp_path)
+    layer = _wide(w)
+    layer.name = "Rib B"
+    w.duplicate_active_object()
+    assert [o.name for o in w._objects] == ["Rib B", "Rib B copy"]
+
+
+def test_a_duplicate_is_offset_so_it_is_not_hidden_under_the_original(
+        tmp_path):
+    w = _window_with_photo(tmp_path)
+    original = _wide(w)
+    w.duplicate_active_object()
+    copy = w._objects[1]
+    assert list(copy.contours[0].points()) != list(
+        original.contours[0].points())
+    assert _box(copy) == _box(original)       # same shape, moved
+
+
+def test_transforming_with_nothing_selected_is_refused_quietly(tmp_path):
+    w = _window_with_photo(tmp_path)
+    w._active_index = -1
+    w.rotate_active_cw()                      # must not raise
+    w.duplicate_active_object()
+    assert w._objects == []
+
+
+def test_a_transform_carries_a_hole_with_its_outline(tmp_path):
+    from pagewright.core import contours as cont
+    w = _window_with_photo(tmp_path)
+    w.new_object()
+    w._objects[0].set_contours([
+        ([(10.0, 10.0), (50.0, 10.0), (50.0, 20.0), (10.0, 20.0)],
+         cont.ROLE_OUTER),
+        ([(14.0, 12.0), (20.0, 12.0), (20.0, 16.0), (14.0, 16.0)],
+         cont.ROLE_HOLE)])
+    w.rotate_active_cw()
+    layer = w._objects[0]
+    ox = [p[0] for p in layer.contours[0].points()]
+    hx = [p[0] for p in layer.contours[1].points()]
+    assert min(ox) <= min(hx) and max(hx) <= max(ox)

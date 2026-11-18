@@ -1733,3 +1733,37 @@ wanted:
 Unchanged either way: PlaneCraft still builds through the SolidCraft
 CLI, not the MCP server, because a script run is reproducible and
 diffable in a way a conversation is not.
+
+### 16.30  Rotate, flip and duplicate a traced polygon
+
+A parts sheet is a nesting (16.27), so a traced outline often does
+not sit the way the part does on the aeroplane, and the sheet prints
+two of many parts - a left rib and a right one. `core/transform.py`
+and five Tools actions put that right at tracing time, where the user
+can see the result against the drawing, instead of leaving it as a
+placement setting for whatever reads the file later.
+
+Rotation is in QUARTER TURNS, not free angles. A nested part is
+turned by a right angle, and a right angle is exact: no rounding
+creeps into the traced points, and four turns land exactly where the
+part started (a test pins that). A free rotation would need
+resampling decisions this does not have to make.
+
+A flip reverses the point ORDER as well as mirroring the coordinates,
+because a mirror reverses winding and a contour that silently
+inverted its winding would come out inside-out wherever winding is
+read. Verified by injecting the omission: the winding test catches it.
+
+Both transform about the outline's own bounding-box centre, so a
+part does not wander off the sheet when it is turned, and both carry
+holes with their outline.
+
+Duplicate copies the active object as `<name> copy`, offset by a
+tenth of its width (at least 10 px) so it is visible rather than
+hidden exactly beneath the original. It clears the undo stack, as
+`delete_active_object` already does for a structural change.
+
+The user's other suggestion - select several parts and align or snap
+them to a 1/16 in grid - is NOT built. It serves re-nesting a sheet
+for the cutter, which is the return leg, and there is no modified
+model to re-nest yet.
