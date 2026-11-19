@@ -318,7 +318,7 @@
         0.0,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "A",
@@ -328,140 +328,140 @@
         0.0,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "B",
       "frame": "Rib-B-R",
       "offset_mm": [
-        17.9699,
+        16.316,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "B",
       "frame": "Rib-B-L",
       "mirrored": true,
       "offset_mm": [
-        17.9699,
+        16.316,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R1",
       "frame": "Rib-R1-R",
       "offset_mm": [
-        32.42395,
+        31.336,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R1",
       "frame": "Rib-R1-L",
       "mirrored": true,
       "offset_mm": [
-        32.42395,
+        31.336,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "C",
       "frame": "Rib-C-R",
       "offset_mm": [
-        47.26865,
+        46.284,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "C",
       "frame": "Rib-C-L",
       "mirrored": true,
       "offset_mm": [
-        47.26865,
+        46.284,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R2",
       "frame": "Rib-R2-R",
       "offset_mm": [
-        62.504,
+        61.909,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R2",
       "frame": "Rib-R2-L",
       "mirrored": true,
       "offset_mm": [
-        62.504,
+        61.909,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "D",
       "frame": "Rib-D-R",
       "offset_mm": [
-        78.52065,
+        77.474,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "D",
       "frame": "Rib-D-L",
       "mirrored": true,
       "offset_mm": [
-        78.52065,
+        77.474,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R3",
       "frame": "Rib-R3-R",
       "offset_mm": [
-        92.9747,
+        92.123,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "R3",
       "frame": "Rib-R3-L",
       "mirrored": true,
       "offset_mm": [
-        92.9747,
+        92.123,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "E",
       "frame": "Rib-E-R",
       "offset_mm": [
-        108.21005,
+        107.051,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     },
     {
       "part": "E",
       "frame": "Rib-E-L",
       "mirrored": true,
       "offset_mm": [
-        108.21005,
+        107.051,
         0.0
       ],
-      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
+      "note": "chordwise position placed by hand in the wing SVG"
     }
   ],
   "thickness_mm": {

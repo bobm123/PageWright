@@ -425,9 +425,14 @@ def test_the_wing_svg_round_trips_a_position(tmp_path):
                            "offset_mm": [118.0, 0.0]}]}
     out = str(tmp_path / "wing.svg")
     assert wing_svg.write_svg(p, air, out) == 2
-    back = wing_svg.read_svg(out)
-    assert back["1"] == (pytest.approx(22.0), pytest.approx(100.0))
-    assert back["2"] == (pytest.approx(45.0), pytest.approx(118.0))
+    rows = wing_svg.compare(p, wing_svg.read_svg(out))
+    # the rib is drawn rotate(-90), so its chord runs BACK from the
+    # translate point: aft_mm is the minimum y, anchor minus chord.
+    assert rows["1"]["aft_mm"] == pytest.approx(80.0, abs=0.01)
+    assert rows["2"]["aft_mm"] == pytest.approx(98.0, abs=0.01)
+    # the gap between them is what the drag changed
+    assert (rows["2"]["aft_mm"] - rows["1"]["aft_mm"]
+            == pytest.approx(18.0, abs=0.01))
 
 
 @needs_pw
@@ -444,7 +449,8 @@ def test_an_edited_transform_is_what_comes_back(tmp_path):
     text = open(out).read().replace("translate(22.0000,100.0000)",
                                     "translate(22.0000,73.5000)")
     open(out, "w").write(text)
-    assert wing_svg.read_svg(out)["1"][1] == pytest.approx(73.5)
+    rows = wing_svg.compare(p, wing_svg.read_svg(out))
+    assert rows["1"]["aft_mm"] == pytest.approx(53.5, abs=0.01)
 
 
 @needs_pw
@@ -490,3 +496,79 @@ def test_an_uncalibrated_project_is_refused_here_too(tmp_path):
            "placements": [{"part": "1", "frame": "Rib-A-R"}]}
     with pytest.raises(ValueError):
         wing_svg.write_svg(p, air, str(tmp_path / "w.svg"))
+
+
+# ----- reading an EDITED svg back -----------------------------------------
+
+def test_a_matrix_transform_is_resolved():
+    """An editor writes matrix(...) once a part has been flipped, so
+    reading only `translate` stops working the moment the user does
+    the thing the file was made for."""
+    from planecraft import wing_svg
+    m = wing_svg.parse_transform("matrix(0,1,1,0,14.5,56.9)")
+    assert wing_svg._apply(m, 0.0, 0.0) == (pytest.approx(14.5),
+                                            pytest.approx(56.9))
+    # (0,1,1,0) swaps x and y: a flip about the diagonal
+    assert wing_svg._apply(m, 1.0, 0.0) == (pytest.approx(14.5),
+                                            pytest.approx(57.9))
+
+
+def test_rotate_about_a_point_is_resolved():
+    from planecraft import wing_svg
+    m = wing_svg.parse_transform("rotate(90,10,10)")
+    # the centre is a fixed point
+    assert wing_svg._apply(m, 10.0, 10.0) == (pytest.approx(10.0),
+                                              pytest.approx(10.0))
+    assert wing_svg._apply(m, 20.0, 10.0) == (pytest.approx(10.0),
+                                              pytest.approx(20.0))
+
+
+def test_a_transform_list_composes_left_to_right():
+    from planecraft import wing_svg
+    m = wing_svg.parse_transform("translate(10,0) scale(2)")
+    assert wing_svg._apply(m, 3.0, 0.0) == (pytest.approx(16.0),
+                                            pytest.approx(0.0))
+
+
+@needs_pw
+@needs_core
+def test_a_flipped_rib_reads_back_at_its_edited_place(tmp_path):
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R",
+                           "offset_mm": [100.0, 0.0]}]}
+    out = str(tmp_path / "w.svg")
+    wing_svg.write_svg(p, air, out)
+    # stand in for a flip-and-drag in the editor
+    text = open(out).read().replace(
+        'transform="translate(22.0000,100.0000) rotate(-90)"',
+        'transform="matrix(0,-1,-1,0,30.0,70.0)"')
+    open(out, "w").write(text)
+    pts = wing_svg.read_svg(out)["1"]
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    # the 20x20 fixture, mirrored and turned, still spans 20 each way
+    assert max(xs) - min(xs) == pytest.approx(20.0)
+    assert max(ys) - min(ys) == pytest.approx(20.0)
+    assert max(xs) == pytest.approx(30.0)
+    assert max(ys) == pytest.approx(70.0)
+
+
+@needs_pw
+@needs_core
+def test_compare_separates_shape_from_placement(tmp_path):
+    """A drag is PLACEMENT and belongs in the airframe; a moved vertex
+    is SHAPE and belongs on the parts sheet. Telling them apart is
+    what lets each go to the right file."""
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R",
+                           "offset_mm": [100.0, 0.0]}]}
+    out = str(tmp_path / "w.svg")
+    wing_svg.write_svg(p, air, out)
+    rows = wing_svg.compare(p, wing_svg.read_svg(out))
+    assert rows["1"]["shape_changed"] is False
+    assert rows["1"]["chord_mm"] == pytest.approx(
+        rows["1"]["chord_traced_mm"], abs=0.01)

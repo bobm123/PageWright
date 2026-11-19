@@ -1899,3 +1899,44 @@ The division is the useful part. Measuring a POSITION on a scan is
 something a person does in a second and a column scan gets wrong six
 times; the machine's job is to carry that number into the model
 exactly, and to make the hand edit cheap to read back.
+
+### 16.34  The hand-placed wing comes back
+
+The user dragged all eight ribs onto the plan in the SVG, flipping
+and rotating some, and reported the step as easy - which it was: six
+automated attempts had failed at the same job.
+
+**Reading only `translate` stopped working immediately.** An editor
+writes `matrix(0,1,1,0,...)` or `rotate(a,cx,cy)` the moment a part
+is flipped or turned, and five of the eight came back that way. So
+`read_svg` now resolves the whole transform list to a 2x3 matrix and
+applies it: what comes back is where the geometry ENDED UP, whatever
+was used to put it there. That is strictly better than parsing each
+form, because it cannot be surprised by one it has not met.
+
+**I had the plan's orientation backwards**, and checked before acting
+on it rather than reasoning from the numbers: in this crop the
+trailing edge is at the TOP and the leading edge at the bottom, so a
+rib's y DECREASES going outboard. The "wrong direction" the numbers
+seemed to show was my own mistake.
+
+The hand placement is self-consistent to **1.92 mm** across all eight
+ribs (a straight-line fit to the leading edges), and gives 0.7503 mm
+aft per mm of span against the 0.7813 measured from the scan. The
+hand figure is the one to trust.
+
+Applied as `in_plane_mm` and rebuilt: ribs step aft 0 to 107 mm from
+the root, and the plan view now shows a swept wing.
+
+**Shape and placement go to different files**, as the user chose: a
+moved vertex is SHAPE and belongs on the parts sheet, while a drag,
+flip or turn is PLACEMENT and belongs in the airframe. A flip stays
+OUT of the traced outline, which must keep matching the printwood
+for the cutter. `compare()` reports both, and found no shape change
+this time - the user said they left the points alone, and the chords
+agree to within 0.15 mm.
+
+Wanted later, recorded not built: editing the points in this step
+too - align a vertex vertically or horizontally, add or delete one.
+Smoothing to splines is explicitly deferred, the user noting that
+splines do not always translate well.
