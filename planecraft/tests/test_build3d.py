@@ -404,3 +404,89 @@ def test_the_offset_is_applied_after_the_rotation():
     xs = [q[0][0] for q in pts]
     # the 20x20 fixture turned and then moved +50 in u
     assert sum(xs) / len(xs) == pytest.approx(50.0, abs=1e-6)
+
+
+# ----- the editable wing SVG -----------------------------------------------
+
+@needs_pw
+@needs_core
+def test_the_wing_svg_round_trips_a_position(tmp_path):
+    """Reading a rib's chordwise position off a dense 1952 plan kept
+    picking the wrong feature, so the positions go out as an SVG, get
+    dragged into place by hand, and come back as numbers. The round
+    trip is the whole point, so it is what the test covers."""
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ"),
+                      _frame("Rib-B-R", 45.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R",
+                           "offset_mm": [100.0, 0.0]},
+                          {"part": "2", "frame": "Rib-B-R",
+                           "offset_mm": [118.0, 0.0]}]}
+    out = str(tmp_path / "wing.svg")
+    assert wing_svg.write_svg(p, air, out) == 2
+    back = wing_svg.read_svg(out)
+    assert back["1"] == (pytest.approx(22.0), pytest.approx(100.0))
+    assert back["2"] == (pytest.approx(45.0), pytest.approx(118.0))
+
+
+@needs_pw
+@needs_core
+def test_an_edited_transform_is_what_comes_back(tmp_path):
+    # Inkscape writes a drag as a change to the group's transform.
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R",
+                           "offset_mm": [100.0, 0.0]}]}
+    out = str(tmp_path / "wing.svg")
+    wing_svg.write_svg(p, air, out)
+    text = open(out).read().replace("translate(22.0000,100.0000)",
+                                    "translate(22.0000,73.5000)")
+    open(out, "w").write(text)
+    assert wing_svg.read_svg(out)["1"][1] == pytest.approx(73.5)
+
+
+@needs_pw
+@needs_core
+def test_the_svg_is_well_formed_xml(tmp_path):
+    """It failed twice while being written: a duplicated xmlns:xlink,
+    then inkscape: and sodipodi: prefixes with no namespace declared.
+    Either makes the file unopenable."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R"}]}
+    out = str(tmp_path / "wing.svg")
+    wing_svg.write_svg(p, air, out, image_path="plan.png",
+                       image_size_mm=(100.0, 80.0))
+    ET.parse(out)          # raises if the prefixes are unbound
+
+
+@needs_pw
+@needs_core
+def test_only_one_side_is_written(tmp_path):
+    # The two wings are mirror images; editing one is less work than
+    # keeping two in step.
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ"),
+                      _frame("Rib-A-L", -22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R"},
+                          {"part": "1", "frame": "Rib-A-L",
+                           "mirrored": True}]}
+    out = str(tmp_path / "wing.svg")
+    assert wing_svg.write_svg(p, air, out, side="R") == 1
+
+
+@needs_pw
+@needs_core
+def test_an_uncalibrated_project_is_refused_here_too(tmp_path):
+    from planecraft import wing_svg
+    p = _project()
+    p.calibration.mm_per_pixel = None
+    air = {"frames": [_frame("Rib-A-R", 22.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Rib-A-R"}]}
+    with pytest.raises(ValueError):
+        wing_svg.write_svg(p, air, str(tmp_path / "w.svg"))

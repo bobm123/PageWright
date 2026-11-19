@@ -1860,3 +1860,42 @@ a THIRD CONTOUR ROLE, `ROLE_ENGRAVE` beside outer and hole, so the
 geometry travels with its part through the file format, placement and
 re-nesting. `role` is already the mechanism and about 14 sites
 consume it. Not built - there is no cut file to produce yet.
+
+### 16.33  The wing positions go out as an SVG to be dragged by hand
+
+Six attempts to read the ribs' chordwise position off the plan gave
+six answers. The failures were all the same kind - picking the wrong
+feature out of a dense 1952 drawing:
+
+  * a Hough fit of the "swept family" found the TRAILING edge, and it
+    was used as the leading edge, putting every rib 9.7 mm too far
+    aft. That is the error the user saw as rib A being "cut off".
+  * two column scans returned a near-constant offset instead of a
+    progression, because at a rib's station the column crosses the
+    long swept edges.
+  * a stipple-density scan found bands that fit no straight line
+    (residuals to 438 px), so they were not one feature.
+  * the two rows finally picked were 8.9 mm apart - two edges of the
+    same 1/8 in strip, not the LE and TE of a 70.5 mm rib.
+
+What IS settled, by following each circled letter's own leader arrow:
+the spanwise stations (A 23.2, B 45.4, C 86.5 mm measured against
+22, 45, 82.5 placed) and the sweep slope, 0.7813 mm aft per mm of
+span, which lands correctly at the tip when re-anchored.
+
+So the chordwise anchor goes out to a person. `wing_svg.write_svg`
+writes one wing with the plan scan underneath and each rib as its own
+`<g id="rib-NAME">`; a drag in Inkscape or VectorCraft rewrites that
+group's `transform` and nothing else moves. `read_svg` reads the
+translations back. Verified by round trip, and by opening the file in
+VectorCraft.
+
+Two things the file needed that are easy to miss: an `<image>` with
+no width and height renders as nothing, and the `inkscape:` and
+`sodipodi:` prefixes must have their namespaces declared or the file
+is not well-formed XML. Both are covered by tests.
+
+The division is the useful part. Measuring a POSITION on a scan is
+something a person does in a second and a column scan gets wrong six
+times; the machine's job is to carry that number into the model
+exactly, and to make the hand edit cheap to read back.
