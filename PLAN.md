@@ -2085,3 +2085,60 @@ keels, flipped XZ parts) and the lesson is the same each time: a
 symmetric object cannot testify about its own orientation. Prefer an
 asymmetric witness, and assert the thing that is true in the world
 rather than the intermediate that happens to produce it.
+
+## §16.39  The former plane convention, checked
+
+Prompted by §16.38: three sign bugs in a row, so the formers' own
+plane deserved the same treatment rather than an assumption that it
+was fine because the formers looked right.
+
+**Measured with an asymmetric witness.** A box probe cannot answer
+this - mirrored or not, its extents are identical. An L (local x to
+40, local y to 60, with the long leg at LOW x and the foot at LOW y)
+pins down both axes AND their direction:
+
+    plane  normal  local x ->  local y ->
+    YZ     X       +Y          +Z
+    XY     Z       +X          +Y
+    XZ     Y       +X          -Z
+
+Handedness checked separately: the long leg sits at the low local-x
+end on all three planes, so there is no x flip anywhere, and only XZ
+puts the foot at the far end in y. `Y_IS_FLIPPED` is therefore right
+as written - XZ alone - and the formers need no change. XY, which
+the tail surfaces will use, is unflipped.
+
+**Why the formers could not have told us themselves.** Six of the
+ten are near-symmetric top to bottom (ratio within 0.03 of 0.50);
+only 1, 3, 4 and 5 are asymmetric enough to testify. This is the
+§16.38 lesson again, and it is why the convention was probed with a
+deliberately asymmetric shape instead of being read off the model.
+
+**An unresolved placement question, kept separate from the above.**
+Checking the formers against the keels showed F3's top edge at -1.67
+while the former bottoms run -11.8 to -24.3, so the strip crosses
+the formers rather than running along their lower edges.
+
+Two things are established. F3's traced curve DOES match the
+fuselage: the offset between its centreline and the former bottoms
+is constant to 4.2 mm over nine formers across 300 mm, so the part
+is right and at most a single shift is wrong. And former 5 is a real
+outlier - 8 mm off that constant - which is worth a look on its own;
+it is a genuinely smaller former (half-depth 11-13 mm against 20-27
+for its neighbours) rather than a misplacement, but it was also the
+one rotated 90 degrees in §16.35.
+
+What is NOT established is whether a shift is wanted at all. An
+inferred correction came out at -10.15 mm, but the SVG edit moved F3
+by -146 mm along the fuselage and only +2.9 mm in height, made
+against the plan scan - a 10 mm error in height would have been
+visible during that drag. Reading the plan settles that F3 is the
+bottom keel and that the shaded strip is the fuselage skin edge, so
+sitting below the formers is right in principle; it does not settle
+the exact amount, and a column scan of the side view is as
+unreliable here as it was for the rib positions (§16.30).
+
+So this goes back through the SVG step, where a person can see it,
+rather than being closed with a number the machine inferred. Left as
+built until then: the error is a few millimetres of placement on one
+part, not a convention error, and the convention was the question.
