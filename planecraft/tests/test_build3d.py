@@ -727,7 +727,13 @@ def test_a_rotation_is_read_without_moving_the_part(tmp_path):
     """Rotating about a far-off point is what an editor writes. The
     position must come from the TRANSLATION: rebuilding it from the
     bounding box disagrees part to part once things are turned, by
-    7.9 mm in the case that prompted this."""
+    7.9 mm in the case that prompted this.
+
+    The ANGLE is checked as a round trip rather than against the raw
+    SVG value, because SVG y runs down and so the drawing's angle is
+    the model's negated. Asserting the drawing's sign here would pin
+    down that convention as a side effect, the way the in-plane
+    offset test did (16.38)."""
     import xml.etree.ElementTree as ET
     from planecraft import wing_svg
     p = _project()
@@ -744,8 +750,18 @@ def test_a_rotation_is_read_without_moving_the_part(tmp_path):
 
     got = wing_svg.placements_from_svg(turned, upright=True)
     row = next(iter(got.values()))
-    assert row["rotate_deg"] == pytest.approx(-5.0, abs=0.01)
+    assert abs(row["rotate_deg"]) == pytest.approx(5.0, abs=0.01)
     assert row["mirrored"] is False
+
+    # the round trip is the thing that has to hold: an angle written
+    # from a placement must read back as that same placement
+    air2 = {"frames": air["frames"],
+            "placements": [dict(air["placements"][0], rotate_deg=-5.0)]}
+    out2 = str(tmp_path / "rt.svg")
+    wing_svg.write_svg(p, air2, out2, parts={"1"}, upright=True)
+    back = next(iter(wing_svg.placements_from_svg(
+        out2, upright=True).values()))
+    assert back["rotate_deg"] == pytest.approx(-5.0, abs=0.01)
 
 
 @needs_pw
@@ -812,3 +828,94 @@ def test_a_yz_part_is_not_negated():
     ys = [q[1] for c in cmds if c["command"] == "sketch.line"
           for q in c["params"]["points"]]
     assert sum(ys) / len(ys) == pytest.approx(20.0, abs=1.0)
+
+
+# ----- the reference layer -------------------------------------------------
+
+@needs_pw
+@needs_core
+def test_a_reference_part_is_drawn_at_its_resolved_station(tmp_path):
+    """A lamination shares its base part's FRAME but stands one
+    thickness along from it. Drawing it at frame_offset_mm put the
+    two nose formers on top of each other - and a reference line in
+    the wrong place is worse than none, because it is there to be
+    trusted."""
+    import re
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    # a third part carries the drawing, so no part appears both as a
+    # reference and as the thing being dragged
+    from pagewright.model import Build, Contour, TracedObject
+    k = TracedObject(name="K", build=Build())
+    k.contours.append(Contour(points=[(0, 0), (40, 0), (40, 8), (0, 8)]))
+    p.objects.append(k)
+    air = {"frames": [_frame("Former-1", 10.0, "YZ"),
+                      _frame("Keel", 0.0, "XZ")],
+           # a lamination only steps along if its thickness is known
+           "thickness_mm": {"1": 1.6, "2": 1.6},
+           "placements": [
+               {"part": "1", "frame": "Former-1"},
+               {"part": "2", "frame": "Former-1",
+                "laminate": {"on": "1", "face": "positive"}},
+               {"part": "K", "frame": "Keel", "offset_mm": [20.0, 5.0]}]}
+    out = str(tmp_path / "r.svg")
+    wing_svg.write_svg(p, air, out, parts={"K"}, upright=True,
+                       reference={"1", "2"})
+
+    xs = {}
+    for q in ET.parse(out).iter("{%s}path" % wing_svg.SVG_NS):
+        gid = q.get("id") or ""
+        if gid.startswith("ref-"):
+            v = re.findall(r"-?[\d.]+", q.get("d"))
+            xs[gid[4:]] = float(v[0])
+    assert xs["1"] == pytest.approx(10.0, abs=0.01)
+    # one sheet thickness further along, NOT on top of part 1
+    assert xs["2"] > xs["1"] + 1.0
+
+
+@needs_pw
+@needs_core
+def test_a_reference_part_is_drawn_as_placed_not_as_traced(tmp_path):
+    """Five formers carry a rotation (16.35) and the sheet's y runs
+    the other way, so a bar drawn straight from the contour describes
+    the part as it sits on the PRINTWOOD. Every one came out upside
+    down that way."""
+    import re
+    import xml.etree.ElementTree as ET
+    from pagewright.model import Contour
+    from planecraft import wing_svg
+    p = _project()
+    # an asymmetric former: deeper below its centre than above
+    p.objects[0].contours = [Contour(points=[(0, 0), (20, 0),
+                                             (20, 30), (0, 10)])]
+    air = {"frames": [_frame("Former-1", 10.0, "YZ"),
+                      _frame("Keel", 0.0, "XZ")],
+           "placements": [
+               {"part": "1", "frame": "Former-1", "rotate_deg": 180.0},
+               {"part": "2", "frame": "Keel", "offset_mm": [20.0, 5.0]}]}
+    out = str(tmp_path / "r.svg")
+    wing_svg.write_svg(p, air, out, parts={"2"}, upright=True,
+                       reference={"1"})
+
+    def bar(rot):
+        air["placements"][0]["rotate_deg"] = rot
+        o = str(tmp_path / ("r%s.svg" % rot))
+        wing_svg.write_svg(p, air, o, parts={"2"}, upright=True,
+                           reference={"1"})
+        for q in ET.parse(o).iter("{%s}path" % wing_svg.SVG_NS):
+            if (q.get("id") or "") == "ref-1":
+                v = [float(x) for x in re.findall(r"-?[\d.]+", q.get("d"))]
+                return v[1], v[3]            # svg y of top, bottom
+        pytest.fail("no reference bar was drawn")
+
+    # The part is deeper on one side of its centre than the other, so
+    # turning it through 180 must MOVE the bar - asserting only that
+    # it stays asymmetric would pass whether or not the rotation was
+    # applied at all.
+    top0, bot0 = bar(0.0)
+    top1, bot1 = bar(180.0)
+    assert (bot0 - top0) == pytest.approx(bot1 - top1, abs=0.01)
+    centre0 = (top0 + bot0) / 2.0
+    centre1 = (top1 + bot1) / 2.0
+    assert abs(centre1 - centre0) > 1.0

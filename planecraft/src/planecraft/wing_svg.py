@@ -28,6 +28,21 @@ INK_NS = "http://www.inkscape.org/namespaces/inkscape"
 SODI_NS = "http://sodipodi.sourceforge.net/DTD/sodipodi-0.0.dtd"
 
 
+def _part_transform(span, aft, upright, rot_deg):
+    """Where a part sits in the drawing, as an SVG transform.
+
+    Order matters: the move comes first and the turn second, about
+    the part's own origin, so reading the translation back gives the
+    position whatever the angle is.
+    """
+    t = "translate(%.4f,%.4f)" % (span, aft)
+    if not upright:
+        t += " rotate(-90)"
+    if rot_deg:
+        t += " rotate(%.4f)" % -rot_deg
+    return t
+
+
 def _path_d(points):
     """A closed path from (x, y) millimetre points."""
     head = "M %.4f %.4f" % points[0]
@@ -37,7 +52,8 @@ def _path_d(points):
 
 def write_svg(project, airframe, path, image_path=None,
               image_origin_mm=(0.0, 0.0), image_size_mm=None, side="R",
-              parts=None, upright=False):
+              parts=None, upright=False, reference=None,
+              datum_mm=0.0):
     """Write one wing's ribs over the plan.
 
     `image_path` is the plan scan to place underneath, and
@@ -48,6 +64,17 @@ def write_svg(project, airframe, path, image_path=None,
     Only one side is written (`side` is "R" or "L"): the two are
     mirror images, so editing one and mirroring is less work than
     keeping two in step.
+
+    `reference` draws other, already-placed parts as locked outlines
+    to judge against - the formers, when the thing being dragged is a
+    keel that has to meet them. It is the model's own answer rather
+    than the scan's, so a part can be lined up against what is
+    actually built even where the drawing is too dense to read.
+
+    `datum_mm` shifts the whole drawing so z = 0 lands there, which
+    is how the parts line up with a scan whose own origin is not the
+    centreline. It is recorded in the file as a `z-datum` marker so
+    the reader does not have to be told.
     """
     from .core import plan as core_plan
 
@@ -101,6 +128,56 @@ def write_svg(project, airframe, path, image_path=None,
         img.set("{%s}href" % XLINK_NS, image_path)
         img.set("href", image_path)
 
+    # Reference parts first, so they sit UNDER what is being dragged,
+    # and locked, so a stray click cannot move the thing being
+    # measured against.
+    if reference:
+        ref_layer = ET.SubElement(svg, "{%s}g" % SVG_NS, {
+            "id": "reference",
+            "{%s}label" % INK_NS: "placed parts (locked)",
+            "{%s}insensitive" % SODI_NS: "true"})
+        for p in core_plan(airframe):
+            if p["part"] not in reference:
+                continue
+            obj = traced.get(p["part"])
+            if obj is None:
+                continue
+            c = next((q for q in obj.contours
+                      if getattr(q, "role", "outer") != "hole"), None)
+            if c is None or len(c.points) < 3:
+                continue
+            # The SAME transform the builder applies, or the bar
+            # describes the part as traced rather than as placed:
+            # drawn straight from the contour, every former came out
+            # upside down, because the sheet's y runs the other way
+            # and five of them carry a rotation (16.35).
+            from .solidcraft import _outline_mm, Y_IS_FLIPPED
+            outline, _holes = _outline_mm(
+                obj, mpp, project.pixel_height,
+                mirrored=p.get("mirrored", False),
+                rotate_deg=p.get("rotate_deg") or 0.0,
+                shift_mm=tuple(p.get("in_plane_mm") or (0.0, 0.0)),
+                flip_y=Y_IS_FLIPPED.get(p["base"], False))
+            if not outline:
+                continue
+            # A former stands across the fuselage, so what shows in a
+            # side view is its DEPTH: the sketch's y, which on YZ is
+            # world z. Its other axis is into the page and says
+            # nothing here.
+            lo = min(q[1] for q in outline)
+            hi = max(q[1] for q in outline)
+            # The RESOLVED station, not the frame's own offset: a
+            # lamination shares its base part's frame but stands one
+            # thickness along from it, so frame_offset_mm drew the
+            # two nose formers on top of each other.
+            x = p["offset_mm"]
+            ET.SubElement(ref_layer, "{%s}path" % SVG_NS, {
+                "id": "ref-%s" % p["part"],
+                "d": "M %.4f %.4f L %.4f %.4f" % (x, datum_mm - hi,
+                                                  x, datum_mm - lo),
+                "fill": "none", "stroke": "#1a9850",
+                "stroke-width": "1.2", "stroke-opacity": "0.55"})
+
     layer = ET.SubElement(svg, "{%s}g" % SVG_NS, {
         "id": "ribs", "{%s}label" % INK_NS: "ribs (drag these)"})
 
@@ -117,12 +194,13 @@ def write_svg(project, airframe, path, image_path=None,
         # the rib drawn nose-up at the origin, then moved into place
         local = [(q[0] - x0, q[1] - y0) for q in pts]
         inplane = p.get("in_plane_mm") or [0.0, 0.0]
+        rot_deg = p.get("rotate_deg") or 0.0
         if upright:
             # A keel IS a side profile already: it is drawn as traced,
             # positioned by its in-plane offset. A rib is a section
             # seen edge-on, so it gets turned a quarter and placed by
             # its span.
-            span, aft = inplane[0], -inplane[1]
+            span, aft = inplane[0], datum_mm - inplane[1]
         else:
             span, aft = abs(p["offset_mm"]), inplane[0]
 
@@ -132,9 +210,13 @@ def write_svg(project, airframe, path, image_path=None,
                 "rib %s  (span %.1f mm)" % (name, span),
             # The rib is drawn ROTATED 90: its chord runs along y,
             # because a streamwise rib lies fore-and-aft on the plan.
-            "transform": ("translate(%.4f,%.4f)" % (span, aft)
-                          if upright else
-                          "translate(%.4f,%.4f) rotate(-90)" % (span, aft)),
+            #
+            # A placement's own rotate_deg is drawn too, or a second
+            # pass over the same parts starts by throwing away the
+            # angles the first pass established - and silently, since
+            # a keel lying flat still looks like a keel. SVG y runs
+            # down, so the angle is negated to turn the same way.
+            "transform": _part_transform(span, aft, upright, rot_deg),
         })
         ET.SubElement(g, "{%s}path" % SVG_NS, {
             "d": _path_d(local),
@@ -159,7 +241,8 @@ def write_svg(project, airframe, path, image_path=None,
     if upright and xs:
         ET.SubElement(layer, "{%s}path" % SVG_NS, {
             "id": "z-datum",
-            "d": "M %.4f 0 L %.4f 0" % (min(xs) - 10.0, max(xs) + 10.0),
+            "d": "M %.4f %.4f L %.4f %.4f"
+                 % (min(xs) - 10.0, datum_mm, max(xs) + 10.0, datum_mm),
             "fill": "none", "stroke": "#0080ff",
             "stroke-width": "0.25", "stroke-dasharray": "4,2"})
 
@@ -325,6 +408,11 @@ def placements_from_svg(path, datum_mm=None, upright=False):
         rot = math.degrees(math.atan2(m[1], m[0]))
         if upright:
             ty = m[5] if datum_mm is None else datum_mm - m[5]
+            # SVG y runs DOWN, so an angle measured in the drawing
+            # turns the opposite way to one in the model - the same
+            # inversion the height needs, and it was latent for as
+            # long as the angles were read off by hand.
+            rot = -rot
         else:
             ty = m[5]
         out[gid[4:]] = {

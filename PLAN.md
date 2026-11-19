@@ -2142,3 +2142,59 @@ So this goes back through the SVG step, where a person can see it,
 rather than being closed with a number the machine inferred. Left as
 built until then: the error is a few millimetres of placement on one
 part, not a convention error, and the convention was the question.
+
+## §16.40  The keel SVG, second pass
+
+Regenerated for F3 (§16.39). Three fixes, each found by checking the
+drawing against the model rather than by looking at it.
+
+**A reference layer.** `write_svg(reference={...})` draws already-
+placed parts as locked outlines to judge against - here the ten
+formers, as vertical bars showing their depth at their own stations.
+It is the MODEL's answer rather than the scan's, so a part can be
+lined up against what is actually built even where the drawing is
+too dense to read reliably (§16.30, §16.39).
+
+Two bugs in that layer, both caught by comparing the bars with the
+built STL rather than by eye:
+
+  * Drawn straight from the traced contour, every bar came out
+    upside down - the sheet's y runs the other way and five formers
+    carry a rotation (§16.35). It now goes through the same
+    `_outline_mm` the builder uses, so a bar describes the part as
+    PLACED, not as it sits on the printwood.
+  * Drawn at `frame_offset_mm`, the two nose formers landed on top
+    of each other: a lamination shares its base part's frame but
+    stands one thickness along. It now uses the resolved
+    `offset_mm`. A reference line in the wrong place is worse than
+    none, because it is there to be trusted.
+
+**The parts were drawn flat.** `write_svg` emitted only a translate,
+so a second pass over the same parts began by throwing away the
+angles the first pass established - silently, since a keel lying
+flat still looks like a keel. It now writes the placement's
+`rotate_deg` too.
+
+That immediately exposed the matching reader bug: SVG y runs down,
+so the drawing's angle is the model's negated, and `read` returned
++4.94 for a part placed at -4.94. Latent until now only because
+every angle so far had been read off by hand. Both legs now agree
+and the round trip is exact in position AND angle.
+
+`test_a_rotation_is_read_without_moving_the_part` had to change: it
+asserted the raw SVG angle, so it pinned down the drawing's sign as
+a side effect of checking something else - the same flaw as
+`test_an_in_plane_offset_reaches_the_sketch` in §16.38. It now
+asserts the round trip, which is what the code must guarantee.
+
+**What the drawing shows.** With the rotations drawn, F1 and F2 sit
+on their keel lines and F3 tracks the plan's bottom keel closely for
+most of its length, diverging toward the tail. So the §16.39
+correction of -10.15 mm was wrong in kind as well as in size: F3
+wants a small rotation, not a shift, and the flat rendering had
+exaggerated the error. Left for the hand-placement pass, which is
+the point of the step.
+
+Datum 30.0387 mm, from the crop geometry (row 355 of 780 at
+66 mm tall) and agreeing with the 30.0567 measured back out of the
+first edited file.
