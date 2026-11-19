@@ -1973,3 +1973,27 @@ What a shape check CAN see, and what it cannot: the slots at +-12 to
 16 mm on formers 3 and 4 are longeron notches round the rim, not
 keel slots, so a mean-|x| over every deep notch is diluted by them.
 Only the slots within about 6 mm of the centreline are keels.
+
+### 16.36  The keels get the same SVG treatment
+
+F1, F2 and F3 were placed from inferred spans (16.28), so they go
+through the hand-placement step that worked for the wing.
+
+Two differences from the ribs, both now options on `write_svg`:
+
+  * `parts={"F1","F2","F3"}` names what to draw. The keels share ONE
+    frame (Keel-centre) rather than having one each, so there is no
+    "-R"/"-L" suffix to select on.
+  * `upright=True` draws a part as traced rather than turned a
+    quarter. A keel IS a side profile; a rib is a section seen
+    edge-on. Turning the keel would lay it on its side.
+
+The drawing is the fuselage side view, 370 x 66 mm, with model X
+running along it - conveniently X = 0 falls at the crop's left edge.
+The vertical datum is approximate: the formers' ink middles scatter
+over rows 398..564, so Z = 0 was taken as their mean, row 355 of the
+crop. That is a starting point to drag from, not a measurement, and
+it does not need to be better than that.
+
+Opening it showed F1 close to its drawn position and F3 well aft of
+the keel line, which is the error 16.28 recorded as inferred.

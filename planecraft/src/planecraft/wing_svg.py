@@ -36,7 +36,8 @@ def _path_d(points):
 
 
 def write_svg(project, airframe, path, image_path=None,
-              image_origin_mm=(0.0, 0.0), image_size_mm=None, side="R"):
+              image_origin_mm=(0.0, 0.0), image_size_mm=None, side="R",
+              parts=None, upright=False):
     """Write one wing's ribs over the plan.
 
     `image_path` is the plan scan to place underneath, and
@@ -61,17 +62,26 @@ def write_svg(project, airframe, path, image_path=None,
     ET.register_namespace("inkscape", INK_NS)
     ET.register_namespace("sodipodi", SODI_NS)
 
+    # `parts` names what to draw and overrides the rib filter, which
+    # is how the fuselage keels get a drawing of their own: they sit
+    # on one shared frame rather than one frame each, so there is no
+    # "-R"/"-L" to select on.
     ribs = []
     for p in core_plan(airframe):
-        fr = p["frame"]
-        if not fr.startswith("Rib-") or not fr.endswith("-" + side):
-            continue
+        if parts is not None:
+            if p["part"] not in parts:
+                continue
+        else:
+            fr = p["frame"]
+            if not fr.startswith("Rib-") or not fr.endswith("-" + side):
+                continue
         obj = traced.get(p["part"])
         if obj is None:
             continue
         ribs.append((p, obj))
     if not ribs:
-        raise ValueError("no ribs on side %r" % (side,))
+        raise ValueError("nothing to draw (side %r, parts %r)"
+                         % (side, parts))
 
     # The drawing frame: x is span, y is along the fuselage (aft is +y,
     # matching the scan, where the nose is at the top).
@@ -106,8 +116,15 @@ def write_svg(project, airframe, path, image_path=None,
         y0 = min(q[1] for q in pts)
         # the rib drawn nose-up at the origin, then moved into place
         local = [(q[0] - x0, q[1] - y0) for q in pts]
-        span = abs(p["offset_mm"])
-        aft = (p.get("in_plane_mm") or [0.0, 0.0])[0]
+        inplane = p.get("in_plane_mm") or [0.0, 0.0]
+        if upright:
+            # A keel IS a side profile already: it is drawn as traced,
+            # positioned by its in-plane offset. A rib is a section
+            # seen edge-on, so it gets turned a quarter and placed by
+            # its span.
+            span, aft = inplane[0], -inplane[1]
+        else:
+            span, aft = abs(p["offset_mm"]), inplane[0]
 
         g = ET.SubElement(layer, "{%s}g" % SVG_NS, {
             "id": "rib-%s" % name,
@@ -115,7 +132,9 @@ def write_svg(project, airframe, path, image_path=None,
                 "rib %s  (span %.1f mm)" % (name, span),
             # The rib is drawn ROTATED 90: its chord runs along y,
             # because a streamwise rib lies fore-and-aft on the plan.
-            "transform": "translate(%.4f,%.4f) rotate(-90)" % (span, aft),
+            "transform": ("translate(%.4f,%.4f)" % (span, aft)
+                          if upright else
+                          "translate(%.4f,%.4f) rotate(-90)" % (span, aft)),
         })
         ET.SubElement(g, "{%s}path" % SVG_NS, {
             "d": _path_d(local),

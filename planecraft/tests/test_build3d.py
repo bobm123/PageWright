@@ -572,3 +572,42 @@ def test_compare_separates_shape_from_placement(tmp_path):
     assert rows["1"]["shape_changed"] is False
     assert rows["1"]["chord_mm"] == pytest.approx(
         rows["1"]["chord_traced_mm"], abs=0.01)
+
+
+@needs_pw
+@needs_core
+def test_parts_filter_draws_something_other_than_ribs(tmp_path):
+    """The fuselage keels share one frame, so there is no -R/-L to
+    select on; `parts` names them instead."""
+    from planecraft import wing_svg
+    p = _project()
+    air = {"frames": [_frame("Keel-centre", 0.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Keel-centre",
+                           "offset_mm": [30.0, -10.0]},
+                          {"part": "2", "frame": "Keel-centre"}]}
+    out = str(tmp_path / "k.svg")
+    assert wing_svg.write_svg(p, air, out, parts={"1"}, upright=True) == 1
+    assert set(wing_svg.read_svg(out)) == {"1"}
+
+
+@needs_pw
+@needs_core
+def test_upright_parts_are_not_turned_a_quarter(tmp_path):
+    """A keel is already a side profile; a rib is a section seen
+    edge-on. Turning the keel would lay it on its side."""
+    from planecraft import wing_svg
+    from pagewright.model import Contour
+    p = _project()
+    p.objects[0].contours = [Contour(points=[(0, 0), (40, 0),
+                                             (40, 10), (0, 10)])]
+    air = {"frames": [_frame("Keel-centre", 0.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Keel-centre",
+                           "offset_mm": [0.0, 0.0]}]}
+    out = str(tmp_path / "k.svg")
+    wing_svg.write_svg(p, air, out, parts={"1"}, upright=True)
+    pts = wing_svg.read_svg(out)["1"]
+    xs = [q[0] for q in pts]
+    ys = [q[1] for q in pts]
+    # 40 long, 10 deep - as traced, not turned
+    assert max(xs) - min(xs) == pytest.approx(40.0)
+    assert max(ys) - min(ys) == pytest.approx(10.0)
