@@ -1997,3 +1997,34 @@ it does not need to be better than that.
 
 Opening it showed F1 close to its drawn position and F3 well aft of
 the keel line, which is the error 16.28 recorded as inferred.
+
+### 16.37  Keels placed, and T3 is a third orientation
+
+All three keels came back from the SVG with a small rotation, which
+decomposes cleanly from the transform matrix: F1 -4.94, F2 +1.02,
+F3 -1.34 degrees, no mirror, scale exactly 1.000. They follow the
+fuselage taper rather than lying level, which is why the inferred
+placement of 16.28 never looked right.
+
+Placed: F1 at x 11.5 z +19.7, F2 at x 137.9 z +22.1, F3 at x 11.5
+z -14.6 - two above the centreline and one below, as the plan draws
+them. Lengths survive the round trip (50.0, 202.2, 303.5 mm against
+the traced 50.0, 202.2, 303.5).
+
+**A `compare()` limitation, found in use.** It reported
+`shape_changed` for all three, because it measures chord along Y -
+right for a rib, wrong for an `upright` part whose length runs along
+X. The dimensions were fine; the metric was not. Worth fixing when
+shape write-back is built, since that is when it will matter.
+
+**T3 is a third orientation.** The side view shows it running
+HORIZONTALLY across the tail, behind former 10, carrying the
+stabilizer - so it lies in XY, where every part so far has been YZ
+(formers) or XZ (ribs and keels). `BasePlane::XY` already exists and
+the frame machinery covers it, but placing T3 needs a view that
+shows a horizontal tail part, which neither the side view nor the
+wing plan does. Deferred, as the user suggested.
+
+Unplaced so far: 14 of 35 parts - T3, T4, the fin, rudder, both
+stabilizer halves, F4, F6, S1, S4, W1, W2, W3. Several of those are
+tail surfaces that will want the same XY treatment.

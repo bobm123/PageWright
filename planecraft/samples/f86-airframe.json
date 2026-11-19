@@ -294,28 +294,31 @@
       "part": "F1",
       "frame": "Keel-centre",
       "offset_mm": [
-        31.9,
-        19.0
+        11.516,
+        19.676
       ],
-      "note": "span inferred from strip length and slot line, not read off the plan"
+      "note": "placed by hand in keels_side-update.svg",
+      "rotate_deg": -4.94
     },
     {
       "part": "F2",
       "frame": "Keel-centre",
       "offset_mm": [
-        208.3,
-        19.5
+        137.934,
+        22.116
       ],
-      "note": "span inferred from strip length and slot line, not read off the plan"
+      "note": "placed by hand in keels_side-update.svg",
+      "rotate_deg": 1.02
     },
     {
       "part": "F3",
       "frame": "Keel-centre",
       "offset_mm": [
-        158.25,
-        -17.0
+        11.506,
+        -14.547
       ],
-      "note": "span inferred from strip length and slot line, not read off the plan"
+      "note": "placed by hand in keels_side-update.svg",
+      "rotate_deg": -1.34
     },
     {
       "part": "A",
