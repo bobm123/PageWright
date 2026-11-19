@@ -37,8 +37,18 @@ def _rotate(loop, degrees):
     return [(x * c - y * s, x * s + y * c) for x, y in loop]
 
 
+# A sketch's local y does not point the same way on every plane.
+# MEASURED, not assumed: a line from local y 0 to +50 on the XZ plane
+# came out spanning world Z 0 to -50, so local +y is world -Z there.
+# Everything placed on XZ therefore needs its height negated, or it
+# builds mirrored about the centreline - which looks plausible in a
+# render of a roughly symmetric airframe, and is why it survived a
+# first pass.
+Y_IS_FLIPPED = {"XZ": True, "XY": False, "YZ": False}
+
+
 def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
-                rotate_deg=0.0, shift_mm=(0.0, 0.0)):
+                rotate_deg=0.0, shift_mm=(0.0, 0.0), flip_y=False):
     """A traced contour as sketch-plane millimetres.
 
     Image y grows downward and CAD y grows up, so the row is flipped -
@@ -74,6 +84,11 @@ def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
     dx, dy = shift_mm
     if dx or dy:
         loops = [[(x + dx, y + dy) for x, y in loop] for loop in loops]
+    # Last of all, and on the FINISHED points: the plane's own axis
+    # direction is not part of the part or of its placement, it is how
+    # the sketch sits in the world.
+    if flip_y:
+        loops = [[(x, -y) for x, y in loop] for loop in loops]
     return loops[0], loops[1:]
 
 
@@ -138,7 +153,8 @@ def commands(project, airframe, units="mm"):
             obj, mpp, project.pixel_height,
             mirrored=p.get("mirrored", False),
             rotate_deg=p.get("rotate_deg") or 0.0,
-            shift_mm=tuple(p.get("in_plane_mm") or (0.0, 0.0)))
+            shift_mm=tuple(p.get("in_plane_mm") or (0.0, 0.0)),
+            flip_y=Y_IS_FLIPPED.get(p["base"], False))
         if outline is None:
             raise ScriptError("%s has no closed outline" % p["part"])
 

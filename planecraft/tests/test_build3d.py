@@ -371,7 +371,13 @@ def test_an_in_plane_offset_reaches_the_sketch():
     """A part is centred on its own centroid, so it straddles the
     frame origin. `offset_mm` is how a keel gets carried back to
     where the fuselage actually is - and solidcraft.py was dropping
-    it, the same way it dropped rotate_deg."""
+    it, the same way it dropped rotate_deg.
+
+    The offset is checked as a DISPLACEMENT, not as a signed sketch
+    coordinate: on XZ the sketch's local y runs opposite world Z, so
+    asserting the raw sign here would pin down the plane's axis
+    convention as a side effect - and did, until the convention was
+    measured and found to be the other way."""
     from planecraft import solidcraft
     def span(off):
         air = {"frames": [_frame("F", 0.0, "XZ")],
@@ -385,8 +391,10 @@ def test_an_in_plane_offset_reaches_the_sketch():
     sx0, sx1, sy0, sy1 = span([100.0, -17.0])
     assert sx0 == pytest.approx(x0 + 100.0)
     assert sx1 == pytest.approx(x1 + 100.0)
-    assert sy0 == pytest.approx(y0 - 17.0)
-    assert sy1 == pytest.approx(y1 - 17.0)
+    # 17 mm of movement, whichever way the plane's y axis points
+    assert abs(sy0 - y0) == pytest.approx(17.0)
+    assert abs(sy1 - y1) == pytest.approx(17.0)
+    assert (sy0 - y0) == pytest.approx(sy1 - y1)
 
 
 @needs_pw
@@ -611,3 +619,196 @@ def test_upright_parts_are_not_turned_a_quarter(tmp_path):
     # 40 long, 10 deep - as traced, not turned
     assert max(xs) - min(xs) == pytest.approx(40.0)
     assert max(ys) - min(ys) == pytest.approx(10.0)
+
+
+# ----- reading a placement back out of an edited SVG ----------------------
+#
+# The bug these protect against is SILENT: a height read with the
+# wrong datum builds a part a few millimetres off, or on the wrong
+# side of the centreline, and the render still looks plausible. F1
+# and F2 were built 1.4 and 5.8 mm low exactly that way.
+
+def _upright_airframe():
+    """Two parts on the fuselage centre plane, one above and one
+    below, so a sign error cannot pass as symmetry."""
+    return {"frames": [_frame("Keel-centre", 0.0, "XZ")],
+            "placements": [
+                {"part": "1", "frame": "Keel-centre",
+                 "offset_mm": [30.0, 12.0]},
+                {"part": "2", "frame": "Keel-centre",
+                 "offset_mm": [120.0, -8.0]}]}
+
+
+@needs_pw
+@needs_core
+def test_an_untouched_svg_reads_back_the_placement_it_was_written_from(
+        tmp_path):
+    """The round trip has to be exact, or every edit carries an error
+    that has nothing to do with the edit."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = _upright_airframe()
+    out = str(tmp_path / "keels.svg")
+    wing_svg.write_svg(p, air, out, parts={"1", "2"}, upright=True)
+
+    got = wing_svg.placements_from_svg(out, upright=True)
+    want = {q["part"]: q["offset_mm"] for q in air["placements"]}
+    for name, row in got.items():
+        a, b = row["offset_mm"]
+        assert a == pytest.approx(want[name][0], abs=0.01)
+        assert b == pytest.approx(want[name][1], abs=0.01)
+
+
+@needs_pw
+@needs_core
+def test_a_shifted_drawing_still_reads_the_right_height(tmp_path):
+    """Inkscape rewrote every transform and moved them 30.06 mm on
+    save. The datum marker moves with the parts, so the shift cancels;
+    without it the heights come back 30 mm out."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = _upright_airframe()
+    out = str(tmp_path / "keels.svg")
+    wing_svg.write_svg(p, air, out, parts={"1", "2"}, upright=True)
+
+    # What Inkscape actually did: rewrite EACH part's own transform,
+    # shifted by a constant, and shift the datum marker's geometry to
+    # match. A shift on the shared parent would cancel by itself and
+    # prove nothing, so it has to be applied per element.
+    SHIFT = 30.0567
+    tree = ET.parse(out)
+    for g in tree.iter("{%s}g" % wing_svg.SVG_NS):
+        if not (g.get("id") or "").startswith("rib-"):
+            continue
+        m = wing_svg.parse_transform(g.get("transform"))
+        g.set("transform", "matrix(%g,%g,%g,%g,%g,%g)"
+              % (m[0], m[1], m[2], m[3], m[4], m[5] + SHIFT))
+    for q in tree.iter("{%s}path" % wing_svg.SVG_NS):
+        if q.get("id") == "z-datum":
+            q.set("transform", "translate(0,%g)" % SHIFT)
+    shifted = str(tmp_path / "shifted.svg")
+    tree.write(shifted)
+
+    # the shift really is in the file, or the test is vacuous
+    assert wing_svg.datum_of(ET.parse(shifted)) == pytest.approx(
+        SHIFT, abs=0.01)
+
+    got = wing_svg.placements_from_svg(shifted, upright=True)
+    want = {q["part"]: q["offset_mm"] for q in air["placements"]}
+    for name, row in got.items():
+        assert row["offset_mm"][1] == pytest.approx(want[name][1], abs=0.01)
+
+
+@needs_pw
+@needs_core
+def test_the_height_sign_is_not_merely_symmetric(tmp_path):
+    """A part ABOVE the centreline must not read as below it. The
+    first keel pass got F2 and F3 inverted, and nothing caught it."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = _upright_airframe()
+    air["placements"][0]["offset_mm"] = [20.0, 15.0]    # above
+    air["placements"][1]["offset_mm"] = [20.0, -15.0]   # below
+    out = str(tmp_path / "signs.svg")
+    wing_svg.write_svg(p, air, out, parts={"1", "2"}, upright=True)
+
+    got = wing_svg.placements_from_svg(out, upright=True)
+    heights = {n: r["offset_mm"][1] for n, r in got.items()}
+    assert max(heights.values()) == pytest.approx(15.0, abs=0.01)
+    assert min(heights.values()) == pytest.approx(-15.0, abs=0.01)
+
+
+@needs_pw
+@needs_core
+def test_a_rotation_is_read_without_moving_the_part(tmp_path):
+    """Rotating about a far-off point is what an editor writes. The
+    position must come from the TRANSLATION: rebuilding it from the
+    bounding box disagrees part to part once things are turned, by
+    7.9 mm in the case that prompted this."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = _upright_airframe()
+    out = str(tmp_path / "rot.svg")
+    wing_svg.write_svg(p, air, out, parts={"1"}, upright=True)
+
+    tree = ET.parse(out)
+    for g in tree.iter("{%s}g" % wing_svg.SVG_NS):
+        if (g.get("id") or "").startswith("rib-"):
+            g.set("transform", "rotate(-5,110.4,-127.3)")
+    turned = str(tmp_path / "turned.svg")
+    tree.write(turned)
+
+    got = wing_svg.placements_from_svg(turned, upright=True)
+    row = next(iter(got.values()))
+    assert row["rotate_deg"] == pytest.approx(-5.0, abs=0.01)
+    assert row["mirrored"] is False
+
+
+@needs_pw
+@needs_core
+def test_a_mirrored_part_is_reported_as_mirrored(tmp_path):
+    """A flip is a negative determinant, not a 180 degree turn, and
+    the two are not interchangeable for an asymmetric part."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    p = _project()
+    air = _upright_airframe()
+    out = str(tmp_path / "mir.svg")
+    wing_svg.write_svg(p, air, out, parts={"1"}, upright=True)
+
+    tree = ET.parse(out)
+    for g in tree.iter("{%s}g" % wing_svg.SVG_NS):
+        if (g.get("id") or "").startswith("rib-"):
+            g.set("transform", "matrix(-1,0,0,1,50,10)")
+    flipped = str(tmp_path / "flipped.svg")
+    tree.write(flipped)
+
+    row = next(iter(wing_svg.placements_from_svg(
+        flipped, upright=True).values()))
+    assert row["mirrored"] is True
+
+
+# ----- which way a sketch's local y points ---------------------------------
+
+@needs_pw
+@needs_core
+def test_a_part_above_the_centreline_is_built_above_it():
+    """MEASURED in SolidCraft: a line from local y 0 to +50 on the XZ
+    plane came out spanning world Z 0 to -50, so local +y is world -Z
+    there. Without the negation every XZ part builds mirrored about
+    the centreline - which looks plausible in a render of a roughly
+    symmetric airframe, and is exactly how it survived a first pass.
+
+    Asserted through the EMITTED POINTS rather than the flag, so the
+    test still means something if the mechanism changes.
+    """
+    from planecraft import solidcraft
+    p = _project()
+    air = {"frames": [_frame("Keel-centre", 0.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Keel-centre",
+                           "offset_mm": [0.0, 20.0]}]}
+    cmds = solidcraft.commands(p, air)
+    ys = [q[1] for c in cmds if c["command"] == "sketch.line"
+          for q in c["params"]["points"]]
+    # placed 20 mm UP, so the sketch points must come out NEGATIVE
+    assert sum(ys) / len(ys) == pytest.approx(-20.0, abs=1.0)
+
+
+@needs_pw
+@needs_core
+def test_a_yz_part_is_not_negated():
+    """The formers were already right, so the fix must not move them:
+    only XZ has the flipped axis."""
+    from planecraft import solidcraft
+    p = _project()
+    air = {"frames": [_frame("Former-1", 10.0, "YZ")],
+           "placements": [{"part": "1", "frame": "Former-1",
+                           "offset_mm": [0.0, 20.0]}]}
+    cmds = solidcraft.commands(p, air)
+    ys = [q[1] for c in cmds if c["command"] == "sketch.line"
+          for q in c["params"]["points"]]
+    assert sum(ys) / len(ys) == pytest.approx(20.0, abs=1.0)

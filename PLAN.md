@@ -2028,3 +2028,60 @@ wing plan does. Deferred, as the user suggested.
 Unplaced so far: 14 of 35 parts - T3, T4, the fin, rudder, both
 stabilizer halves, F4, F6, S1, S4, W1, W2, W3. Several of those are
 tail surfaces that will want the same XY treatment.
+
+## §16.38  Two sign errors, and why neither showed
+
+The keels went into the model at the right X and the wrong Z, and
+the render looked plausible enough to pass. Two independent faults,
+both about which way "up" is.
+
+**The SVG datum.** `write_svg` emits `translate(span, -z)`, and
+nothing inverted that on the way back: each session read the
+transforms by hand and decided the sign from what looked right.
+Inkscape then shifted every transform by 30.06 mm on save, which no
+reconstruction from the geometry can detect. Rebuilding a position
+from the bounding box made it worse, not better - a rotated part's
+box moves relative to its centroid, so the implied datum scattered
+over 7.9 mm across three parts that shared one.
+
+Fixed by reading the group's TRANSLATION, which is the number the
+editor actually wrote, and by having `write_svg` record the datum in
+the file as a `z-datum` marker. The marker is geometry inside the
+same layer, so an editor that shifts the parts shifts it too and the
+offset cancels. `placements_from_svg` reads it, falling back to 0.
+
+**The plane's own axis.** Measured, not assumed: a line from sketch
+local y 0 to +50 on SolidCraft's XZ plane comes out spanning world Z
+0 to -50. Local +y is world -Z there. Every XZ part was therefore
+built mirrored about the centreline - all three keels and all 16
+wing ribs.
+
+The ribs hid it completely. An aerofoil section straddles its chord
+line, so mirroring one leaves it looking like an aerofoil, just
+upside down; and the wing is roughly symmetric top to bottom at this
+scale. Only the keels, which sit well off the centreline, made it
+visible - and only once their heights were right, because the first
+fault was putting them in the wrong place anyway. Two bugs in series,
+where fixing one did not reveal the other until both were understood.
+
+Now `Y_IS_FLIPPED` on the base plane, applied last, to the finished
+points: the plane's axis direction is not a property of the part or
+of its placement, it is how the sketch sits in the world.
+
+**What this says about the test suite.** An existing test,
+`test_an_in_plane_offset_reaches_the_sketch`, FAILED when the axis
+was corrected - it asserted the raw sign of a sketch coordinate and
+so had pinned down the wrong convention as a side effect of checking
+something else. It now asserts the offset as a displacement, which is
+what it was written to check.
+
+Each new test was checked by reintroducing the bug and confirming it
+fails. The first version of the datum test did not: it shifted the
+shared parent layer, which cancels whether or not the code is right.
+It now shifts each part's own transform, as the editor did.
+
+Three sign bugs in this project so far (mirrored formers, flipped
+keels, flipped XZ parts) and the lesson is the same each time: a
+symmetric object cannot testify about its own orientation. Prefer an
+asymmetric witness, and assert the thing that is true in the world
+rather than the intermediate that happens to produce it.

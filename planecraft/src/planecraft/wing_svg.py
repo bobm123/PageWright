@@ -150,6 +150,19 @@ def write_svg(project, airframe, path, image_path=None,
         xs.append(span)
         ys.append(aft)
 
+    # Record the convention IN the file, as a line along z = 0.
+    # An editor may rewrite every transform - Inkscape shifted these
+    # by 30.06 mm on save - so a reader that ASSUMES the datum reads
+    # the wrong height and says nothing: F1 and F2 were built 1.4 and
+    # 5.8 mm low that way. A marker drawn at z = 0 is moved by the
+    # same edit as the parts, so the offset stays measurable.
+    if upright and xs:
+        ET.SubElement(layer, "{%s}path" % SVG_NS, {
+            "id": "z-datum",
+            "d": "M %.4f 0 L %.4f 0" % (min(xs) - 10.0, max(xs) + 10.0),
+            "fill": "none", "stroke": "#0080ff",
+            "stroke-width": "0.25", "stroke-dasharray": "4,2"})
+
     # The canvas has to hold the plan image as well as the ribs, so
     # size it to whichever reaches further.
     pad = 15.0
@@ -253,6 +266,73 @@ def read_svg(path):
 def _span_of(pts):
     xs = [p[0] for p in pts]
     return (min(xs) + max(xs)) / 2.0
+
+
+def datum_of(tree):
+    """The SVG y of z = 0, read off the `z-datum` marker.
+
+    Returns 0.0 when there is no marker, which is what `write_svg`
+    itself produces: the offset only appears once an editor has
+    rewritten the transforms.
+    """
+    for p in tree.iter("{%s}path" % SVG_NS):
+        if p.get("id") != "z-datum":
+            continue
+        m = parse_transform(p.get("transform"))
+        pts = [_apply(m, x, y) for x, y in _path_points(p.get("d", ""))]
+        if pts:
+            return sum(q[1] for q in pts) / len(pts)
+    return 0.0
+
+
+def placements_from_svg(path, datum_mm=None, upright=False):
+    """Where each edited part now sits, as a `Placement` records it.
+
+    The inverse of what `write_svg` applies, and it exists because
+    getting it wrong is SILENT: read a keel's height with the sign or
+    the datum wrong and it builds a few millimetres off, or on the
+    wrong side of the centreline, which looks plausible in a render.
+    F1 and F2 were built 1.4 and 5.8 mm low that way, from heights
+    reconstructed per part instead of through one shared datum.
+
+    A group's transform already holds the answer, so this reads the
+    TRANSLATION rather than rebuilding a position from the geometry:
+    a rotated part's bounding box moves relative to its centroid, so
+    bbox arithmetic disagrees with itself part to part (it scattered
+    over 7.9 mm here) while the translation does not.
+
+    SVG y grows DOWNWARD and the aeroplane's z grows UP, so an
+    upright part's height is `datum_mm - ty`. `datum_mm` is the SVG y
+    of z = 0; pass the value `write_svg` used, or leave it None to
+    get raw SVG millimetres.
+
+    Returns {name: {"offset_mm": (a, b), "rotate_deg": r,
+                    "mirrored": bool}}.
+    """
+    tree = ET.parse(path)
+    if datum_mm is None and upright:
+        datum_mm = datum_of(tree)
+    out = {}
+    for g in tree.iter("{%s}g" % SVG_NS):
+        gid = g.get("id") or ""
+        if not gid.startswith("rib-"):
+            continue
+        m = parse_transform(g.get("transform"))
+        # A negative determinant is a mirror; the rotation is then the
+        # angle of the x axis with the flip taken out.
+        det = m[0] * m[3] - m[1] * m[2]
+        mirrored = det < 0
+        rot = math.degrees(math.atan2(m[1], m[0]))
+        if upright:
+            ty = m[5] if datum_mm is None else datum_mm - m[5]
+        else:
+            ty = m[5]
+        out[gid[4:]] = {
+            "offset_mm": (round(m[4], 3), round(ty, 3)),
+            "rotate_deg": round(rot, 3),
+            "mirrored": mirrored,
+        }
+    return out
 
 
 def compare(project, edited, traced_names=None):
