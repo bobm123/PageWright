@@ -251,7 +251,9 @@
     },
     {
       "part": "3",
-      "frame": "Former-3"
+      "frame": "Former-3",
+      "rotate_deg": 180.0,
+      "note": "orientation set by eye against the parts sheet"
     },
     {
       "part": "4",
@@ -260,7 +262,7 @@
     {
       "part": "5",
       "frame": "Former-5",
-      "rotate_deg": 90.0
+      "note": "orientation set by eye against the parts sheet"
     },
     {
       "part": "6",
@@ -269,11 +271,14 @@
     {
       "part": "7",
       "frame": "Former-7",
-      "rotate_deg": 90.0
+      "rotate_deg": 270.0,
+      "note": "orientation set by eye against the parts sheet"
     },
     {
       "part": "8",
-      "frame": "Former-8"
+      "frame": "Former-8",
+      "rotate_deg": 180.0,
+      "note": "orientation set by eye against the parts sheet"
     },
     {
       "part": "9",
@@ -282,7 +287,8 @@
     {
       "part": "10",
       "frame": "Former-10",
-      "rotate_deg": 90.0
+      "rotate_deg": 270.0,
+      "note": "orientation set by eye against the parts sheet"
     },
     {
       "part": "F1",

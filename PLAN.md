@@ -1940,3 +1940,36 @@ Wanted later, recorded not built: editing the points in this step
 too - align a vertex vertically or horizontally, add or delete one.
 Smoothing to splines is explicitly deferred, the user noting that
 splines do not always translate well.
+
+### 16.35  Former orientation: five corrections, found by eye
+
+The user suspected the formers needed rotations too, and was right.
+Drawing all ten as placed, with UP marked, showed it at a glance -
+former 5's cockpit opening faced RIGHT, and four others sat upside
+down.
+
+Corrections: 3, 7, 8 and 10 turned 180 degrees; 5 turned 90 CCW,
+which takes it from 90 to 0. Final rotate_deg: 3=180, 5=0, 7=270,
+8=180, 10=270.
+
+**"Flip" was ambiguous and worth asking about.** These sections are
+nearly symmetric left-to-right, so a mirror changes almost nothing
+while a 180 degree turn genuinely inverts them - the wide end moves
+from bottom to top. The user meant the turn. Showing the three
+options side by side made the question answerable in a glance rather
+than in prose.
+
+**Why the earlier checks missed it.** §16.28 verified the rotations
+by the keel slots' mean |x|, and §16.27 by aspect ratio. Both are
+SYMMETRIC UNDER A 180 DEGREE TURN, so a former could be upside down
+and pass each one. A check that cannot distinguish the error it is
+asked about proves nothing, however good the number looks.
+
+Former 5 independently confirms the result: the four-way view showed
+rot 0 puts the cockpit U up and the keel slot at the bottom, and
+90 CCW from the stored 90 arrives at exactly that.
+
+What a shape check CAN see, and what it cannot: the slots at +-12 to
+16 mm on formers 3 and 4 are longeron notches round the rim, not
+keel slots, so a mean-|x| over every deep notch is diluted by them.
+Only the slots within about 6 mm of the centreline are keels.
