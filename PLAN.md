@@ -2198,3 +2198,110 @@ the point of the step.
 Datum 30.0387 mm, from the crop geometry (row 355 of 780 at
 66 mm tall) and agreeing with the 30.0567 measured back out of the
 first edited file.
+
+## 16.41 The second keel pass, and a third sign error
+
+The edited file came back as `keels_side2-updated.svg`. Reading it
+took four wrong turns before one right one, and the wrong turns are
+the useful part of the record.
+
+**The reader was right; I doubted it.** `placements_from_svg` reads a
+group's translation, and the edited file no longer has one: Inkscape
+baked the original transform into the path coordinates and left only
+`rotate(a,cx,cy)`, whose translation component is an artifact of the
+rotation centre. That is a real hazard, and it produced numbers that
+looked plausible. But the numbers were also *correct*, and three
+attempts to re-derive them from the geometry disagreed with each
+other before one succeeded and confirmed the reader to the last
+digit. The geometry is the arbiter; reasoning about conventions is
+not.
+
+What settled it: fit the edited contour onto the TRACED contour -
+the shape `write_svg` draws from - over every cyclic alignment and
+both directions, since an editor may re-emit a closed path from a
+different start node. All three keels fit at **rms 4e-5 mm**, which
+is proof rather than agreement.
+
+**The parser could not read the file it was written for.**
+`_path_points` treated every command as absolute, with a docstring
+saying "which is what `write_svg` emits" - and that was exactly the
+problem: the file that comes BACK is written by Inkscape, which
+switches to relative commands partway through. F3 returned as
+`M ...absolute... l 6.0131,0.626 ...`, so its whole lower edge
+landed somewhere else and the part read 23 mm out of shape while its
+upper edge still parsed. Several steps of analysis were spent on
+"what did the user reshape" before looking at the raw `d`. H and V
+are now read too, which the reference bars need.
+
+**Every angle changed sign, and the edit was real.** F1 -4.94 to
++4.78, F2 +1.02 to -0.90, F3 -1.34 to +1.43. Three parts flipping
+when one was adjusted looked like a convention bug. The witness that
+settled it: each keel's own long axis, as drawn, in both files. The
+drawn turn matches the turn implied by the two placements to
+**0.0003 deg** for all three, so the parts really turned. The
+convention held.
+
+**The third sign error.** `_outline_mm` applies `shift_mm` and then
+`flip_y`, so on a flipped plane a placement's height was negated:
+offset z = +10 built the part at z = -10. Moving the flip before the
+shift fixed the offset and broke the part, because the flip is not
+there to correct the placement - it compensates for the PLANE.
+MEASURED with an asymmetric L probe: a sketch spanning local y 10..30
+on XZ builds at world Z -30..-10. So the whole sketch, part and
+placement together, must be negated, and the original order was
+right. The tests now pin down the ORDER, not just the presence, of
+the flip: both wrong orderings fail.
+
+`test_a_part_above_the_centreline_is_built_above_it` was changed
+twice in the course of this - once wrongly. It asserts the emitted
+sketch y is -20 for a part placed 20 mm up, which looks like
+asserting an intermediate and is not: on a flipped plane -20 IS
+20 mm up in the world. The docstring now says so, with the
+measurement.
+
+**One placement, two origins (open).** `write_svg` draws each part
+from its bounding-box MIN CORNER; the builder centres it on its
+CENTROID. The same numbers therefore mean two different points, so a
+position read off the drawing builds half the part's length out in x
+(F3 by 146 mm) and a part-dependent amount out in z. Recorded as
+`test_the_drawing_and_the_build_place_the_same_point`, a **strict**
+xfail - fixing it moves the WING path too, since the rib tests assert
+the bbox-corner answer, and that is a change to make deliberately
+rather than in passing. Until then the keel offsets are SOLVED
+numerically against `_outline_mm` rather than written from the
+drawing: two probes give the gain and intercept, the third confirms
+at 0.00000.
+
+Verified in the BUILT STL, not the script: all three keels match the
+drawing's x and z extents to 0.001 mm.
+
+## 16.42 The green bars become input
+
+The reference bars were output only - drawn from the formers'
+stations so a keel could be judged against them - which meant
+dragging one said nothing and the file could not report it. On this
+pass **seven of the ten crossed over**, former 8's bar landing at
+x 45.7 instead of 221.7, with 3/2, 4/5 and 6/7 transposed.
+
+`stations_from_svg` now reads them back and two checks guard the
+result, because they fail in different ways:
+
+- `check_stations` compares each bar's DEPTH with the depth it was
+  drawn with. A bar's length is its former's depth and dragging does
+  not change it, so this catches a bar that is no longer the part its
+  id claims.
+- `check_order` compares the sequence. Two bars dropped on each
+  other's stations each keep their own length, so the depth check
+  passes while both are wrong - that is the case that got through
+  here, and only the order gives it away.
+
+On the real file: depths match to 0.000 for all ten (nothing was
+reshaped), and the order check reports 2,3,4,5,6,7,8. So the pass is
+reported, not applied.
+
+**Former 5 confirmed the datum.** Its bar is 24.13 mm deep against
+42-53 for its neighbours, and it was placed with its bottom at
+**z = 0.379 mm** - on the datum line. The user's explanation is that
+former 5 rests on the cockpit floor, which is where the datum was
+drawn. An independent check on both the datum and the depths, from a
+part that is distinctive enough to testify.

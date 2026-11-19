@@ -77,16 +77,20 @@ def _outline_mm(obj, mm_per_pixel, pixel_height, mirrored=False,
     _a, cx, cy = polygon_area_centroid(loops[0])
     loops = [[(x - cx, y - cy) for x, y in loop] for loop in loops]
     loops = [_rotate(loop, rotate_deg) for loop in loops]
-    # Shift LAST, so it is a move in the frame's own plane rather than
-    # something the rotation turns. A part centred on its centroid
-    # straddles the origin; this is how a keel gets carried back to
-    # where the fuselage actually is.
+    # Shift in MODEL terms: the part is now where the placement says
+    # it is, measured the way the aeroplane is measured.
     dx, dy = shift_mm
     if dx or dy:
         loops = [[(x + dx, y + dy) for x, y in loop] for loop in loops]
-    # Last of all, and on the FINISHED points: the plane's own axis
-    # direction is not part of the part or of its placement, it is how
-    # the sketch sits in the world.
+    # Then, on the FINISHED points, compensate for the plane's own
+    # axis direction. MEASURED: a sketch on XZ spanning local y 10..30
+    # comes out at world Z -30..-10, so local +y is world -Z there and
+    # the whole sketch - part AND placement together - is negated so
+    # SolidCraft's flip puts it back. Negating only the part (before
+    # the shift) leaves the height right and the part upside down;
+    # negating neither builds every XZ part mirrored about the
+    # centreline, which is how it survived a first pass: an aerofoil
+    # straddles its chord line and still looks like an aerofoil.
     if flip_y:
         loops = [[(x, -y) for x, y in loop] for loop in loops]
     return loops[0], loops[1:]

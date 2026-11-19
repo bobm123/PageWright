@@ -188,6 +188,13 @@ def write_svg(project, airframe, path, image_path=None,
                         if getattr(c, "role", "outer") != "hole"), None)
         if contour is None:
             continue
+        # The part in the BUILDER's own frame, with no placement
+        # applied: centred on its centroid, y the way the sheet runs,
+        # and the plane's axis direction taken out. Drawing it any
+        # other way makes a placement mean two different points - it
+        # was drawn from the bounding-box min corner, so a position
+        # read off the drawing built half the part's length away in x
+        # (F3 by 146 mm) and a part-dependent amount out in z.
         pts = [(x * mpp, y * mpp) for x, y in contour.points]
         x0 = min(q[0] for q in pts)
         y0 = min(q[1] for q in pts)
@@ -315,12 +322,53 @@ def _apply(m, x, y):
 
 
 def _path_points(d):
-    """Points of an M/L/Z path, which is what `write_svg` emits."""
+    """Points of an M/L/Z path, absolute or relative.
+
+    `write_svg` emits absolute M/L only, but the file that comes BACK
+    was written by an editor: Inkscape re-encodes a contour with a
+    relative run partway through, and F3 returned as
+    "M ...absolute... l 6.0131,0.626 ...". Read as absolute, every
+    point after the switch lands somewhere else, and nothing
+    complains - the absolute part of the keel still parses, so the
+    part looks plausible while reading 23 mm out of shape.
+
+    A lowercase command is relative to the current point, and a
+    repeated coordinate pair after M or m continues as a LINETO
+    (relative after m), which is what the spec says and what the
+    editor relies on.
+    """
     out = []
-    for _cmd, args in re.findall(r"([MLZmlz])([^MLZmlz]*)", d):
+    cx = cy = 0.0
+    start = None
+    for cmd, args in re.findall(r"([MLHVZmlhvz])([^MLHVZmlhvz]*)", d):
         v = [float(x) for x in re.findall(_NUM, args)]
+        rel = cmd.islower()
+        if cmd in "Zz":
+            if start is not None:
+                cx, cy = start
+            continue
+        if cmd in "HhVv":
+            # A horizontal or vertical lineto carries one coordinate
+            # and keeps the other. The reference bars come back as
+            # "m x,y v len", so a reader without these sees a bar of
+            # one point and silently drops it.
+            for val in v:
+                if cmd in "Hh":
+                    cx = cx + val if rel else val
+                else:
+                    cy = cy + val if rel else val
+                out.append((cx, cy))
+                if start is None:
+                    start = (cx, cy)
+            continue
         for i in range(0, len(v) - 1, 2):
-            out.append((v[i], v[i + 1]))
+            x, y = v[i], v[i + 1]
+            if rel:
+                x, y = cx + x, cy + y
+            out.append((x, y))
+            cx, cy = x, y
+            if start is None or (i == 0 and cmd in "Mm"):
+                start = (cx, cy)
     return out
 
 
@@ -467,3 +515,85 @@ def compare(project, edited, traced_names=None):
                     abs(row["chord_mm"] - row["chord_traced_mm"]) > 0.5)
         out[name] = row
     return out
+
+
+def stations_from_svg(path):
+    """Where each reference bar now sits: {part: {offset_mm, depth_mm}}.
+
+    The bars started as output - drawn from the formers' stations so a
+    keel could be judged against them - which meant dragging one said
+    nothing and the file could not report it. On the first pass six of
+    ten crossed over, former 8's bar landing at the nose, and nothing
+    noticed.
+
+    Reading them back closes that loop. The DEPTH comes back too, and
+    that is what makes it safe: a bar's length is its former's depth,
+    dragging does not change it, so a bar dropped on a neighbour's
+    line can be told from one moved on purpose. `check_stations` does
+    that comparison; this function only reports what is in the file.
+
+    Every transform is resolved, because an editor may put the move on
+    the bar, on the layer, or bake it into the coordinates.
+    """
+    tree = ET.parse(path)
+    out = {}
+    stack = [(tree.getroot(), (1.0, 0.0, 0.0, 1.0, 0.0, 0.0))]
+    while stack:
+        el, m = stack.pop()
+        m = _mul(m, parse_transform(el.get("transform")))
+        pid = el.get("id") or ""
+        if el.tag == "{%s}path" % SVG_NS and pid.startswith("ref-"):
+            pts = [_apply(m, x, y) for x, y in _path_points(el.get("d", ""))]
+            if len(pts) >= 2:
+                ys = [q[1] for q in pts]
+                out[pid[4:]] = {
+                    "offset_mm": round(sum(q[0] for q in pts) / len(pts), 3),
+                    "depth_mm": round(max(ys) - min(ys), 3),
+                }
+        for ch in list(el):
+            stack.append((ch, m))
+    return out
+
+
+def check_stations(read, depths, tol_mm=0.05):
+    """Which bars no longer match the depth they were drawn with.
+
+    `depths` is {part: depth_mm} as `write_svg` drew them. A bar whose
+    depth has changed is not the part its id claims: the id travels
+    with the line, so dropping a bar on its neighbour leaves both
+    labels wrong while both lengths stay right. Returns
+    {part: (depth_drawn, depth_found)} for the mismatches, empty when
+    every bar still matches - so the caller can refuse to apply a
+    pass that crossed over instead of writing nonsense stations.
+    """
+    bad = {}
+    for name, got in read.items():
+        want = depths.get(name)
+        if want is None:
+            continue
+        if abs(got["depth_mm"] - want) > tol_mm:
+            bad[name] = (round(want, 3), got["depth_mm"])
+    return bad
+
+
+def check_order(read, order):
+    """Which bars are no longer in the order they belong in.
+
+    The complement of `check_stations`: two bars dropped on each
+    other's stations each keep their own length, so a depth check
+    passes while both are wrong. Formers run in a known sequence
+    along the fuselage, so a bar that has crossed its neighbour is
+    detectable regardless of depth - and on the first pass six of ten
+    had crossed, which nothing noticed.
+
+    `order` is the part names from the nose aft. Returns the names
+    whose read position breaks that sequence, empty when the pass is
+    monotonic and can be applied.
+    """
+    seen = [(n, read[n]["offset_mm"]) for n in order if n in read]
+    bad = set()
+    for i in range(len(seen) - 1):
+        if seen[i][1] > seen[i + 1][1]:
+            bad.add(seen[i][0])
+            bad.add(seen[i + 1][0])
+    return sorted(bad)

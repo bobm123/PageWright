@@ -810,7 +810,11 @@ def test_a_part_above_the_centreline_is_built_above_it():
     cmds = solidcraft.commands(p, air)
     ys = [q[1] for c in cmds if c["command"] == "sketch.line"
           for q in c["params"]["points"]]
-    # placed 20 mm UP, so the sketch points must come out NEGATIVE
+    # Placed 20 mm UP, and the emitted sketch y must be NEGATIVE,
+    # because SolidCraft's XZ plane maps local +y to world -Z.
+    # MEASURED: a sketch spanning local y 10..30 on XZ comes out at
+    # world Z -30..-10. So -20 here IS 20 mm up in the world, and the
+    # world is what the docstring promises.
     assert sum(ys) / len(ys) == pytest.approx(-20.0, abs=1.0)
 
 
@@ -919,3 +923,363 @@ def test_a_reference_part_is_drawn_as_placed_not_as_traced(tmp_path):
     centre0 = (top0 + bot0) / 2.0
     centre1 = (top1 + bot1) / 2.0
     assert abs(centre1 - centre0) > 1.0
+
+
+# ----- reading a path an EDITOR wrote --------------------------------------
+#
+# `_path_points` was written against what `write_svg` emits, which is
+# absolute M/L only. The file that comes BACK is written by Inkscape,
+# which re-encodes a contour with relative commands partway through -
+# F3 came back as "M ...absolute... l 6.0131,0.626 ...". Read as
+# absolute, the whole relative run lands in the wrong place, and the
+# failure is silent: the upper edge of the keel still parses, so the
+# part looks plausible and reads 23 mm out of shape.
+
+def test_a_relative_lineto_is_read_as_a_displacement():
+    from planecraft.wing_svg import _path_points
+    pts = _path_points("M 10,20 l 5,0 0,5 Z")
+    assert pts[0] == (10.0, 20.0)
+    assert pts[1] == (15.0, 20.0)
+    assert pts[2] == (15.0, 25.0)
+
+
+def test_an_absolute_and_a_relative_run_in_one_path_both_read():
+    """The shape Inkscape actually wrote: absolute, then relative."""
+    from planecraft.wing_svg import _path_points
+    pts = _path_points("M 0,0 100,0 L 100,10 l -100,0 Z")
+    assert pts == [(0.0, 0.0), (100.0, 0.0), (100.0, 10.0), (0.0, 10.0)]
+
+
+def test_a_relative_moveto_after_a_subpath_is_relative():
+    from planecraft.wing_svg import _path_points
+    pts = _path_points("M 10,10 L 20,10 m 5,5 l 10,0")
+    assert pts[2] == (25.0, 15.0)
+    assert pts[3] == (35.0, 15.0)
+
+
+def test_an_absolute_path_is_unaffected():
+    """The regression guard: what write_svg emits must still read."""
+    from planecraft.wing_svg import _path_points
+    pts = _path_points("M 1,2 L 3,4 L 5,6 Z")
+    assert pts == [(1.0, 2.0), (3.0, 4.0), (5.0, 6.0)]
+
+
+def stations_from_svg_text(text, fn):
+    """Run a file-reading function against SVG held as a string."""
+    import tempfile
+    import os
+    fd, path = tempfile.mkstemp(suffix=".svg")
+    try:
+        with os.fdopen(fd, "w") as f:
+            f.write(text)
+        return fn(path)
+    finally:
+        os.unlink(path)
+
+
+# ----- the reference layer as INPUT ---------------------------------------
+#
+# The green bars were output only: drawn from the formers' stations so
+# a keel could be judged against them. Dragging one therefore said
+# nothing, and six of the ten crossed over on the first pass - former
+# 8's bar ended up at the nose - with no way for the file to report
+# it. Reading them back closes the loop, and the DEPTH is what makes
+# it safe: a bar's length is its former's depth and dragging does not
+# change it, so a bar that was dropped on its neighbour's line can be
+# told apart from one that was moved on purpose.
+
+def _former_airframe():
+    """Two formers of DIFFERENT depth, on stations wide apart.
+
+    Different depths on purpose: equal ones could not tell a swap
+    from a move, which is the whole thing being guarded here.
+    """
+    return {
+        "name": "formers",
+        "parts_source": "unused",
+        "frames": {
+            "Former-A": {"base": "YZ", "offset_mm": 20.0},
+            "Former-B": {"base": "YZ", "offset_mm": 80.0},
+        },
+        "placements": [
+            {"part": "A", "frame": "Former-A"},
+            {"part": "B", "frame": "Former-B"},
+        ],
+        "thickness_mm": {"A": 1.6, "B": 1.6},
+    }
+
+
+def test_a_moved_reference_bar_reports_its_new_station():
+    from planecraft.wing_svg import stations_from_svg
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 35.0 10.0 L 35.0 20.0"/>'
+        '<path id="ref-B" d="M 80.0 5.0 L 80.0 25.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert got["A"]["offset_mm"] == pytest.approx(35.0)
+    assert got["B"]["offset_mm"] == pytest.approx(80.0)
+
+
+def test_a_bar_reports_the_depth_it_was_drawn_with():
+    """The identity witness: length survives a drag, position does not."""
+    from planecraft.wing_svg import stations_from_svg
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 35.0 10.0 L 35.0 20.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert got["A"]["depth_mm"] == pytest.approx(10.0)
+
+
+def test_a_relative_bar_is_read_too():
+    """Inkscape rewrites a two-point line as 'm x,y v len'."""
+    from planecraft.wing_svg import stations_from_svg
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="m 35.0,10.0 v 10.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert got["A"]["offset_mm"] == pytest.approx(35.0)
+    assert got["A"]["depth_mm"] == pytest.approx(10.0)
+
+
+def test_a_bar_under_a_layer_transform_is_resolved():
+    """An editor may put the shift on the layer, not the bar."""
+    from planecraft.wing_svg import stations_from_svg
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference" transform="translate(5,0)">'
+        '<path id="ref-A" d="M 35.0 10.0 L 35.0 20.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert got["A"]["offset_mm"] == pytest.approx(40.0)
+
+
+def test_a_bar_whose_depth_changed_is_reported():
+    """A bar that is no longer the part its id claims.
+
+    The id travels with the line, so this is what a RESHAPED or
+    substituted bar looks like: label A, but 20 mm deep where A was
+    drawn 10 mm deep.
+    """
+    from planecraft.wing_svg import stations_from_svg, check_stations
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 35.0 5.0 L 35.0 25.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    warn = check_stations(got, {"A": 10.0})
+    assert "A" in warn
+    assert warn["A"] == (10.0, 20.0)
+
+
+def test_bars_that_crossed_over_are_reported():
+    """Two bars dropped on each other's stations.
+
+    Each keeps its OWN length, so a depth check sees nothing wrong -
+    this is the case that got through on the first pass, where six of
+    ten bars crossed and former 8's landed at the nose. What gives it
+    away is the ORDER: A belongs forward of B, and here it is aft of
+    it, so the pass cannot be applied as read.
+    """
+    from planecraft.wing_svg import stations_from_svg, check_order
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 80.0 10.0 L 80.0 20.0"/>'
+        '<path id="ref-B" d="M 20.0 5.0 L 20.0 25.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    out_of_order = check_order(got, ["A", "B"])
+    assert out_of_order, "a crossing must be reported, not applied"
+    assert set(out_of_order) == {"A", "B"}
+
+
+def test_bars_still_in_order_raise_no_crossing():
+    from planecraft.wing_svg import stations_from_svg, check_order
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 35.0 10.0 L 35.0 20.0"/>'
+        '<path id="ref-B" d="M 80.0 5.0 L 80.0 25.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert check_order(got, ["A", "B"]) == []
+
+
+def test_consistent_bars_raise_no_warning():
+    from planecraft.wing_svg import stations_from_svg, check_stations
+    svg = (
+        '<svg xmlns="http://www.w3.org/2000/svg">'
+        '<g id="reference">'
+        '<path id="ref-A" d="M 35.0 10.0 L 35.0 20.0"/>'
+        '<path id="ref-B" d="M 80.0 5.0 L 80.0 25.0"/>'
+        '</g></svg>')
+    got = stations_from_svg_text(svg, stations_from_svg)
+    assert check_stations(got, {"A": 10.0, "B": 20.0}) == {}
+
+
+# ----- one origin for a placement -----------------------------------------
+#
+# `write_svg` drew each part shifted to its bounding-box MIN CORNER
+# and placed that with translate(); the builder centres the part on
+# its CENTROID and places that with in_plane_mm. So the same numbers
+# meant two different points and a placement read off the drawing
+# built somewhere else - each keel out by half its own length in x
+# (F3 by 146 mm) and by a different amount in z, which looks like a
+# datum error and is not.
+
+@pytest.mark.xfail(reason=
+    "KNOWN: write_svg draws from the bounding-box min corner while "
+    "the builder centres on the centroid, so a placement means two "
+    "different points. Reading a position off the drawing builds it "
+    "half the part's length out in x (F3 by 146 mm) and a "
+    "part-dependent amount out in z. Fixing it moves the WING path "
+    "too - the rib tests assert the bbox-corner answer - so it is "
+    "recorded here rather than changed in passing.",
+    strict=True)
+@needs_pw
+@needs_core
+def test_the_drawing_and_the_build_place_the_same_point(tmp_path):
+    """A placement must mean ONE point in both paths.
+
+    `write_svg` drew each part shifted to its bounding-box MIN CORNER
+    and placed that; the builder centres the part on its CENTROID and
+    places that. The same numbers therefore meant two different
+    points, so a position read off the drawing built somewhere else -
+    each keel out by half its own length in x (F3 by 146 mm) and by a
+    part-dependent amount in z, which looks like a datum error and is
+    not.
+
+    An ASYMMETRIC part on purpose: a shape whose centroid and
+    bounding-box centre coincide cannot tell the two conventions
+    apart, and all three keels are asymmetric.
+    """
+    from planecraft import wing_svg
+    from planecraft.solidcraft import _outline_mm, Y_IS_FLIPPED
+    from planecraft.core import plan as core_plan
+    from pagewright.model import Contour
+
+    p = _project()
+    # a wedge: centroid well away from the box centre
+    p.objects[0].contours = [Contour(points=[(0, 0), (400, 0), (400, 20),
+                                             (300, 100), (0, 100)])]
+    air = {"frames": [_frame("Keel-centre", 0.0, "XZ")],
+           "placements": [{"part": "1", "frame": "Keel-centre",
+                           "offset_mm": [30.0, 12.0]}]}
+    out = str(tmp_path / "k.svg")
+    wing_svg.write_svg(p, air, out, parts={"1"}, upright=True,
+                       datum_mm=0.0)
+    drawn = wing_svg.read_svg(out)["1"]
+
+    q = next(r for r in core_plan(air) if r["part"] == "1")
+    built, _holes = _outline_mm(
+        p.objects[0], p.calibration.mm_per_pixel, p.pixel_height,
+        rotate_deg=q.get("rotate_deg") or 0.0,
+        shift_mm=tuple(q.get("in_plane_mm") or (0.0, 0.0)),
+        flip_y=Y_IS_FLIPPED.get(q["base"], False))
+
+    dx = [r[0] for r in drawn]
+    dz = [-r[1] for r in drawn]          # SVG y down, datum 0
+    bx = [r[0] for r in built]
+    bz = [r[1] for r in built]
+    assert min(dx) == pytest.approx(min(bx), abs=0.01), (
+        "x origin differs: drawn %.3f, built %.3f" % (min(dx), min(bx)))
+    assert min(dz) == pytest.approx(min(bz), abs=0.01), (
+        "z origin differs: drawn %.3f, built %.3f" % (min(dz), min(bz)))
+
+
+# ----- a placement's offset must mean what it says ------------------------
+#
+# `_outline_mm` applied `shift_mm` and THEN `flip_y`, so on a flipped
+# plane - XZ, which carries the three keels and all sixteen wing ribs
+# - a placement's height came out negated: offset z = +10 built the
+# part at z = -10. The flip belongs to the PLANE, not to the
+# placement, so it must not turn the placement's own offset round.
+#
+# This is the third sign error of the same family here, and the same
+# lesson each time: a symmetric witness cannot testify. A part
+# straddling the centreline still looks right when its offset is
+# negated, so the probe below is placed OFF the centreline.
+
+def test_an_offset_on_a_flipped_plane_is_not_negated():
+    from planecraft.solidcraft import _outline_mm
+
+    class _C:
+        role = "outer"
+        points = [(0, 0), (100, 0), (100, 50), (0, 50)]
+
+    class _O:
+        name = "T"
+        contours = [_C()]
+
+    loop, _holes = _outline_mm(_O(), 1.0, 50, shift_mm=(0.0, 10.0),
+                               flip_y=True)
+    # The sketch's local y is negated on a flipped plane, so world z
+    # is -local_y. MEASURED in SolidCraft: local y 10..30 on XZ builds
+    # at world Z -30..-10.
+    world_z = [-q[1] for q in loop]
+    centre = (min(world_z) + max(world_z)) / 2.0
+    assert centre == pytest.approx(10.0, abs=0.001), (
+        "offset z = +10 must build at world z = +10, not %.3f" % centre)
+
+
+def test_an_offset_on_an_unflipped_plane_is_unchanged():
+    """The regression guard: YZ and XY must not move."""
+    from planecraft.solidcraft import _outline_mm
+
+    class _C:
+        role = "outer"
+        points = [(0, 0), (100, 0), (100, 50), (0, 50)]
+
+    class _O:
+        name = "T"
+        contours = [_C()]
+
+    loop, _holes = _outline_mm(_O(), 1.0, 50, shift_mm=(0.0, 10.0),
+                               flip_y=False)
+    zs = [q[1] for q in loop]
+    assert (min(zs) + max(zs)) / 2.0 == pytest.approx(10.0, abs=0.001)
+
+
+def test_the_plane_flip_still_turns_the_PART_over():
+    """Fixing the offset must not stop the flip doing its job.
+
+    An asymmetric part, so the flip is visible: with the flip the
+    long side of the wedge must end up on the other side of the
+    part's own centre.
+    """
+    from planecraft.solidcraft import _outline_mm
+
+    class _C:
+        role = "outer"
+        points = [(0, 0), (100, 0), (100, 10), (0, 50)]
+
+    class _O:
+        name = "T"
+        contours = [_C()]
+
+    class _O2:
+        name = "T"
+        contours = [_C()]
+
+    plain, _h1 = _outline_mm(_O(), 1.0, 50, flip_y=False)
+    flipped, _h2 = _outline_mm(_O2(), 1.0, 50, flip_y=True)
+
+    # The wedge is deep at one end and shallow at the other, so the
+    # SIGNED area about the part's own centre changes sign when it is
+    # turned over. The x of the deep end does not - it is the same
+    # corner either way - which is why that was the wrong witness.
+    def lopsidedness(loop):
+        """Mean y, which is off-centre for a wedge and flips sign."""
+        return sum(q[1] for q in loop) / len(loop)
+
+    a, b = lopsidedness(plain), lopsidedness(flipped)
+    assert a == pytest.approx(-b, abs=0.001), (
+        "the flip must turn the part over: %.3f vs %.3f" % (a, b))
+    assert abs(a) > 0.5, "the probe part is too symmetric to testify"
