@@ -1805,3 +1805,48 @@ chord at each station does not separate them - the column scan picks
 up the whole outline including the swept trailing edge, giving 67,
 72, 64, 63, 62 mm, which does not taper. That needs reading off the
 plan. **E is also not traced yet** - it is the tip rib.
+
+### 16.32  The wing placed: stations read off the plan's own arrows
+
+Rib E and the F5 fuselage-side pieces traced (35 parts), stock
+assigned by the same bottom-sheet rule, and the wing placed. 29
+placements: 13 fuselage plus 8 ribs on each side.
+
+Stations came from the leader arrows, read at 2x on two crops rather
+than inferred:
+
+    A  22.0    B  45.0    R1  63.5    C  82.5
+    R2 102.0   D 122.5    R3 141.0    E 160.5   mm from the centreline
+
+A sits at the wing ROOT, just outside the fuselage (half-width 26.8
+mm), not on the centreline - the arithmetic rules out a root rib at
+zero. R1..R3 INTERLEAVE between the full ribs: they are the short
+part-ribs forward of the spar, which is why 8 ribs need 8 stations
+rather than 5.
+
+An earlier scan found only 4 stations per side because one narrow
+band missed them. Scanning several bands and keeping what appears in
+two or more found all 8 - a swept wing puts each rib at a different
+height in the image, so a single band cannot see them all.
+
+Built: 984 commands, 84 steps, span 322.6 mm (12.70 in) against the
+plan's stated 13 1/4 in, the difference being the wingtip blocks
+beyond rib E. Verified from the STL: ribs at +-22 through +-160.5,
+every one 1.6 mm thick, symmetric.
+
+**Still wrong: the ribs all sit at the same fuselage station.** A
+swept wing steps each rib aft, and `in_plane_mm` is zero for all of
+them. The sweep is 33.5 degrees (16.31), which gives dx = y * 1.511,
+but that is computed from an inferred angle rather than measured, and
+an attempt to measure each rib's leading edge off the plan failed
+honestly: a column scan at a rib's station picks up the long swept
+edges crossing it, giving a near-constant -26 mm instead of a
+progression. Left unset rather than guessed.
+
+**An engrave layer is wanted** (user, this session). The F5 pieces
+carry a dashed airfoil outline showing where the wing sits, and the
+printwood carries part numbers; neither is a cut or a hole. Decided:
+a THIRD CONTOUR ROLE, `ROLE_ENGRAVE` beside outer and hole, so the
+geometry travels with its part through the file format, placement and
+re-nesting. `role` is already the mechanism and about 14 sites
+consume it. Not built - there is no cut file to produce yet.
