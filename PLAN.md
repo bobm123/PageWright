@@ -1834,14 +1834,24 @@ plan's stated 13 1/4 in, the difference being the wingtip blocks
 beyond rib E. Verified from the STL: ribs at +-22 through +-160.5,
 every one 1.6 mm thick, symmetric.
 
-**Still wrong: the ribs all sit at the same fuselage station.** A
-swept wing steps each rib aft, and `in_plane_mm` is zero for all of
-them. The sweep is 33.5 degrees (16.31), which gives dx = y * 1.511,
-but that is computed from an inferred angle rather than measured, and
-an attempt to measure each rib's leading edge off the plan failed
-honestly: a column scan at a rib's station picks up the long swept
-edges crossing it, giving a near-constant -26 mm instead of a
-progression. Left unset rather than guessed.
+**The sweep, measured at the third attempt.** Two column scans
+failed the same way: at a rib's station they pick up whatever long
+swept edge crosses it, returning a near-constant -26 mm and then
+-10 mm instead of a progression. The edge is one long straight line,
+so the third attempt fit it AS a line - Hough segments in the swept
+family (130..165 deg), restricted to the right wing outboard of the
+fuselage. Three independent segments agree:
+
+    leading edge row 2339 at span +22 mm, 1061 at +160.5 mm
+    -> 0.7813 mm aft per mm of span (38.0 deg)
+
+Applied as `in_plane_mm` per rib, measured from the root station.
+Verified in the solid: ribs step aft 18.6, 50.9, 82.2, 91.2 mm as
+they go outboard, and the overlay puts every rib on its drawn
+counterpart on both wings.
+
+The lesson repeats 16.21's: a column scan reads whatever crosses the
+column. Where the thing being measured is a LINE, fit the line.
 
 **An engrave layer is wanted** (user, this session). The F5 pieces
 carry a dashed airfoil outline showing where the wing sits, and the

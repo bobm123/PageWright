@@ -313,75 +313,155 @@
     },
     {
       "part": "A",
-      "frame": "Rib-A-R"
+      "frame": "Rib-A-R",
+      "offset_mm": [
+        0.0,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "A",
       "frame": "Rib-A-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        0.0,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "B",
-      "frame": "Rib-B-R"
+      "frame": "Rib-B-R",
+      "offset_mm": [
+        17.9699,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "B",
       "frame": "Rib-B-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        17.9699,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R1",
-      "frame": "Rib-R1-R"
+      "frame": "Rib-R1-R",
+      "offset_mm": [
+        32.42395,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R1",
       "frame": "Rib-R1-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        32.42395,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "C",
-      "frame": "Rib-C-R"
+      "frame": "Rib-C-R",
+      "offset_mm": [
+        47.26865,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "C",
       "frame": "Rib-C-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        47.26865,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R2",
-      "frame": "Rib-R2-R"
+      "frame": "Rib-R2-R",
+      "offset_mm": [
+        62.504,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R2",
       "frame": "Rib-R2-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        62.504,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "D",
-      "frame": "Rib-D-R"
+      "frame": "Rib-D-R",
+      "offset_mm": [
+        78.52065,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "D",
       "frame": "Rib-D-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        78.52065,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R3",
-      "frame": "Rib-R3-R"
+      "frame": "Rib-R3-R",
+      "offset_mm": [
+        92.9747,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "R3",
       "frame": "Rib-R3-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        92.9747,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "E",
-      "frame": "Rib-E-R"
+      "frame": "Rib-E-R",
+      "offset_mm": [
+        108.21005,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     },
     {
       "part": "E",
       "frame": "Rib-E-L",
-      "mirrored": true
+      "mirrored": true,
+      "offset_mm": [
+        108.21005,
+        0.0
+      ],
+      "note": "sweep from the leading-edge fit: 0.7813 mm aft per mm of span"
     }
   ],
   "thickness_mm": {
