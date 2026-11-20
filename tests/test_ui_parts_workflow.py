@@ -430,3 +430,64 @@ def test_a_transform_carries_a_hole_with_its_outline(tmp_path):
     ox = [p[0] for p in layer.contours[0].points()]
     hx = [p[0] for p in layer.contours[1].points()]
     assert min(ox) <= min(hx) and max(hx) <= max(ox)
+
+
+# ----- right-click must not disturb the selection -------------------------
+#
+# The bug: QGraphicsView's own mousePressEvent clears the selection
+# when a click lands on empty space, and it runs BEFORE
+# contextMenuEvent. So every selection-dependent menu item - "Align
+# Vertically", "Delete N Selected Points" - was built against an empty
+# selection and could never appear. Nothing in the suite noticed,
+# because nothing tested that a selection survives a right-click.
+
+def _select_two_vertices(w):
+    """Put the canvas in edit mode with exactly two vertices selected.
+
+    The mode ACTION has to be triggered, not just canvas.enter_edit_mode:
+    a handle is only given ItemIsSelectable when the window calls
+    set_editable, and that is gated on act_mode_edit.isChecked().
+    """
+    from pagewright.ui.editable import VertexHandle
+    w.act_mode_edit.trigger()
+    handles = [it for it in w.canvas.scene_obj().items()
+               if isinstance(it, VertexHandle)]
+    assert len(handles) >= 2, "fixture needs at least two vertices"
+    for h in handles[:2]:
+        h.setSelected(True)
+    return handles[:2]
+
+
+def test_a_right_click_keeps_the_selection(tmp_path):
+    from PySide6.QtCore import QEvent, QPoint, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, SQ)
+    w._refresh_editability()
+    _select_two_vertices(w)
+    assert len(w.canvas.scene_obj().selectedItems()) == 2
+
+    # a right-click on empty canvas, where the old code cleared it
+    pos = QPointF(5.0, 5.0)
+    ev = QMouseEvent(QEvent.MouseButtonPress, pos, Qt.RightButton,
+                     Qt.RightButton, Qt.NoModifier)
+    w.canvas.mousePressEvent(ev)
+    assert len(w.canvas.scene_obj().selectedItems()) == 2, (
+        "the right-click cleared the selection, so the context menu "
+        "would be built with nothing selected")
+
+
+def test_a_left_click_on_empty_space_still_clears(tmp_path):
+    """The fix must not break the ordinary way to deselect."""
+    from PySide6.QtCore import QEvent, QPointF, Qt
+    from PySide6.QtGui import QMouseEvent
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, SQ)
+    w._refresh_editability()
+    _select_two_vertices(w)
+    assert len(w.canvas.scene_obj().selectedItems()) == 2
+    pos = QPointF(5.0, 5.0)
+    ev = QMouseEvent(QEvent.MouseButtonPress, pos, Qt.LeftButton,
+                     Qt.LeftButton, Qt.NoModifier)
+    w.canvas.mousePressEvent(ev)
+    assert w.canvas.scene_obj().selectedItems() == []

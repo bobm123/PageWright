@@ -941,6 +941,19 @@ class Canvas(QGraphicsView):
             super().mousePressEvent(event)
             return
 
+        # A right-click must not disturb the selection. QGraphicsView's
+        # own press handler clears it when the click lands on empty
+        # space, and that runs BEFORE contextMenuEvent - so the menu
+        # was always built against an empty selection and the
+        # selection-dependent items ("Align Vertically", "Delete N
+        # Selected Points") could never appear. Swallowing the press
+        # here leaves contextMenuEvent to do the work, which is also
+        # what every other editor does: a right-click acts ON the
+        # selection rather than replacing it.
+        if event.button() == Qt.RightButton:
+            event.accept()
+            return
+
         # Middle-button starts a temporary pan; the prior mode is unchanged.
         if event.button() == Qt.MiddleButton:
             self._mw_panning = True
