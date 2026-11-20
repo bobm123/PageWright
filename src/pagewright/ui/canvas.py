@@ -1097,7 +1097,7 @@ class Canvas(QGraphicsView):
         # canvas only sees keys when it has focus.
         if self._mode == MODE_EDIT and not event.modifiers():
             verb = {Qt.Key_V: "vertical", Qt.Key_H: "horizontal",
-                    Qt.Key_S: "square"}.get(event.key())
+                    Qt.Key_S: "square", Qt.Key_Q: "quad"}.get(event.key())
             if verb is not None:
                 self.vertexVerbRequested.emit(verb)
                 event.accept()

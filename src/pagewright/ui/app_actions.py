@@ -387,9 +387,19 @@ def show_canvas_menu(w, global_pos):
 
         a = menu.addAction("Square Up	S")
         a.setEnabled(run is not None)
-        a.setToolTip("Make 3 or 4 consecutive points meet at right "
-                     "angles")
+        a.setToolTip("Square the turns of 3 or 4 consecutive points, "
+                     "keeping every segment length")
         a.triggered.connect(lambda _=False: w.square_selected_vertices())
+
+        calibrated = bool(getattr(
+            getattr(w.project, "calibration", None), "mm_per_pixel", None))
+        a = menu.addAction("Quad Snap	Q")
+        a.setEnabled(run is not None and len(run[1]) == 4 and calibrated)
+        a.setToolTip("Make 4 consecutive points a closed rectangle on "
+                     "1/32 in sides"
+                     if calibrated else
+                     "Needs a calibrated scale")
+        a.triggered.connect(lambda _=False: w.quad_selected_vertices())
 
         menu.addSeparator()
         a = menu.addAction("Delete %d Selected Point%s	Del"

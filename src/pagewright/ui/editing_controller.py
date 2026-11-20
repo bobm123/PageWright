@@ -372,28 +372,35 @@ class EditingController:
                 return contour, run
         return None
 
+    def _run_grid(self, contour):
+        """The part's own dominant angle, or 0 without a scale."""
+        from ..core import notches as nt
+        try:
+            mpp = self._w.project.calibration.mm_per_pixel
+        except AttributeError:
+            return 0.0, None
+        if not mpp:
+            return 0.0, None
+        return nt.dominant_angle_deg(contour.points(), mpp), mpp
+
     def square_selected_vertices(self):
-        """Square a run of 3 or 4 selected points, as one undo step."""
+        """Square a run's turns, keeping every segment length.
+
+        The lengths are the trustworthy part of a traced notch - it
+        was cut to a stick's width - while the angles are scan noise.
+        So this holds the lengths and lets the run's far end move,
+        rather than holding both ends and stretching the segments.
+        """
         w = self._w
         found = self.selected_run()
         if found is None:
             return
         contour, run = found
         from ..core import geometry as geo
-        from ..core import notches as nt
 
         before = [contour.get_point(i) for i in run]
-        mpp = None
-        try:
-            mpp = w.project.calibration.mm_per_pixel
-        except AttributeError:
-            pass
-        # Square to the PART's own grid, the same angle the notch
-        # cleaner uses, or this would fight it.
-        grid = 0.0
-        if mpp:
-            grid = nt.dominant_angle_deg(contour.points(), mpp)
-        after = geo.square_up(before, grid_deg=grid)
+        grid, _mpp = self._run_grid(contour)
+        after = geo.square_keeping_lengths(before, grid_deg=grid)
         if all(a == b for a, b in zip(before, after)):
             return
 
@@ -409,3 +416,45 @@ class EditingController:
             lambda: _apply(before), lambda: _apply(after)))
         w.statusBar().showMessage(
             "Squared %d points." % len(run), 4000)
+
+    def quad_selected_vertices(self):
+        """Make 4 selected points a closed rectangle on stock sides.
+
+        Needs a calibrated project: 1/32 in means nothing in pixels.
+        The menu greys the item when there is no scale, so this
+        returning early is the belt to that brace.
+        """
+        w = self._w
+        found = self.selected_run()
+        if found is None:
+            return
+        contour, run = found
+        if len(run) != 4:
+            return
+        from ..core import geometry as geo
+        from ..core import notches as nt
+
+        grid, mpp = self._run_grid(contour)
+        if not mpp:
+            w.statusBar().showMessage(
+                "Quad snap needs a calibrated scale.", 4000)
+            return
+        before = [contour.get_point(i) for i in run]
+        after = geo.quad_snap(before, mpp, nt.DEFAULT_STEP_MM,
+                              grid_deg=grid)
+        if all(a == b for a, b in zip(before, after)):
+            return
+
+        def _apply(points):
+            for i, xy in zip(run, points):
+                contour.move_vertex(i, xy[0], xy[1])
+            w._refresh_editability()
+            w._update_bbox()
+
+        _apply(after)
+        w.undo_stack.push(undo.FnCommand(
+            "quad snap 4 vertices",
+            lambda: _apply(before), lambda: _apply(after)))
+        w.statusBar().showMessage(
+            "Squared and snapped to a %s rectangle."
+            % "1/32 in", 4000)

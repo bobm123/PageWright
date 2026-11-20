@@ -196,3 +196,144 @@ def test_two_or_five_points_are_refused():
         geo.square_up([(0.0, 0.0), (1.0, 1.0)])
     with pytest.raises(ValueError):
         geo.square_up([(0.0, 0.0)] * 5)
+
+
+# ----- squaring that keeps the segment lengths ----------------------------
+
+def _lengths(pts):
+    import math
+    return [math.hypot(pts[i+1][0]-pts[i][0], pts[i+1][1]-pts[i][1])
+            for i in range(len(pts)-1)]
+
+
+def test_keeping_lengths_changes_no_length():
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.square_keeping_lengths(pts)
+    for a, b in zip(_lengths(pts), _lengths(out)):
+        assert b == pytest.approx(a, abs=1e-9)
+
+
+def test_keeping_lengths_squares_every_turn():
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.square_keeping_lengths(pts)
+    for a in _seg_angles(out):
+        assert min(a, 90.0 - a) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_keeping_lengths_holds_the_first_point():
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.square_keeping_lengths(pts)
+    assert out[0] == pytest.approx(pts[0])
+
+
+def test_keeping_lengths_moves_the_last_point():
+    """It HAS to: both ends cannot be held while every length is
+    kept. The caller is choosing the lengths over the surrounding
+    contour, and that is the cost."""
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.square_keeping_lengths(pts)
+    assert out[-1] != pytest.approx(pts[-1])
+
+
+def test_keeping_lengths_preserves_each_segment_direction():
+    """A segment that ran downward must not come back running up.
+
+    Both signs on BOTH axes, because a run that only ever goes right
+    cannot tell whether the x sign was honoured: dropping it entirely
+    passed an earlier version of this test.
+    """
+    pts = [(0.0, 0.0), (0.2, -9.0), (-7.0, -9.1), (-7.1, 4.0),
+           (3.0, 4.2)]
+    out = geo.square_keeping_lengths(pts)
+    assert out[1][1] < out[0][1]          # down
+    assert out[2][0] < out[1][0]          # LEFT
+    assert out[3][1] > out[2][1]          # up
+    assert out[4][0] > out[3][0]          # right
+
+
+def test_keeping_lengths_uses_the_part_grid():
+    import math
+    g = 10.0
+    r = math.radians(g)
+    c, s = math.cos(r), math.sin(r)
+    square = [(0.0, 0.0), (0.0, 9.0), (7.0, 9.0), (7.0, 0.0)]
+    tilted = [(x * c - y * s, x * s + y * c) for x, y in square]
+    out = geo.square_keeping_lengths(tilted, grid_deg=g)
+    for a, b in zip(tilted, out):
+        assert a[0] == pytest.approx(b[0], abs=0.01)
+        assert a[1] == pytest.approx(b[1], abs=0.01)
+
+
+# ----- quad snap: a closed rectangle on stock-sized sides ----------------
+
+QMPP = 0.126620
+QSTEP = 25.4 / 32.0
+
+
+def test_quad_snap_closes_the_shape():
+    """Every side a whole number of steps, and the fourth implied -
+    so the four points really are a rectangle."""
+    import math
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    sides = _lengths(out) + [math.hypot(out[0][0] - out[3][0],
+                                        out[0][1] - out[3][1])]
+    for s in sides:
+        steps = s * QMPP / QSTEP
+        assert steps == pytest.approx(round(steps), abs=1e-6)
+
+
+def test_quad_snap_makes_opposite_sides_equal():
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    a, b, c = _lengths(out)
+    assert a == pytest.approx(c, abs=1e-9)
+
+
+def test_quad_snap_averages_the_disagreeing_pair():
+    """The two sides that must match rarely trace the same. Each is
+    snapped on its own and the results averaged, so neither side is
+    privileged and the answer does not depend on selection order."""
+    # 1 step and 3 steps -> both become 2
+    one, three = QSTEP / QMPP, 3 * QSTEP / QMPP
+    across = 2 * QSTEP / QMPP
+    pts = [(0.0, 0.0), (0.0, one), (across, one), (across, one - three)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    a, _b, c = _lengths(out)
+    assert a * QMPP / QSTEP == pytest.approx(2.0, abs=1e-6)
+    assert c * QMPP / QSTEP == pytest.approx(2.0, abs=1e-6)
+
+
+def test_quad_snap_is_order_independent():
+    one, three = QSTEP / QMPP, 3 * QSTEP / QMPP
+    across = 2 * QSTEP / QMPP
+    fwd = [(0.0, 0.0), (0.0, one), (across, one), (across, one - three)]
+    rev = list(reversed(fwd))
+    a = _lengths(geo.quad_snap(fwd, QMPP, QSTEP))
+    b = _lengths(geo.quad_snap(rev, QMPP, QSTEP))
+    assert sorted(round(x, 6) for x in a) == sorted(
+        round(x, 6) for x in b)
+
+
+def test_quad_snap_refuses_without_a_scale():
+    """1/32 in means nothing in pixels, and guessing would put a
+    wrong number in a part silently."""
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    with pytest.raises(ValueError):
+        geo.quad_snap(pts, 0.0, QSTEP)
+    with pytest.raises(ValueError):
+        geo.quad_snap(pts, None, QSTEP)
+
+
+def test_quad_snap_wants_exactly_four_points():
+    with pytest.raises(ValueError):
+        geo.quad_snap([(0.0, 0.0)] * 3, QMPP, QSTEP)
+
+
+def test_quad_snap_never_collapses_a_side():
+    """A side rounding to zero steps would delete the notch."""
+    tiny = 0.2 * QSTEP / QMPP
+    pts = [(0.0, 0.0), (0.0, tiny), (tiny, tiny), (tiny, 0.0)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    for s in _lengths(out):
+        assert s > 0.0

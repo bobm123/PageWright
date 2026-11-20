@@ -218,3 +218,104 @@ def square_up(points, grid_deg=0.0):
             out[2] = (mid, to[3][1])
 
     return [(x * c - y * s, x * s + y * c) for x, y in out]
+
+
+def square_keeping_lengths(points, grid_deg=0.0):
+    """Square the turns of a run WITHOUT changing any segment length.
+
+    Each segment keeps the length it traced and is rotated onto
+    whichever part axis it already lies closest to. The first point
+    is held; every later one follows from it.
+
+    This is the opposite trade from `square_up`, which holds both
+    ENDS and lets the lengths change. Both ends cannot be held while
+    every length is kept - that is over-constrained - so the last
+    point MOVES here, and the caller should expect the segment
+    joining the run to the rest of the contour to change.
+
+    Use this when the traced lengths are the trustworthy part (a
+    notch cut to a stick's width) and the angles are the noise. Use
+    `square_up` when the surrounding contour matters more.
+
+    `grid_deg` is the part's own dominant angle, not the image's.
+    """
+    import math
+    pts = [(float(x), float(y)) for x, y in points]
+    if len(pts) < 3:
+        raise ValueError("need at least 3 points, got %d" % len(pts))
+
+    a = math.radians(grid_deg)
+    c, s = math.cos(a), math.sin(a)
+    to = [(x * c + y * s, -x * s + y * c) for x, y in pts]
+
+    out = [to[0]]
+    for i in range(len(to) - 1):
+        dx = to[i + 1][0] - to[i][0]
+        dy = to[i + 1][1] - to[i][1]
+        length = math.hypot(dx, dy)
+        x, y = out[-1]
+        if abs(dy) > abs(dx):
+            out.append((x, y + math.copysign(length, dy)))
+        else:
+            out.append((x + math.copysign(length, dx), y))
+    return [(x * c - y * s, x * s + y * c) for x, y in out]
+
+
+def quad_snap(points, mm_per_pixel, step_mm, grid_deg=0.0):
+    """Make 4 points a closed rectangle on stock-sized sides.
+
+    Squares the three traced segments, snaps their lengths to
+    multiples of `step_mm`, and closes the shape - so the fourth
+    side is implied and the result is a true rectangle on the part's
+    own grid.
+
+    Closing it means opposite sides must be EQUAL, and the two that
+    have to match rarely trace identical (1.28 and 1.32 steps on the
+    sample notch). Each is snapped on its own and the two results
+    averaged, then snapped again: symmetric, so neither side is
+    privileged and the answer does not depend on which point was
+    selected first.
+
+    Needs a calibrated scale: 1/32 in means nothing in pixels.
+    Raises ValueError without one, rather than guessing - the same
+    refusal core.notches makes.
+
+    The first point is held; the other three follow.
+    """
+    import math
+    pts = [(float(x), float(y)) for x, y in points]
+    if len(pts) != 4:
+        raise ValueError("quad_snap takes 4 points, got %d" % len(pts))
+    if not mm_per_pixel or mm_per_pixel <= 0.0:
+        raise ValueError("quad_snap needs a calibrated scale")
+    if not step_mm or step_mm <= 0.0:
+        raise ValueError("quad_snap needs a positive step")
+
+    a = math.radians(grid_deg)
+    c, s = math.cos(a), math.sin(a)
+    to = [(x * c + y * s, -x * s + y * c) for x, y in pts]
+
+    step_px = float(step_mm) / float(mm_per_pixel)
+    segs = []
+    for i in range(3):
+        dx = to[i + 1][0] - to[i][0]
+        dy = to[i + 1][1] - to[i][1]
+        vertical = abs(dy) > abs(dx)
+        segs.append((vertical, math.hypot(dx, dy),
+                     math.copysign(1.0, dy if vertical else dx)))
+
+    # Segments 0 and 2 are the opposite pair that must match.
+    n0 = max(1, int(round(segs[0][1] / step_px)))
+    n2 = max(1, int(round(segs[2][1] / step_px)))
+    side = max(1, int(round((n0 + n2) / 2.0))) * step_px
+    across = max(1, int(round(segs[1][1] / step_px))) * step_px
+
+    out = [to[0]]
+    for i, length in enumerate((side, across, side)):
+        vertical, _l, sign = segs[i]
+        x, y = out[-1]
+        if vertical:
+            out.append((x, y + sign * length))
+        else:
+            out.append((x + sign * length, y))
+    return [(x * c - y * s, x * s + y * c) for x, y in out]

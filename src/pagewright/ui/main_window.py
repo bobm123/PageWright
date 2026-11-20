@@ -998,9 +998,14 @@ class MainWindow(QMainWindow):
     def square_selected_vertices(self):
         self.editing.square_selected_vertices()
 
+    def quad_selected_vertices(self):
+        self.editing.quad_selected_vertices()
+
     def _on_vertex_verb(self, verb):
         if verb == "square":
             self.square_selected_vertices()
+        elif verb == "quad":
+            self.quad_selected_vertices()
         else:
             self.align_selected_vertices(verb)
 
