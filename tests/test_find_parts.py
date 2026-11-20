@@ -185,3 +185,95 @@ def test_candidates_do_not_hand_back_their_masks():
     # few dozen full-size arrays back to the caller would be careless.
     c = fp.find_parts(_box(_sheet(), 20, 20, 60, 40), MMPP, trace=True)[0]
     assert not hasattr(c, "_enclosed")
+
+
+# ----- closing along contours ---------------------------------------------
+#
+# The case these cover: two parts nested closer than their own
+# outlines are broken. A square close cannot serve both - the kernel
+# that spans the break also spans the lane - so the bridge has to
+# know which way the line runs.
+
+def _nested_arcs(gap_px=19, lane_px=11, thickness=3):
+    """Two nested rings, each broken along one side.
+
+    The numbers are the ones measured on a real printwood sheet: the
+    BREAK (19 px) is wider than the LANE between the parts (11 px),
+    which is what makes a square close impossible - the kernel that
+    seals one ring has already welded it to its neighbour.
+
+    Drawn as RECTANGULAR rings rather than arcs. The property under
+    test is about the DIRECTION of a break against the direction of
+    the lane, not about curvature, and a rectangle keeps the lane a
+    constant width - concentric ellipses pinch together at their
+    ends and quietly merge, which made an earlier version of this
+    fixture one ink component and the test vacuous.
+    """
+    h, w = 420, 360
+    sheet = np.full((h, w, 3), 255, np.uint8)
+    ring = 26
+    for i in range(2):
+        pad = 30 + i * (ring + lane_px)
+        x0, y0 = 30 + i * (ring + lane_px), pad
+        x1, y1 = w - 40 - i * (ring + lane_px), h - pad
+        cv2.rectangle(sheet, (x0, y0), (x1, y1), (0, 0, 0), thickness)
+        cv2.rectangle(sheet, (x0 + ring, y0 + ring),
+                      (x1 - ring, y1 - ring), (0, 0, 0), thickness)
+        # the BREAK: in the inner rectangle's LEFT side, which runs
+        # vertically, so the gap lies ALONG the line. A square close
+        # bridging it must reach `gap_px` sideways too - into the
+        # lane, which is narrower.
+        by = (y0 + y1) // 2 - gap_px // 2
+        cv2.line(sheet, (x0 + ring, by), (x0 + ring, by + gap_px),
+                 (255, 255, 255), thickness + 4)
+    return sheet
+
+
+def test_a_square_close_cannot_bridge_a_break_wider_than_the_lane():
+    """The motivating failure, pinned so the fix is not cosmetic.
+
+    With the break wider than the gap between parts, any square
+    kernel big enough to seal one arc has already welded it to its
+    neighbour - so the two arcs come back as fewer than two parts."""
+    sheet = _nested_arcs()
+    mmpp = 0.126620
+    square = fp.find_parts(sheet, mmpp, gap_mm=19 * mmpp,
+                           min_fill=0.10, max_aspect=12.0,
+                           min_area_mm2=50.0)
+    assert len(square) < 2, (
+        "the square close was expected to weld or miss the arcs, "
+        "got %d parts" % len(square))
+
+
+def test_closing_along_contours_keeps_nested_parts_apart():
+    sheet = _nested_arcs()
+    mmpp = 0.126620
+    found = fp.find_parts(sheet, mmpp, gap_mm=19 * mmpp,
+                          min_fill=0.10, max_aspect=12.0,
+                          min_area_mm2=50.0, along_contours=True)
+    assert len(found) >= 2, (
+        "closing along contours should find both arcs, got %d"
+        % len(found))
+
+
+def test_the_directional_close_does_not_bridge_sideways():
+    """The property that makes it work: a vertical line is extended
+    up and down, never left and right - otherwise it is just a
+    square close wearing a different name."""
+    mask = np.zeros((120, 120), np.uint8)
+    mask[20:50, 60] = 1                 # a vertical stub
+    mask[70:100, 60] = 1                # and another, below a break
+    out = fp.close_along_contours(mask, 25)
+    assert out[50:70, 60].any(), "the break along the line was not bridged"
+    # nothing should have reached a neighbour 11 px to the side
+    assert not out[20:100, 71:].any(), "it bridged sideways"
+
+
+def test_closing_along_contours_is_off_by_default():
+    """The square close stays the default: it is right for an
+    ordinary sheet and cheaper, and this must not change what
+    existing callers get."""
+    sheet = _box(_sheet(), 20, 20, 60, 40)
+    a = fp.find_parts(sheet, MMPP)
+    b = fp.find_parts(sheet, MMPP, along_contours=False)
+    assert len(a) == len(b) == 1

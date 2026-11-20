@@ -136,10 +136,79 @@ def _enclosed_mask(component):
     return (flooded > 0).astype(np.uint8)[1:-1, 1:-1]
 
 
+def _orientation(mask, sigma=4.0):
+    """Local LINE direction at each pixel, in degrees 0..180.
+
+    From the structure tensor: the gradient points across a line, so
+    its minor eigenvector points along one. Smoothed over `sigma`, a
+    few line-widths, so the direction is the curve's and not one
+    pixel's noise.
+    """
+    f = cv2.GaussianBlur(mask.astype(np.float32), (0, 0), 1.0)
+    gx = cv2.Sobel(f, cv2.CV_32F, 1, 0, ksize=5)
+    gy = cv2.Sobel(f, cv2.CV_32F, 0, 1, ksize=5)
+    jxx = cv2.GaussianBlur(gx * gx, (0, 0), sigma)
+    jyy = cv2.GaussianBlur(gy * gy, (0, 0), sigma)
+    jxy = cv2.GaussianBlur(gx * gy, (0, 0), sigma)
+    ang = 0.5 * np.arctan2(2.0 * jxy, jxx - jyy)
+    return (np.rad2deg(ang) + 90.0) % 180.0
+
+
+def _line_kernel(length, angle_deg):
+    """A one-pixel-wide line of `length`, at `angle_deg`."""
+    s = int(length) | 1
+    k = np.zeros((s, s), np.uint8)
+    c = s // 2
+    a = np.deg2rad(angle_deg)
+    dx, dy = np.cos(a), np.sin(a)
+    for t in np.linspace(-s / 2.0, s / 2.0, s * 3):
+        x = int(round(c + t * dx))
+        y = int(round(c + t * dy))
+        if 0 <= x < s and 0 <= y < s:
+            k[y, x] = 1
+    return k
+
+
+def close_along_contours(mask, length_px, bins=12):
+    """Bridge breaks ALONG each line, never across it.
+
+    A square close reaches equally in every direction, so a kernel
+    big enough to span a break also spans the paper to the part
+    beside it. On a nested printwood sheet that is fatal: measured on
+    a peanut-scale fuselage sheet, the dashes in the formers' inner
+    curves were 19 px while the lane between two formers was 11, so
+    NO square kernel could bridge the one without welding the other -
+    the block went from 33 ink components to 1 as the kernel grew.
+
+    A break and a lane differ in DIRECTION, though. The break lies
+    along the curve; the lane lies across it. So each pixel is
+    dilated only along its own local line direction: a pixel on a
+    north-south curve reaches north-south, towards the next dash, and
+    never east-west towards its neighbour.
+
+    On that sheet this took find_parts from 9 parts and no formers to
+    21 parts including five formers traced through their notches.
+
+    `length_px` is how far to reach - about the longest break to
+    bridge. `bins` quantises direction; 12 (15 degrees) was enough.
+    """
+    ang = _orientation(mask)
+    out = mask.copy()
+    for b in range(int(bins)):
+        lo = 180.0 * b / bins
+        hi = 180.0 * (b + 1) / bins
+        sel = ((ang >= lo) & (ang < hi) & (mask > 0)).astype(np.uint8)
+        if int(sel.sum()) < 50:
+            continue                    # too little ink to be a curve
+        out |= cv2.dilate(sel, _line_kernel(length_px, 0.5 * (lo + hi)))
+    return out
+
+
 def find_parts(image, mm_per_pixel, gap_mm=DEFAULT_GAP_MM,
                min_area_mm2=DEFAULT_MIN_AREA_MM2,
                max_aspect=DEFAULT_MAX_ASPECT, min_fill=DEFAULT_MIN_FILL,
-               trace=False, tolerance_mm=None, limit=0, progress=None):
+               trace=False, tolerance_mm=None, limit=0, progress=None,
+               along_contours=False):
     """Locate the closed outlines on a sheet. Returns [Candidate].
 
     `trace` also extracts each candidate's polygon, using the same
@@ -158,7 +227,16 @@ def find_parts(image, mm_per_pixel, gap_mm=DEFAULT_GAP_MM,
     ink = ink_mask(image)
     mm2 = float(mm_per_pixel) * float(mm_per_pixel)
 
-    if gap_mm and gap_mm > 0.0:
+    if along_contours and gap_mm and gap_mm > 0.0:
+        # Directional: bridge along each line, not across it. For a
+        # sheet whose parts nest closer than their own breaks are
+        # wide, where a square close must weld them together.
+        reach = max(3, int(round(float(gap_mm) / float(mm_per_pixel))))
+        if progress:
+            progress("bridging along contours up to %.2f mm (%d px)"
+                     % (gap_mm, reach))
+        sealed = close_along_contours(ink, reach)
+    elif gap_mm and gap_mm > 0.0:
         # A square close bridges a break roughly HALF the kernel wide:
         # the element has to span the gap and still touch ink on both
         # sides of it. Measured on a 6 px break, a 7 px kernel left it

@@ -2405,3 +2405,59 @@ the missing shape flip, the missing placement flip, and a reader
 that forgets to undo it. The origin mutation fails on the x
 assertion and the flip mutations on the z assertion, so the test
 distinguishes them rather than catching both by luck.
+
+## 16.45 Closing along contours
+
+A printwood sheet defeated `find_parts` completely: 9 parts found,
+none of them formers. The reason turned out to be worth a feature.
+
+The formers are closed C-shaped rings, but their inner curve is
+drawn **dashed** - a drawing convention, not a scan fault - so the
+ring leaks out through the dashes and the flood never walls it in.
+`find_parts` bridges breaks with a SQUARE morphological close, and
+here that cannot work:
+
+| distance | size |
+|---|---|
+| dash gap in the inner curve | **19 px** |
+| smallest lane between adjacent formers | **11 px** |
+
+**The gap to bridge is wider than the gap that must stay open.**
+Any square kernel big enough to seal a ring has already welded it
+to its neighbour: measured, the formers block goes from 33 ink
+components at 0.3 mm, to 7 at 1.2 mm, to 1 at 2.4 mm.
+
+A dash and a lane differ in DIRECTION, though - the dash lies along
+the curve, the lane across it. `close_along_contours` estimates
+each ink pixel's local line direction from the structure tensor,
+bins it, and dilates each bin only along its own direction. A pixel
+on a north-south curve reaches north-south, towards the next dash,
+and never east-west towards its neighbour.
+
+On the real sheet, through the shipped API:
+
+    along_contours=False:  1 part,  0 formers
+    along_contours=True : 20 parts, 6 formers
+
+and the traced formers follow their rings through every notch.
+
+It is **off by default**: the square close is right for an ordinary
+sheet and cheaper, and existing callers must not change.
+
+### What it took to get there
+
+Seven attempts at tracing this sheet by other means first - per-part
+windows, lane walls, a colour watershed, a distance-transform
+watershed, per-part seal kernels - all of which clipped the parts.
+The lesson is in the shape of the failure: **no straight separator
+exists between two nested C-arches**, because one's arch overlaps
+the other's waist in x. Every windowing scheme was an attempt to
+find an x that does not exist.
+
+What finally worked attacked the SEAL rather than the separator,
+and needed no separator at all.
+
+**And the diagnostic that would have saved most of it:** filling one
+traced region and looking at it showed the answer in a glance, after
+measurements ("4-8 mm wide") had said only that something was wrong.
+That was attempt six; it should have been attempt two.
