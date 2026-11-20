@@ -880,6 +880,75 @@ def test_a_reference_part_is_drawn_at_its_resolved_station(tmp_path):
 
 @needs_pw
 @needs_core
+def test_the_station_bars_are_reachable_and_the_plan_is_not(tmp_path):
+    """The bars are INPUT now: stations_from_svg reads them back, so
+    dragging one moves a former's station. A locked layer is an input
+    the user cannot reach - the pass was asked for and could not be
+    done. The plan scan underneath must STAY locked in the same file,
+    or the drag that moves a bar can take the whole tracing frame
+    with it, and then every part is wrong at once. Both halves are
+    asserted together because unlocking everything also makes the
+    first half pass."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    from pagewright.model import Build, Contour, TracedObject
+    p = _project()
+    k = TracedObject(name="K", build=Build())
+    k.contours.append(Contour(points=[(0, 0), (40, 0), (40, 8), (0, 8)]))
+    p.objects.append(k)
+    air = {"frames": [_frame("Former-1", 10.0, "YZ"),
+                      _frame("Keel", 0.0, "XZ")],
+           "placements": [
+               {"part": "1", "frame": "Former-1"},
+               {"part": "K", "frame": "Keel", "offset_mm": [20.0, 5.0]}]}
+    out = str(tmp_path / "r.svg")
+    wing_svg.write_svg(p, air, out, parts={"K"}, upright=True,
+                       reference={"1"}, image_path="plan.png",
+                       image_size_mm=(500.0, 400.0))
+
+    lock = {}
+    for g in ET.parse(out).iter("{%s}g" % wing_svg.SVG_NS):
+        gid = g.get("id") or ""
+        if gid:
+            lock[gid] = g.get("{%s}insensitive" % wing_svg.SODI_NS)
+    assert lock["reference"] is None, "the bars must be draggable"
+    assert lock["plan"] == "true", "the scan must stay locked"
+
+
+@needs_pw
+@needs_core
+def test_the_station_layer_says_what_it_is_for(tmp_path):
+    """The label is the only instruction the user gets in the editor.
+    It said "placed parts (locked)" while the bars were output; left
+    there, it tells the user not to touch the one thing they are
+    meant to drag."""
+    import xml.etree.ElementTree as ET
+    from planecraft import wing_svg
+    from pagewright.model import Build, Contour, TracedObject
+    p = _project()
+    k = TracedObject(name="K", build=Build())
+    k.contours.append(Contour(points=[(0, 0), (40, 0), (40, 8), (0, 8)]))
+    p.objects.append(k)
+    air = {"frames": [_frame("Former-1", 10.0, "YZ"),
+                      _frame("Keel", 0.0, "XZ")],
+           "placements": [
+               {"part": "1", "frame": "Former-1"},
+               {"part": "K", "frame": "Keel", "offset_mm": [20.0, 5.0]}]}
+    out = str(tmp_path / "r.svg")
+    wing_svg.write_svg(p, air, out, parts={"K"}, upright=True,
+                       reference={"1"})
+    for g in ET.parse(out).iter("{%s}g" % wing_svg.SVG_NS):
+        if (g.get("id") or "") == "reference":
+            label = g.get("{%s}label" % wing_svg.INK_NS) or ""
+            assert "locked" not in label.lower()
+            assert "drag" in label.lower()
+            break
+    else:
+        raise AssertionError("no reference layer")
+
+
+@needs_pw
+@needs_core
 def test_a_reference_part_is_drawn_as_placed_not_as_traced(tmp_path):
     """Five formers carry a rotation (16.35) and the sheet's y runs
     the other way, so a bar drawn straight from the contour describes

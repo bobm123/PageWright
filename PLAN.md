@@ -2305,3 +2305,35 @@ reported, not applied.
 former 5 rests on the cockpit floor, which is where the datum was
 drawn. An independent check on both the datum and the depths, from a
 part that is distinctive enough to testify.
+
+## 16.43 Unlocking the bars
+
+Reading the bars back was only half of "make the bars draggable
+input": `write_svg` still wrote the reference layer
+`sodipodi:insensitive="true"`, so the next file handed over would
+have had bars that could not be grabbed - a reader with nothing to
+read.
+
+The lock was right while the bars were output: it stopped a stray
+click moving the thing being measured against. It is wrong now that
+dragging one *means* something, and the protection it gave has been
+replaced by something better - `check_stations` catches a bar that
+is no longer its own part, `check_order` catches two bars dropped on
+each other's stations. A guard that reports what moved beats one
+that forbids moving.
+
+The plan scan underneath **stays locked**, and the test asserts both
+halves together: unlocking everything would satisfy "the bars are
+draggable" on its own, and a drag that took the tracing frame with
+it would put every part wrong at once.
+
+`keels_side3.svg` is the regenerated file - same scan, origin, size
+and datum as `keels_side2.svg`, so it overlays the old one exactly;
+the keels move to the outline layer now that they are placed, and
+the ten former bars are what gets dragged. It round-trips: written,
+then read back through `stations_from_svg` as ten bars in order,
+none crossed, former 5 at 24.13 mm.
+
+Note that the keels are in the `ribs` layer and so are draggable
+too. Deliberate: they are placed, but fitting the formers may well
+want a keel nudged, and locking them would be a guess.

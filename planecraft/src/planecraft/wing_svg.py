@@ -128,14 +128,20 @@ def write_svg(project, airframe, path, image_path=None,
         img.set("{%s}href" % XLINK_NS, image_path)
         img.set("href", image_path)
 
-    # Reference parts first, so they sit UNDER what is being dragged,
-    # and locked, so a stray click cannot move the thing being
-    # measured against.
+    # Reference parts first, so they sit UNDER what is being dragged.
+    # UNLOCKED, unlike the plan: the bars began as output - drawn from
+    # the formers' stations so a keel could be judged against them -
+    # and the lock made sense while that was all they were. It does
+    # not now. `stations_from_svg` reads them back, so dragging a bar
+    # MOVES a former's station, and a locked bar is an input the user
+    # cannot reach. The guard that the lock used to provide is now
+    # `check_stations` (a bar reshaped, so it is no longer its part)
+    # and `check_order` (two bars dropped on each other's stations,
+    # which no depth check can see - both keep their own length).
     if reference:
         ref_layer = ET.SubElement(svg, "{%s}g" % SVG_NS, {
             "id": "reference",
-            "{%s}label" % INK_NS: "placed parts (locked)",
-            "{%s}insensitive" % SODI_NS: "true"})
+            "{%s}label" % INK_NS: "former stations (drag these)"})
         for p in core_plan(airframe):
             if p["part"] not in reference:
                 continue
