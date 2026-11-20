@@ -491,3 +491,75 @@ def test_a_left_click_on_empty_space_still_clears(tmp_path):
                      Qt.LeftButton, Qt.NoModifier)
     w.canvas.mousePressEvent(ev)
     assert w.canvas.scene_obj().selectedItems() == []
+
+
+# ----- squaring needs CONSECUTIVE points ----------------------------------
+
+def _edit_with_square(tmp_path):
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (160.0, 100.0),
+                    (160.0, 160.0), (100.0, 160.0)])
+    w.act_mode_edit.trigger()
+    from pagewright.ui.editable import VertexHandle
+    return w, [it for it in w.canvas.scene_obj().items()
+               if isinstance(it, VertexHandle)]
+
+
+def test_three_consecutive_points_are_a_run(tmp_path):
+    w, h = _edit_with_square(tmp_path)
+    by_idx = {h[i].owner_contour().index_of(h[i]): h[i]
+              for i in range(len(h))}
+    for i in (0, 1, 2):
+        by_idx[i].setSelected(True)
+    assert w.editing.selected_run() is not None
+
+
+def test_a_wrapping_run_counts_too(tmp_path):
+    """On a closed contour the run from the last vertex to the first
+    is as consecutive as any other."""
+    w, h = _edit_with_square(tmp_path)
+    by_idx = {h[i].owner_contour().index_of(h[i]): h[i]
+              for i in range(len(h))}
+    for i in (3, 0, 1):
+        by_idx[i].setSelected(True)
+    assert w.editing.selected_run() is not None
+
+
+def test_scattered_points_are_not_a_run(tmp_path):
+    """Squaring points that share no segment is meaningless, so the
+    menu greys the item rather than doing something arbitrary.
+
+    Needs a hexagon: on a 4-gon every set of three vertices is
+    consecutive one way round, so a square cannot express a scatter.
+    """
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (130.0, 95.0), (160.0, 100.0),
+                    (160.0, 160.0), (130.0, 165.0), (100.0, 160.0)])
+    w.act_mode_edit.trigger()
+    from pagewright.ui.editable import VertexHandle
+    h = [it for it in w.canvas.scene_obj().items()
+         if isinstance(it, VertexHandle)]
+    by_idx = {it.owner_contour().index_of(it): it for it in h}
+    for i in (0, 2, 4):              # every other vertex
+        by_idx[i].setSelected(True)
+    assert w.editing.selected_run() is None
+
+
+def test_two_points_are_not_a_square_run(tmp_path):
+    w, h = _edit_with_square(tmp_path)
+    for it in h[:2]:
+        it.setSelected(True)
+    assert w.editing.selected_run() is None
+
+
+def test_five_points_are_not_a_square_run(tmp_path):
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (130.0, 95.0), (160.0, 100.0),
+                    (160.0, 160.0), (130.0, 165.0), (100.0, 160.0)])
+    w.act_mode_edit.trigger()
+    from pagewright.ui.editable import VertexHandle
+    h = [it for it in w.canvas.scene_obj().items()
+         if isinstance(it, VertexHandle)]
+    for it in h[:5]:
+        it.setSelected(True)
+    assert w.editing.selected_run() is None

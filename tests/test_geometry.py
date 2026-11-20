@@ -119,3 +119,80 @@ def test_a_single_point_is_unchanged():
 def test_an_unknown_axis_is_refused():
     with pytest.raises(ValueError):
         geo.align_points([(0.0, 0.0), (1.0, 1.0)], "diagonal")
+
+
+# ----- squaring a run of points -------------------------------------------
+
+def _seg_angles(pts):
+    import math
+    return [math.degrees(math.atan2(pts[i+1][1]-pts[i][1],
+                                    pts[i+1][0]-pts[i][0])) % 90.0
+            for i in range(len(pts)-1)]
+
+
+def test_squaring_a_notch_makes_every_segment_axial():
+    out = geo.square_up([(10.0, 0.0), (10.4, 8.0),
+                         (16.0, 8.3), (16.2, 0.0)])
+    for a in _seg_angles(out):
+        assert min(a, 90.0 - a) == pytest.approx(0.0, abs=0.01)
+
+
+def test_squaring_keeps_the_notch_depth():
+    """The bug this replaces: the axis was chosen from the run END TO
+    END, which for a notch cut into a wall is mostly sideways - so
+    the floor was flattened onto the wall and the notch vanished."""
+    out = geo.square_up([(10.0, 0.0), (10.4, 8.0),
+                         (16.0, 8.3), (16.2, 0.0)])
+    depth = abs((out[1][1] + out[2][1]) / 2.0
+                - (out[0][1] + out[3][1]) / 2.0)
+    assert depth == pytest.approx(8.15, abs=0.1)
+
+
+def test_squaring_works_on_a_notch_in_a_horizontal_edge():
+    """The same notch turned 90 degrees must behave the same way."""
+    out = geo.square_up([(0.0, 10.0), (8.0, 10.4),
+                         (8.3, 16.0), (0.0, 16.2)])
+    depth = abs((out[1][0] + out[2][0]) / 2.0
+                - (out[0][0] + out[3][0]) / 2.0)
+    assert depth == pytest.approx(8.15, abs=0.1)
+
+
+def test_the_ends_of_the_run_never_move():
+    """The run is a piece of a longer contour: moving an end would
+    break the segment joining it to the rest, which the caller
+    cannot see."""
+    pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
+    out = geo.square_up(pts)
+    assert out[0] == pytest.approx(pts[0])
+    assert out[-1] == pytest.approx(pts[-1])
+
+
+def test_three_points_square_one_corner():
+    out = geo.square_up([(0.0, 0.0), (0.3, 9.0), (7.0, 9.2)])
+    a = _seg_angles(out)
+    assert min(a[0], 90.0 - a[0]) == pytest.approx(0.0, abs=0.01)
+    assert min(a[1], 90.0 - a[1]) == pytest.approx(0.0, abs=0.01)
+
+
+def test_squaring_uses_the_part_grid_not_the_image():
+    """A drawing is rarely pasted down square - these traces sit 0.26
+    degrees off - and squaring to the image axes would fight the part
+    and undo what the notch cleaner did."""
+    import math
+    g = 10.0
+    r = math.radians(g)
+    c, s = math.cos(r), math.sin(r)
+    square = [(0.0, 0.0), (0.0, 9.0), (7.0, 9.0), (7.0, 0.0)]
+    tilted = [(x * c - y * s, x * s + y * c) for x, y in square]
+    out = geo.square_up(tilted, grid_deg=g)
+    # already square ON THE PART GRID, so nothing should move
+    for a, b in zip(tilted, out):
+        assert a[0] == pytest.approx(b[0], abs=0.01)
+        assert a[1] == pytest.approx(b[1], abs=0.01)
+
+
+def test_two_or_five_points_are_refused():
+    with pytest.raises(ValueError):
+        geo.square_up([(0.0, 0.0), (1.0, 1.0)])
+    with pytest.raises(ValueError):
+        geo.square_up([(0.0, 0.0)] * 5)

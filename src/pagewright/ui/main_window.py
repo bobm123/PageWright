@@ -85,6 +85,7 @@ class MainWindow(QMainWindow):
         self.canvas.seedsChanged.connect(self._refresh_undo_actions)
         self.canvas.deleteSelectionRequested.connect(
             self.delete_selected_vertices)
+        self.canvas.vertexVerbRequested.connect(self._on_vertex_verb)
         self.canvas.roiSelected.connect(self._on_roi_selected)
         self.canvas.roiCleared.connect(self.clear_roi)
         self.canvas.roiEdited.connect(self._on_roi_edited)
@@ -993,6 +994,15 @@ class MainWindow(QMainWindow):
 
     def align_selected_vertices(self, axis):
         self.editing.align_selected_vertices(axis)
+
+    def square_selected_vertices(self):
+        self.editing.square_selected_vertices()
+
+    def _on_vertex_verb(self, verb):
+        if verb == "square":
+            self.square_selected_vertices()
+        else:
+            self.align_selected_vertices(verb)
 
     def clear_seeds(self):
         self.canvas.clear_seeds()

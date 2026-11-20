@@ -337,3 +337,75 @@ class EditingController:
             lambda: _apply(before), lambda: _apply(after)))
         w.statusBar().showMessage(
             "Aligned %d points %sly." % (len(items), axis), 4000)
+
+    def selected_run(self):
+        """The selected vertices as a consecutive run, or None.
+
+        Returns (contour, [indices in order]) when the selection is 3
+        or 4 vertices of ONE contour that follow each other round the
+        ring, else None. Squaring a scattered selection would move
+        points that share no segment, which is meaningless - so the
+        menu asks this first and greys the item out when it fails.
+
+        Wrap-around counts: the run from the last vertex to the first
+        is as consecutive as any other on a closed contour.
+        """
+        w = self._w
+        if not w._is_edit_mode():
+            return None
+        picked = [it for it in w.canvas.scene_obj().selectedItems()
+                  if isinstance(it, VertexHandle)]
+        if not 3 <= len(picked) <= 4:
+            return None
+        contours = {it.owner_contour() for it in picked}
+        if len(contours) != 1:
+            return None
+        contour = contours.pop()
+        n = contour.vertex_count()
+        idx = sorted(contour.index_of(it) for it in picked)
+        if len(set(idx)) != len(idx):
+            return None
+        k = len(idx)
+        for start in range(n):
+            run = [(start + d) % n for d in range(k)]
+            if sorted(run) == idx:
+                return contour, run
+        return None
+
+    def square_selected_vertices(self):
+        """Square a run of 3 or 4 selected points, as one undo step."""
+        w = self._w
+        found = self.selected_run()
+        if found is None:
+            return
+        contour, run = found
+        from ..core import geometry as geo
+        from ..core import notches as nt
+
+        before = [contour.get_point(i) for i in run]
+        mpp = None
+        try:
+            mpp = w.project.calibration.mm_per_pixel
+        except AttributeError:
+            pass
+        # Square to the PART's own grid, the same angle the notch
+        # cleaner uses, or this would fight it.
+        grid = 0.0
+        if mpp:
+            grid = nt.dominant_angle_deg(contour.points(), mpp)
+        after = geo.square_up(before, grid_deg=grid)
+        if all(a == b for a, b in zip(before, after)):
+            return
+
+        def _apply(points):
+            for i, xy in zip(run, points):
+                contour.move_vertex(i, xy[0], xy[1])
+            w._refresh_editability()
+            w._update_bbox()
+
+        _apply(after)
+        w.undo_stack.push(undo.FnCommand(
+            "square %d vertices" % len(run),
+            lambda: _apply(before), lambda: _apply(after)))
+        w.statusBar().showMessage(
+            "Squared %d points." % len(run), 4000)

@@ -351,9 +351,59 @@ def build_toolbar(w):
 
 
 def show_canvas_menu(w, global_pos):
-    """Right-click menu on the trace canvas: the tools that matter for
-    tracing, mode-aware, plus one-click jumps to the other stages."""
+    """Right-click menu on the trace canvas.
+
+    In EDIT VERTICES mode this is a vertex-editing menu and nothing
+    else: the mode switches and stage jumps are already a row of
+    buttons above the canvas, and repeating them here buried the two
+    items that are actually wanted mid-edit under fourteen that are
+    not.
+
+    The vertex items are always SHOWN, greyed when the selection does
+    not suit them, rather than appearing and disappearing. A menu
+    whose items move depending on what is selected cannot be learned;
+    one with a fixed shape can, and the grey state teaches what each
+    item needs.
+    """
+    from .canvas import MODE_EDIT, MODE_SEED_BG, MODE_SEED_FG
     menu = QMenu(w)
+
+    if w.canvas._mode == MODE_EDIT:
+        sel = [it for it in w.canvas.scene_obj().selectedItems()]
+        n = len(sel)
+        run = w.editing.selected_run()
+
+        a = menu.addAction("Align Vertically	V")
+        a.setEnabled(n == 2)
+        a.setToolTip("Give both points the same x")
+        a.triggered.connect(
+            lambda _=False: w.align_selected_vertices("vertical"))
+
+        a = menu.addAction("Align Horizontally	H")
+        a.setEnabled(n == 2)
+        a.setToolTip("Give both points the same y")
+        a.triggered.connect(
+            lambda _=False: w.align_selected_vertices("horizontal"))
+
+        a = menu.addAction("Square Up	S")
+        a.setEnabled(run is not None)
+        a.setToolTip("Make 3 or 4 consecutive points meet at right "
+                     "angles")
+        a.triggered.connect(lambda _=False: w.square_selected_vertices())
+
+        menu.addSeparator()
+        a = menu.addAction("Delete %d Selected Point%s	Del"
+                           % (n, "" if n == 1 else "s"))
+        a.setEnabled(n > 0)
+        a.triggered.connect(w.delete_selected_vertices)
+
+        menu.addSeparator()
+        menu.addAction(w.act_mode_pan)          # the way back out
+        if getattr(w, "_active_index", -1) >= 0:
+            menu.addAction(w.act_clean_notches)
+        menu.exec(global_pos)
+        return
+
     menu.addAction(w.act_run_seg)       # Trace Poly
     menu.addAction(w.act_new_object)    # New Polygon
     menu.addSeparator()
@@ -364,32 +414,6 @@ def show_canvas_menu(w, global_pos):
     menu.addAction(w.act_mode_edit)
     if w.canvas.roi_rect() is not None:
         menu.addAction(w.act_clear_roi)
-    # editing: delete a marquee-selected group of points without
-    # reaching for the keyboard
-    from .canvas import MODE_EDIT, MODE_SEED_BG, MODE_SEED_FG
-    if w.canvas._mode == MODE_EDIT:
-        sel = w.canvas.scene_obj().selectedItems()
-        n = len(sel)
-        if n == 2:
-            # Exactly two points: the align pair is what is wanted, at
-            # the top where it is first under the cursor. Squaring a
-            # notch wall is the common edit, and two points is the only
-            # selection for which "line these up" is unambiguous - with
-            # three or more it is a distribute, which is a different
-            # operation and not offered here.
-            a = menu.addAction("Align Vertically")
-            a.setToolTip("Give both points the same x")
-            a.triggered.connect(
-                lambda _=False: w.align_selected_vertices("vertical"))
-            a = menu.addAction("Align Horizontally")
-            a.setToolTip("Give both points the same y")
-            a.triggered.connect(
-                lambda _=False: w.align_selected_vertices("horizontal"))
-            menu.addSeparator()
-        if n:
-            a = menu.addAction("Delete %d Selected Point%s"
-                               % (n, "" if n == 1 else "s"))
-            a.triggered.connect(w.delete_selected_vertices)
     # brush size only matters while seeding
     if w.canvas._mode in (MODE_SEED_FG, MODE_SEED_BG):
         brush_menu = menu.addMenu("Brush Size")

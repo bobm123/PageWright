@@ -60,6 +60,10 @@ class Canvas(QGraphicsView):
     # Emitted when Delete/Backspace is pressed in edit mode, so the main
     # window can group-delete the selected vertices.
     deleteSelectionRequested = Signal()
+    # Emitted for V / H / S in edit mode: "vertical", "horizontal" or
+    # "square". A signal rather than a window shortcut because bare
+    # letters must not fire while a text field has focus.
+    vertexVerbRequested = Signal(str)
     # Emitted with the scene rect once a trace area is dragged out.
     roiSelected = Signal(QRectF)
     # Emitted when the trace area is cleared by clicking (vs. dragging).
@@ -1087,6 +1091,17 @@ class Canvas(QGraphicsView):
             self.deleteSelectionRequested.emit()
             event.accept()
             return
+        # V / H / S while editing vertices. Bare letters, so they are
+        # handled HERE rather than as window shortcuts: a global "S"
+        # would fire while typing in the part-name field, and the
+        # canvas only sees keys when it has focus.
+        if self._mode == MODE_EDIT and not event.modifiers():
+            verb = {Qt.Key_V: "vertical", Qt.Key_H: "horizontal",
+                    Qt.Key_S: "square"}.get(event.key())
+            if verb is not None:
+                self.vertexVerbRequested.emit(verb)
+                event.accept()
+                return
         super().keyPressEvent(event)
 
     def contextMenuEvent(self, event):

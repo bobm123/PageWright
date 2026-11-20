@@ -149,3 +149,72 @@ def align_points(points, axis):
         return [(x, my) for x, _y in pts]
     raise ValueError("axis must be 'vertical' or 'horizontal', got %r"
                      % (axis,))
+
+
+def square_up(points, grid_deg=0.0):
+    """Make a short run of consecutive points meet at right angles.
+
+    `points` is 3 or 4 consecutive vertices - one corner, or the two
+    corners of a notch. Each segment between them is snapped to
+    whichever of the two part axes it already lies closest to, and
+    the points are moved onto those axes.
+
+    `grid_deg` is the part's own dominant angle, NOT the image's. A
+    drawing is rarely pasted down square - these traces sit 0.26
+    degrees off - and squaring to the image would fight the part and
+    undo what the notch cleaner did.
+
+    The ENDS are held and the interior points moved, because the run
+    is a piece of a longer contour: moving an end would break the
+    segment joining it to the rest, which the caller cannot see. For
+    three points that means only the middle one moves; for four, the
+    two in the middle.
+
+    Returns a new list; the input is not modified.
+    """
+    import math
+    pts = [(float(x), float(y)) for x, y in points]
+    n = len(pts)
+    if n < 3 or n > 4:
+        raise ValueError("square_up takes 3 or 4 points, got %d" % n)
+
+    a = math.radians(grid_deg)
+    c, s = math.cos(a), math.sin(a)
+    to = [(x * c + y * s, -x * s + y * c) for x, y in pts]
+
+    out = list(to)
+    if n == 3:
+        # one corner: the middle point takes the x of one neighbour
+        # and the y of the other, whichever way the two segments run
+        dx0 = abs(to[1][0] - to[0][0])
+        dy0 = abs(to[1][1] - to[0][1])
+        if dy0 >= dx0:
+            # first segment is the vertical one
+            out[1] = (to[0][0], to[2][1])
+        else:
+            out[1] = (to[2][0], to[0][1])
+    else:
+        # A notch: the middle two share a coordinate with each other,
+        # and each lines up with its own end.
+        #
+        # Which coordinate they share is decided by how the middle
+        # pair sits relative to the ENDS, not by the direction of the
+        # run from end to end. A notch cut into a vertical wall runs
+        # mostly horizontally end to end while its depth is vertical,
+        # so judging by the run flattened the notch to nothing.
+        depth_y = abs(((to[1][1] + to[2][1]) / 2.0)
+                      - ((to[0][1] + to[3][1]) / 2.0))
+        depth_x = abs(((to[1][0] + to[2][0]) / 2.0)
+                      - ((to[0][0] + to[3][0]) / 2.0))
+        if depth_y >= depth_x:
+            # the pair is offset in y: the floor between them is
+            # horizontal, and each middle point keeps its end's x
+            mid = (to[1][1] + to[2][1]) / 2.0
+            out[1] = (to[0][0], mid)
+            out[2] = (to[3][0], mid)
+        else:
+            mid = (to[1][0] + to[2][0]) / 2.0
+            out[1] = (mid, to[0][1])
+            out[2] = (mid, to[3][1])
+
+    return [(x * c - y * s, x * s + y * c) for x, y in out]
