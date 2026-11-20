@@ -991,6 +991,9 @@ class MainWindow(QMainWindow):
     def delete_selected_vertices(self):
         self.editing.delete_selected_vertices()
 
+    def align_selected_vertices(self, axis):
+        self.editing.align_selected_vertices(axis)
+
     def clear_seeds(self):
         self.canvas.clear_seeds()
 

@@ -32,6 +32,13 @@ _OUTER_COLOR = QColor(255, 0, 0)
 _HOLE_COLOR = QColor(255, 170, 40)
 _HANDLE_COLOR = QColor(255, 255, 255)
 _HANDLE_R = 4.0          # on-screen radius (device px, due to IgnoresTransform)
+# A SELECTED vertex, drawn large and filled. Qt's own selection cue on
+# an ellipse item is a faint dashed rectangle that is nearly invisible
+# against a dense plan, so after a marquee drag there was no way to see
+# which points were caught - which matters most at the moment you are
+# about to act on them.
+_SEL_COLOR = QColor(255, 140, 0)
+_SEL_R = 6.5
 _MIN_VERTICES = 3
 
 
@@ -78,7 +85,24 @@ class VertexHandle(QGraphicsEllipseItem):
     def itemChange(self, change, value):
         if change == QGraphicsEllipseItem.ItemScenePositionHasChanged:
             self._owner._on_handle_moved()
+        elif change == QGraphicsEllipseItem.ItemSelectedHasChanged:
+            self._apply_selected_look(bool(value))
         return super().itemChange(change, value)
+
+    def _apply_selected_look(self, on):
+        """Grow and colour the dot while it is selected.
+
+        The geometry is changed, not just the brush: on a drawing this
+        dense a colour change alone is easy to miss, and the size tells
+        you at a glance how many points a marquee caught.
+        """
+        r = _SEL_R if on else _HANDLE_R
+        self.setRect(QRectF(-r, -r, 2 * r, 2 * r))
+        self.setBrush(_SEL_COLOR if on else _HANDLE_COLOR)
+        pen = QPen(QColor(90, 40, 0) if on else QColor(0, 0, 0))
+        pen.setCosmetic(True)
+        pen.setWidth(2 if on else 1)
+        self.setPen(pen)
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton:

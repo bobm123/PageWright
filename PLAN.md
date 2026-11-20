@@ -2491,3 +2491,52 @@ and needed no separator at all.
 traced region and looking at it showed the answer in a glance, after
 measurements ("4-8 mm wide") had said only that something was wrong.
 That was attempt six; it should have been attempt two.
+
+## 16.46 A finer step, and what is too wide to snap
+
+Two changes to the notch cleaner, both from the Pogo formers.
+
+**The step is 1/32 in, not 1/16.** A notch is cut to HALF the stock
+where two pieces cross: a former sitting on a 1/16 in keel is
+notched 1/32 in deep so the two halve into each other. So the sizes
+that actually appear on a sheet step in thirty-seconds even when
+every stick is a sixteenth.
+
+The cost is real and worth stating: halving the step also halves
+the tolerance clamp, from 0.78 mm to 0.39 mm (3.1 px on a 200 dpi
+scan), so fewer edges qualify. On the ten Pogo formers the snap
+count went 110 -> 103 while the worst move fell 0.73 -> 0.59 mm.
+Less is snapped, and what is snapped is moved less.
+
+**A gap wider than four steps is not snapped.** A notch wall has
+its partner a stick's width away; a joint line, a keel seat or a
+part's own depth stands well clear of anything, and its position is
+whatever the design says. Measured: F8's joint edge sat at 5.59
+steps of 1/16 in and F6's keel seat at 5.74 - between multiples and
+no better on 3/32 or 1/8 - and the snap moved them 0.18 and
+0.49 mm for nothing.
+
+Such a line is still SQUARED - it ought to be straight - but it is
+left where it lies.
+
+### The rule is about the GAP, not the edge
+
+Three wrong versions before the right one, and the mistake is
+instructive. The obvious reading of "don't snap edges longer than
+four steps" is to measure each EDGE. But a notch 1.4 mm wide and
+8 mm deep has two 8 mm walls, and those walls are exactly what
+define the 1.4 mm width worth snapping. Judging them by their own
+length pins them and kills the snap that matters - which is what
+the first implementation did, snapping every test rectangle's depth
+and pinning its width.
+
+What marks a structural line is the distance to its nearest
+NEIGHBOURING line, not its own extent. The final rule is three
+lines in the spacing pass and needs no per-edge bookkeeping at all.
+
+(A fourth wrong version measured the edge's length along the axis
+it PINS rather than the way it runs - those are perpendicular, so
+every rectangle came out backwards.)
+
+Mutations covered: the step reverted to 1/16, the gap rule
+disabled, and the gap rule inverted.

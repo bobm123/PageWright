@@ -293,3 +293,47 @@ class EditingController:
         if removals:
             msg += " (%d contour(s) removed)" % len(removals)
         w.statusBar().showMessage(msg + ".", 4000)
+
+    def align_selected_vertices(self, axis):
+        """Line the selected vertices up on one axis, as one undo step.
+
+        `axis` is "vertical" (shared x) or "horizontal" (shared y).
+        The arithmetic is core.geometry.align_points; this layer only
+        collects the selection, applies the result and records undo.
+
+        Points from DIFFERENT contours align together on purpose: two
+        halves of a notch often belong to separate traced loops, and
+        the whole point is to make them line up with each other.
+        """
+        w = self._w
+        if not w._is_edit_mode():
+            return
+        scene = w.canvas.scene_obj()
+        picked = [it for it in scene.selectedItems()
+                  if isinstance(it, VertexHandle)]
+        if len(picked) < 2:
+            return
+        from ..core import geometry as geo
+
+        items = []          # (contour, index, before_xy)
+        for it in picked:
+            contour = it.owner_contour()
+            idx = contour.index_of(it)
+            items.append((contour, idx, contour.get_point(idx)))
+        before = [xy for _c, _i, xy in items]
+        after = geo.align_points(before, axis)
+        if all(a == b for a, b in zip(before, after)):
+            return                      # already aligned; no undo entry
+
+        def _apply(points):
+            for (contour, idx, _old), xy in zip(items, points):
+                contour.move_vertex(idx, xy[0], xy[1])
+            w._refresh_editability()
+            w._update_bbox()
+
+        _apply(after)
+        w.undo_stack.push(undo.FnCommand(
+            "align %d vertices %s" % (len(items), axis),
+            lambda: _apply(before), lambda: _apply(after)))
+        w.statusBar().showMessage(
+            "Aligned %d points %sly." % (len(items), axis), 4000)

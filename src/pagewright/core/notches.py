@@ -30,9 +30,13 @@ import math
 
 import numpy as np
 
-# Default stock step. 1/16 in is the common balsa square section; a
-# drawing using 3/32 or 1/8 in sets its own.
-DEFAULT_STEP_MM = 25.4 / 16.0
+# Default stock step. 1/32 in, not 1/16: a notch is cut to HALF the
+# stock it takes where two pieces cross - a former sitting on a
+# 1/16 in keel is notched 1/32 in deep so the two halve into each
+# other - so the sizes that actually appear on a sheet step in
+# thirty-seconds even when every stick is a sixteenth. A drawing
+# using some other module sets its own.
+DEFAULT_STEP_MM = 25.4 / 32.0
 
 # How far an edge may be from a multiple and still be snapped, in mm.
 # Must stay below half a step or an edge could be pulled to the wrong
@@ -40,6 +44,21 @@ DEFAULT_STEP_MM = 25.4 / 16.0
 # so 0.5 mm catches the honest cases and leaves genuine oddities alone
 # (half of a 1/16 in step is 0.79 mm).
 DEFAULT_TOLERANCE_MM = 0.5
+
+# Longest edge whose LENGTH is a stock dimension, in steps. A notch
+# wall is as wide as the stick it takes, so it is one or two steps and
+# rarely more than four. A longer straight edge is structure - a joint
+# line where two halves butt, a keel seat, a part's own depth - and
+# its length is whatever the design says, not a multiple of anything.
+# Measured on the Pogo formers: F8's joint edge came to 5.59 steps of
+# 1/16 in and F6's keel seat to 5.74, both between multiples and no
+# better on 3/32 or 1/8, and snapping moved them 0.18 and 0.49 mm for
+# no reason.
+#
+# Such an edge is still SQUARED onto the part axis - it ought to be
+# straight - but it is pinned where it lies, so the spacing snap works
+# around it instead of dragging it.
+MAX_SNAP_STEPS = 4.0
 
 # How far from the part axes an edge may be and still count as one of
 # the straight, squared-off edges.
@@ -65,13 +84,15 @@ class NotchReport(object):
         self.snapped = 0             # edges whose length changed
         self.squared = 0             # edges rotated onto the axis
         self.out_of_tolerance = 0    # near-axis but too far off to snap
+        self.pinned = 0              # long edges squared but not snapped
         self.max_move_mm = 0.0       # largest single vertex move
 
     def __repr__(self):
         return ("NotchReport(grid=%.2fdeg axis=%d snapped=%d squared=%d "
-                "skipped=%d max_move=%.3fmm)"
+                "pinned=%d skipped=%d max_move=%.3fmm)"
                 % (self.grid_deg, self.axis_edges, self.snapped,
-                   self.squared, self.out_of_tolerance, self.max_move_mm))
+                   self.squared, self.pinned, self.out_of_tolerance,
+                   self.max_move_mm))
 
 
 def _sharp_corners(pts):
@@ -102,7 +123,43 @@ class _Clusters(object):
         self._members = {}       # cluster id -> [vertex indices]
         self._sum = {}
         self._count = {}
+        self._pinned = set()     # clusters whose value must not move
+        self._long = set()       # clusters a long edge contributed to
+        self._short = set()      # clusters a short edge contributed to
         self._next = 0
+
+    def mark_long(self, i):
+        """Note that a LONG edge contributed vertex `i`."""
+        cid = self._of.get(i)
+        if cid is not None:
+            self._long.add(cid)
+
+    def mark_short(self, i):
+        """Note that a SHORT edge contributed vertex `i`.
+
+        One short edge is enough to disqualify a cluster from being
+        pinned: a line that a notch wall sits on is a notch line,
+        however many long edges also lie along it.
+        """
+        cid = self._of.get(i)
+        if cid is not None:
+            self._short.add(cid)
+
+    def all_long(self, cid):
+        return cid in self._long and cid not in self._short
+
+    def pin_id(self, cid):
+        """Fix this cluster's value against the spacing snap.
+
+        A pinned cluster is still squared - its members are given one
+        common coordinate - but the snap leaves that coordinate
+        alone. This is how a structural edge stays straight without
+        having its position forced to a stock multiple.
+        """
+        self._pinned.add(cid)
+
+    def is_pinned(self, cid):
+        return cid in self._pinned
 
     def add(self, i, j, value):
         cid = self._of.get(i, self._of.get(j))
@@ -123,6 +180,10 @@ class _Clusters(object):
                     self._members[cid].append(m)
                 self._sum[cid] += self._sum.pop(old)
                 self._count[cid] += self._count.pop(old)
+                for tag in (self._pinned, self._long, self._short):
+                    if old in tag:
+                        tag.discard(old)
+                        tag.add(cid)
                 del self._members[old]
         self._sum[cid] += value
         self._count[cid] += 1
@@ -268,6 +329,7 @@ def snap_notches(points, mm_per_pixel, step_mm=DEFAULT_STEP_MM,
     step_px = float(step_mm) / float(mm_per_pixel)
     tol_px = float(tolerance_mm) / float(mm_per_pixel)
     min_edge_px = MIN_EDGE_MM / float(mm_per_pixel)
+    max_snap_px = MAX_SNAP_STEPS * step_px
 
     # Per-edge snapping cannot work on a closed loop: each edge shares
     # both endpoints with a neighbour, so moving an edge end breaks the
@@ -298,12 +360,37 @@ def snap_notches(points, mm_per_pixel, step_mm=DEFAULT_STEP_MM,
         if abs(a[axis] - b[axis]) > 1e-9:
             report.squared += 1
         groups[axis].add(i, j, (a[axis] + b[axis]) / 2.0)
+        # A long edge is structure, not a notch wall: square it, but
+        # do not let its position be snapped to a stock multiple.
+        #
+        # (the pin decision is made on the SPACING below, not here)
 
     for axis, clusters in groups.items():
         values = clusters.values()
         if not values:
             continue
         snapped = _snap_spacing(values, step_px, tol_px)
+        # Undo the snap wherever it moved a line across a gap too
+        # wide to be a stock dimension.
+        #
+        # The rule is about the GAP, not about any edge's own length.
+        # A notch 1.4 mm wide and 8 mm deep has two long walls, and
+        # those walls are exactly what define the 1.4 mm width worth
+        # snapping - judging them by their own length pins them and
+        # kills the snap that matters. What marks a structural edge
+        # is that the distance to its nearest neighbouring line is
+        # LARGE: a joint line or a keel seat stands well clear of
+        # anything, while a notch wall has its partner a stick's
+        # width away.
+        keep = list(snapped)
+        for k in range(len(values)):
+            near = min((abs(values[k] - values[m])
+                        for m in range(len(values)) if m != k),
+                       default=float("inf"))
+            if near > max_snap_px:
+                keep[k] = values[k]
+                report.pinned += 1
+        snapped = keep
         report.snapped += sum(1 for v, w_ in zip(values, snapped)
                               if abs(v - w_) > 1e-9)
         report.out_of_tolerance += sum(

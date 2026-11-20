@@ -64,7 +64,7 @@ def test_dominant_angle_finds_a_rotated_part():
 def test_an_off_size_notch_snaps_to_the_stock_size():
     # 1.39 mm is what a 1/16 in notch traces as; it should become 1.5875.
     pts = _rect(1.39, 8.0)
-    out, report = nt.snap_notches(pts, MMPP)
+    out, report = nt.snap_notches(pts, MMPP, step_mm=SIX)
     lengths = sorted(_edge_lengths_mm(out))
     assert lengths[0] == pytest.approx(SIX, abs=0.01)
     assert lengths[1] == pytest.approx(SIX, abs=0.01)
@@ -73,16 +73,19 @@ def test_an_off_size_notch_snaps_to_the_stock_size():
 
 def test_snapping_reaches_multiples_not_just_one_step():
     pts = _rect(4.6, 10.0)          # ~3/16 in wide
-    out, _r = nt.snap_notches(pts, MMPP)
+    out, _r = nt.snap_notches(pts, MMPP, step_mm=SIX)
     width = min(_edge_lengths_mm(out))
     assert width == pytest.approx(3 * SIX, abs=0.01)
 
 
 def test_an_edge_too_far_off_is_left_alone():
     # Half a step is 0.79 mm; 1.0 mm off must not be dragged anywhere.
+    # Stated against the 1/16 in step the numbers were chosen for: on
+    # the 1/32 in default the same width is only 0.19 mm from a
+    # multiple, which is well inside tolerance and SHOULD snap.
     target = 2 * SIX
     pts = _rect(target - 1.0, 10.0)
-    out, report = nt.snap_notches(pts, MMPP)
+    out, report = nt.snap_notches(pts, MMPP, step_mm=SIX)
     assert report.out_of_tolerance > 0
     assert min(_edge_lengths_mm(out)) == pytest.approx(target - 1.0, abs=0.02)
 
@@ -220,3 +223,74 @@ def test_the_module_needs_nothing_from_pagewrights_model():
                   encoding="utf-8").read()
     for name in ("Contour", "TracedObject", "Project", "cv2", "PySide"):
         assert name not in src, "notches.py now depends on %s" % name
+
+
+# ----- the step, and what is too long to snap -----------------------------
+
+def test_the_default_step_is_one_thirtysecond():
+    """A notch is cut to HALF the stock where two pieces cross: a
+    former on a 1/16 in keel is notched 1/32 in deep. So the sizes
+    that appear on a sheet step in thirty-seconds even when every
+    stick is a sixteenth."""
+    assert nt.DEFAULT_STEP_MM == pytest.approx(25.4 / 32.0)
+
+
+def test_a_wide_gap_is_not_snapped_to_a_multiple():
+    """A joint line or a keel seat stands well clear of anything, and
+    its position is whatever the design says. Measured on the Pogo
+    formers, F8's joint edge sat at 5.59 steps of 1/16 in and F6's
+    keel seat at 5.74 - between multiples, no better on 3/32 or 1/8 -
+    and snapping moved them 0.18 and 0.49 mm for nothing."""
+    # two lines 9 mm apart: far wider than four steps
+    pts = _rect(9.0, 10.0)
+    out, report = nt.snap_notches(pts, MMPP)
+    width = min(_edge_lengths_mm(out))
+    assert width == pytest.approx(9.0, abs=0.01), (
+        "a 9 mm gap should be left where it is, got %.3f" % width)
+    assert report.pinned > 0
+
+
+def test_a_narrow_gap_still_snaps():
+    """The rule must not switch snapping off: a notch wall has its
+    partner a stick's width away, and that is the case worth
+    correcting."""
+    pts = _rect(0.70, 10.0)          # ~1/32 in, traced short
+    out, report = nt.snap_notches(pts, MMPP)
+    width = min(_edge_lengths_mm(out))
+    assert width == pytest.approx(25.4 / 32.0, abs=0.01)
+    assert report.snapped > 0
+
+
+def test_long_walls_do_not_stop_a_narrow_notch_snapping():
+    """The rule is about the GAP, not any edge's own length. A notch
+    1.4 mm wide and 8 mm deep has two 8 mm walls, and those walls are
+    exactly what define the width worth snapping - an earlier version
+    judged them by their own length, pinned them, and killed the
+    snap that mattered."""
+    pts = _rect(0.70, 12.0)          # narrow gap, very long walls
+    out, _r = nt.snap_notches(pts, MMPP)
+    assert min(_edge_lengths_mm(out)) == pytest.approx(25.4 / 32.0,
+                                                       abs=0.01)
+
+
+def test_a_pinned_line_is_still_squared():
+    """Pinning holds a line's POSITION, not its angle: a joint edge
+    ought to come out straight even though its length is nobody's
+    stock size."""
+    pts = _rect(9.0, 10.0, jitter=[(0, 0), (0, 2.0), (0, 0), (0, 0)])
+    out, report = nt.snap_notches(pts, MMPP)
+    assert report.squared > 0
+    assert report.pinned > 0
+    # measured against the PART's own grid, not the image's: a
+    # drawing is rarely pasted down square, and squaring works to the
+    # dominant angle it finds (0.26 deg here, induced by the jitter)
+    grid = math.radians(nt.dominant_angle_deg(out, MMPP))
+    c, sn = math.cos(grid), math.sin(grid)
+    rot = [(x * c + y * sn, -x * sn + y * c) for x, y in out]
+    assert rot[0][1] == pytest.approx(rot[1][1], abs=0.5)
+
+
+def test_a_pinned_line_keeps_its_position():
+    """The point of the pin: the gap is not dragged to a multiple."""
+    out, _r = nt.snap_notches(_rect(9.0, 10.0), MMPP)
+    assert min(_edge_lengths_mm(out)) == pytest.approx(9.0, abs=0.01)

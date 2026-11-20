@@ -69,3 +69,53 @@ def test_snap_angle_locks_to_horizontal_and_diagonal():
     # direction preserved (points left stay left)
     p = snap_angle((0, 0), (-10.0, 0.5))
     assert p[0] < 0
+
+
+# ----- aligning selected vertices -----------------------------------------
+
+def test_aligning_vertically_gives_the_points_one_x():
+    out = geo.align_points([(10.0, 5.0), (20.0, 50.0)], "vertical")
+    assert out[0][0] == out[1][0]
+
+
+def test_aligning_vertically_keeps_each_y():
+    """Only the one coordinate moves: aligning is a correction, not a
+    collapse, and a point that also jumped along the line would lose
+    the spacing the trace recorded."""
+    out = geo.align_points([(10.0, 5.0), (20.0, 50.0)], "vertical")
+    assert out[0][1] == 5.0
+    assert out[1][1] == 50.0
+
+
+def test_aligning_horizontally_gives_the_points_one_y():
+    out = geo.align_points([(10.0, 5.0), (20.0, 50.0)], "horizontal")
+    assert out[0][1] == out[1][1] == pytest.approx(27.5)
+    assert out[0][0] == 10.0 and out[1][0] == 20.0
+
+
+def test_the_shared_value_is_the_mean_not_the_first_point():
+    """Otherwise the result depends on which point was clicked first,
+    and the same two vertices align differently on different days."""
+    out = geo.align_points([(10.0, 0.0), (20.0, 0.0)], "vertical")
+    assert out[0][0] == pytest.approx(15.0)
+
+
+def test_aligning_is_order_independent():
+    a = geo.align_points([(10.0, 0.0), (20.0, 8.0)], "vertical")
+    b = geo.align_points([(20.0, 8.0), (10.0, 0.0)], "vertical")
+    assert sorted(a) == sorted(b)
+
+
+def test_more_than_two_points_align_too():
+    out = geo.align_points(
+        [(0.0, 1.0), (10.0, 2.0), (20.0, 3.0)], "vertical")
+    assert all(p[0] == pytest.approx(10.0) for p in out)
+
+
+def test_a_single_point_is_unchanged():
+    assert geo.align_points([(3.0, 4.0)], "vertical") == [(3.0, 4.0)]
+
+
+def test_an_unknown_axis_is_refused():
+    with pytest.raises(ValueError):
+        geo.align_points([(0.0, 0.0), (1.0, 1.0)], "diagonal")

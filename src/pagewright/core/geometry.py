@@ -121,3 +121,31 @@ def snap_angle(p0, p1, step_deg=45.0):
     step = math.radians(step_deg)
     ang = round(math.atan2(dy, dx) / step) * step
     return (p0[0] + d * math.cos(ang), p0[1] + d * math.sin(ang))
+
+
+def align_points(points, axis):
+    """Line two or more points up on one axis, about their midpoint.
+
+    `axis` is "vertical" for points that should share an x (they then
+    sit one above the other, on a vertical line) or "horizontal" for
+    points that should share a y.
+
+    The shared value is the MEAN, not the first point's: aligning two
+    traced vertices is correcting the trace, and there is no reason to
+    believe either one over the other. Snapping to the first would
+    also make the result depend on selection order, so the same two
+    points would align differently depending on which was clicked.
+
+    Returns a new list; the input is not modified.
+    """
+    pts = [(float(x), float(y)) for x, y in points]
+    if len(pts) < 2:
+        return pts
+    if axis == "vertical":
+        mx = sum(p[0] for p in pts) / len(pts)
+        return [(mx, y) for _x, y in pts]
+    if axis == "horizontal":
+        my = sum(p[1] for p in pts) / len(pts)
+        return [(x, my) for x, _y in pts]
+    raise ValueError("axis must be 'vertical' or 'horizontal', got %r"
+                     % (axis,))

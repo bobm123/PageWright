@@ -368,7 +368,24 @@ def show_canvas_menu(w, global_pos):
     # reaching for the keyboard
     from .canvas import MODE_EDIT, MODE_SEED_BG, MODE_SEED_FG
     if w.canvas._mode == MODE_EDIT:
-        n = len(w.canvas.scene_obj().selectedItems())
+        sel = w.canvas.scene_obj().selectedItems()
+        n = len(sel)
+        if n == 2:
+            # Exactly two points: the align pair is what is wanted, at
+            # the top where it is first under the cursor. Squaring a
+            # notch wall is the common edit, and two points is the only
+            # selection for which "line these up" is unambiguous - with
+            # three or more it is a distribute, which is a different
+            # operation and not offered here.
+            a = menu.addAction("Align Vertically")
+            a.setToolTip("Give both points the same x")
+            a.triggered.connect(
+                lambda _=False: w.align_selected_vertices("vertical"))
+            a = menu.addAction("Align Horizontally")
+            a.setToolTip("Give both points the same y")
+            a.triggered.connect(
+                lambda _=False: w.align_selected_vertices("horizontal"))
+            menu.addSeparator()
         if n:
             a = menu.addAction("Delete %d Selected Point%s"
                                % (n, "" if n == 1 else "s"))
