@@ -213,11 +213,54 @@ def test_keeping_lengths_changes_no_length():
         assert b == pytest.approx(a, abs=1e-9)
 
 
-def test_keeping_lengths_squares_every_turn():
+def _turns(pts):
+    """The turn at each interior vertex, in degrees."""
+    import math
+    b = [math.degrees(math.atan2(pts[i+1][1]-pts[i][1],
+                                 pts[i+1][0]-pts[i][0]))
+         for i in range(len(pts)-1)]
+    return [((b[i+1]-b[i]+180.0) % 360.0) - 180.0
+            for i in range(len(b)-1)]
+
+
+def test_keeping_lengths_makes_every_turn_a_right_angle():
     pts = [(10.0, 0.0), (10.4, 8.0), (16.0, 8.3), (16.2, 0.0)]
     out = geo.square_keeping_lengths(pts)
-    for a in _seg_angles(out):
-        assert min(a, 90.0 - a) == pytest.approx(0.0, abs=1e-6)
+    for t in _turns(out):
+        assert abs(abs(t) - 90.0) == pytest.approx(0.0, abs=1e-6)
+
+
+def test_keeping_lengths_does_not_snap_to_an_axis():
+    """The run keeps the orientation it was traced at. A notch cut
+    into a curved former runs at whatever angle that part of the
+    curve runs, and forcing it upright tears it off the feature it
+    was tracing - which is what an earlier version did."""
+    import math
+    # a run tilted well off the axes
+    pts = [(575.0, 631.0), (729.0, 729.0), (659.0, 882.0)]
+    out = geo.square_keeping_lengths(pts)
+    b0 = math.degrees(math.atan2(out[1][1]-out[0][1],
+                                 out[1][0]-out[0][0]))
+    assert 15.0 < b0 < 50.0, (
+        "the first segment should stay near its traced +32 deg, "
+        "got %+.1f" % b0)
+
+
+def test_keeping_lengths_shares_the_error_between_the_segments():
+    """Neither segment is moved more than it must be: an 8 degree
+    error becomes about 4 degrees each, not 8 on one of them."""
+    import math
+    pts = [(575.0, 631.0), (729.0, 729.0), (659.0, 882.0)]
+    out = geo.square_keeping_lengths(pts)
+    before = [math.degrees(math.atan2(pts[i+1][1]-pts[i][1],
+                                      pts[i+1][0]-pts[i][0]))
+              for i in range(2)]
+    after = [math.degrees(math.atan2(out[i+1][1]-out[i][1],
+                                     out[i+1][0]-out[i][0]))
+             for i in range(2)]
+    moves = [abs(a - b) for a, b in zip(after, before)]
+    assert max(moves) < 6.0, moves
+    assert min(moves) > 2.0, moves
 
 
 def test_keeping_lengths_holds_the_first_point():
@@ -251,14 +294,15 @@ def test_keeping_lengths_preserves_each_segment_direction():
     assert out[4][0] > out[3][0]          # right
 
 
-def test_keeping_lengths_uses_the_part_grid():
+def test_an_already_square_run_is_left_alone():
+    """At any tilt: the run's own turns are already right angles, so
+    there is nothing to correct and nothing should move."""
     import math
-    g = 10.0
-    r = math.radians(g)
+    r = math.radians(10.0)
     c, s = math.cos(r), math.sin(r)
     square = [(0.0, 0.0), (0.0, 9.0), (7.0, 9.0), (7.0, 0.0)]
     tilted = [(x * c - y * s, x * s + y * c) for x, y in square]
-    out = geo.square_keeping_lengths(tilted, grid_deg=g)
+    out = geo.square_keeping_lengths(tilted)
     for a, b in zip(tilted, out):
         assert a[0] == pytest.approx(b[0], abs=0.01)
         assert a[1] == pytest.approx(b[1], abs=0.01)
@@ -337,3 +381,26 @@ def test_quad_snap_never_collapses_a_side():
     out = geo.quad_snap(pts, QMPP, QSTEP)
     for s in _lengths(out):
         assert s > 0.0
+
+
+def test_quad_snap_keeps_the_runs_orientation():
+    """A notch cut into a curved former runs at whatever angle that
+    part of the curve runs. Snapping it upright tears it off the
+    feature - which is what the first version did, taking a run
+    traced at +32 degrees and returning it at 0."""
+    import math
+    pts = [(575.0, 631.0), (729.0, 729.0), (659.0, 882.0),
+           (505.0, 784.0)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    b0 = math.degrees(math.atan2(out[1][1] - out[0][1],
+                                 out[1][0] - out[0][0]))
+    assert 20.0 < b0 < 45.0, (
+        "should stay near the traced +32 deg, got %+.1f" % b0)
+
+
+def test_quad_snap_turns_are_right_angles():
+    pts = [(575.0, 631.0), (729.0, 729.0), (659.0, 882.0),
+           (505.0, 784.0)]
+    out = geo.quad_snap(pts, QMPP, QSTEP)
+    for t in _turns(out):
+        assert abs(abs(t) - 90.0) == pytest.approx(0.0, abs=1e-6)
