@@ -1707,7 +1707,8 @@ directories. That was the wrong mechanism for this machine and has
 been removed.
 
 The Craft apps are registered at USER scope by
-`D:\Programsegister-craft-mcp.ps1`, which is idempotent and adds
+`D:\Programs
+egister-craft-mcp.ps1`, which is idempotent and adds
 every `D:\Programs\<App>\<app>-cli.exe` it finds. A project-level
 copy duplicates them, and `claude mcp list` reports it as a
 "conflicting scopes" warning for each server, because the endpoints
@@ -2437,9 +2438,38 @@ and never east-west towards its neighbour.
 On the real sheet, through the shipped API:
 
     along_contours=False:  1 part,  0 formers
-    along_contours=True : 20 parts, 6 formers
+    along_contours=True : 20 parts, 4 formers
 
-and the traced formers follow their rings through every notch.
+**The "6 formers" first recorded here was wrong.** It counted
+bounding boxes in the formers' region without checking that each
+held ONE part; re-checked with a one-seed-per-candidate test, that
+setting gives zero distinct formers - every candidate was a welded
+group. A sweep of the reach (9..45 px) and the direction bins
+(12..36) puts the real best at **4 clean formers** (F10, F9, F8,
+F1) at reach 15-17. Still a real gain over the square close's
+zero, and 20 parts against 1, but the headline number was wrong
+because I counted detections without testing that a detection was
+one part.
+
+The four that come out cleanly follow their rings through every
+notch.
+
+### Where it stops
+
+The remaining six weld at every setting. The pair-gap between F7
+and F6 is 82 px at the waist, so the merge is not happening where
+it was first measured; scanning every row finds the real
+constraint, a **4 px** lane at the top of the arch, where two
+nested C-shapes converge. Against a 17 px dash that cannot be
+bridged.
+
+Finer direction bins do not help, and the reason is the useful
+part: at the convergence the two curves run nearly PARALLEL, so a
+bridge along one is also along the other and direction stops
+discriminating. Where two parts run parallel a few pixels apart,
+no local operator can know which curve a pixel belongs to -
+separating them needs a method that tracks a contour as a
+connected path, or a human seed.
 
 It is **off by default**: the square close is right for an ordinary
 sheet and cheaper, and existing callers must not change.
