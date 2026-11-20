@@ -295,9 +295,9 @@
       "frame": "Keel-centre",
       "offset_mm": [
         37.162,
-        19.989
+        -19.088
       ],
-      "note": "placed by hand in keels_side2-updated.svg; angle and position recovered by fitting the edited contour onto the traced one (rms 4e-5 mm), then the offset SOLVED against _outline_mm so the built part matches the drawing - write_svg anchors a placement at the bbox corner and the builder at the centroid",
+      "note": "height re-solved 2026-11-20 against the corrected drawing convention: write_svg now calls _outline_mm, so the drawing and the build place the same point. The earlier value was solved to make the sign-wrong drawing agree with the build, and built mirrored about the datum once that was fixed. Verified against the STL extents to 0.001 mm.",
       "rotate_deg": 4.775
     },
     {
@@ -305,9 +305,9 @@
       "frame": "Keel-centre",
       "offset_mm": [
         240.102,
-        21.741
+        -22.238
       ],
-      "note": "placed by hand in keels_side2-updated.svg; angle and position recovered by fitting the edited contour onto the traced one (rms 4e-5 mm), then the offset SOLVED against _outline_mm so the built part matches the drawing - write_svg anchors a placement at the bbox corner and the builder at the centroid",
+      "note": "height re-solved 2026-11-20 against the corrected drawing convention: write_svg now calls _outline_mm, so the drawing and the build place the same point. The earlier value was solved to make the sign-wrong drawing agree with the build, and built mirrored about the datum once that was fixed. Verified against the STL extents to 0.001 mm.",
       "rotate_deg": -0.895
     },
     {
@@ -315,9 +315,9 @@
       "frame": "Keel-centre",
       "offset_mm": [
         157.649,
-        -21.335
+        13.753
       ],
-      "note": "placed by hand in keels_side2-updated.svg; angle and position recovered by fitting the edited contour onto the traced one (rms 4e-5 mm), then the offset SOLVED against _outline_mm so the built part matches the drawing - write_svg anchors a placement at the bbox corner and the builder at the centroid",
+      "note": "height re-solved 2026-11-20 against the corrected drawing convention: write_svg now calls _outline_mm, so the drawing and the build place the same point. The earlier value was solved to make the sign-wrong drawing agree with the build, and built mirrored about the datum once that was fixed. Verified against the STL extents to 0.001 mm.",
       "rotate_deg": 1.427
     },
     {

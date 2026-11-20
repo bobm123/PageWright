@@ -436,9 +436,12 @@ def test_the_wing_svg_round_trips_a_position(tmp_path):
     rows = wing_svg.compare(p, wing_svg.read_svg(out))
     # the rib is drawn rotate(-90), so its chord runs BACK from the
     # translate point: aft_mm is the minimum y, anchor minus chord.
-    assert rows["1"]["aft_mm"] == pytest.approx(80.0, abs=0.01)
-    assert rows["2"]["aft_mm"] == pytest.approx(98.0, abs=0.01)
-    # the gap between them is what the drag changed
+    # the part's CENTRE, not its leading corner: half the 20 mm
+    # fixture beyond the 80.0 that the old corner convention gave
+    assert rows["1"]["aft_mm"] == pytest.approx(90.0, abs=0.01)
+    assert rows["2"]["aft_mm"] == pytest.approx(108.0, abs=0.01)
+    # the gap between them is what the drag changed - unchanged by
+    # the convention, because both parts moved by the same half-part
     assert (rows["2"]["aft_mm"] - rows["1"]["aft_mm"]
             == pytest.approx(18.0, abs=0.01))
 
@@ -458,7 +461,9 @@ def test_an_edited_transform_is_what_comes_back(tmp_path):
                                     "translate(22.0000,73.5000)")
     open(out, "w").write(text)
     rows = wing_svg.compare(p, wing_svg.read_svg(out))
-    assert rows["1"]["aft_mm"] == pytest.approx(53.5, abs=0.01)
+    # the dragged-to anchor 73.5 names the part's CENTRE, so its
+    # aft edge is half the 20 mm fixture beyond it
+    assert rows["1"]["aft_mm"] == pytest.approx(63.5, abs=0.01)
 
 
 @needs_pw
@@ -559,8 +564,14 @@ def test_a_flipped_rib_reads_back_at_its_edited_place(tmp_path):
     # the 20x20 fixture, mirrored and turned, still spans 20 each way
     assert max(xs) - min(xs) == pytest.approx(20.0)
     assert max(ys) - min(ys) == pytest.approx(20.0)
-    assert max(xs) == pytest.approx(30.0)
-    assert max(ys) == pytest.approx(70.0)
+    # A placement names the part's CENTRE, so the edited
+    # matrix(0,-1,-1,0,30,70) puts the centre at (30,70) and the far
+    # corner half a part beyond it. These read 30 and 70 while the
+    # part was drawn from its bounding-box corner instead; the
+    # 10 mm is exactly half the 20 mm fixture, which is the
+    # signature of the corner-to-centre change rather than a drift.
+    assert max(xs) == pytest.approx(40.0)
+    assert max(ys) == pytest.approx(80.0)
 
 
 @needs_pw
@@ -1203,27 +1214,23 @@ def test_consistent_bars_raise_no_warning():
 # (F3 by 146 mm) and by a different amount in z, which looks like a
 # datum error and is not.
 
-@pytest.mark.xfail(reason=
-    "KNOWN: write_svg draws from the bounding-box min corner while "
-    "the builder centres on the centroid, so a placement means two "
-    "different points. Reading a position off the drawing builds it "
-    "half the part's length out in x (F3 by 146 mm) and a "
-    "part-dependent amount out in z. Fixing it moves the WING path "
-    "too - the rib tests assert the bbox-corner answer - so it is "
-    "recorded here rather than changed in passing.",
-    strict=True)
 @needs_pw
 @needs_core
 def test_the_drawing_and_the_build_place_the_same_point(tmp_path):
     """A placement must mean ONE point in both paths.
 
     `write_svg` drew each part shifted to its bounding-box MIN CORNER
-    and placed that; the builder centres the part on its CENTROID and
-    places that. The same numbers therefore meant two different
-    points, so a position read off the drawing built somewhere else -
-    each keel out by half its own length in x (F3 by 146 mm) and by a
-    part-dependent amount in z, which looks like a datum error and is
-    not.
+    and placed that, and skipped the plane's flip; the builder centres
+    the part on its CENTROID and negates the sketch on a flipped
+    plane. The same numbers therefore meant two different points, so
+    a position read off the drawing built somewhere else - each keel
+    out by half its own length in x (F3 by 146 mm), and on XZ the
+    drawing showed the part mirrored about the datum, which read as a
+    "part-dependent" z error and was just the missing negation.
+
+    Fixed by having `write_svg` call `_outline_mm` - the builder's own
+    function - instead of repeating its arithmetic, so there is one
+    convention rather than two kept in step by hand.
 
     An ASYMMETRIC part on purpose: a shape whose centroid and
     bounding-box centre coincide cannot tell the two conventions

@@ -2337,3 +2337,71 @@ none crossed, former 5 at 24.13 mm.
 Note that the keels are in the `ribs` layer and so are draggable
 too. Deliberate: they are placed, but fitting the formers may well
 want a keel nudged, and locking them would be a guess.
+
+## 16.44 One placement, one point
+
+The open xfail is fixed. It was **two** bugs, not one, and the
+second was hiding behind my own description of the first.
+
+**The origin.** `write_svg` shifted each part to its bounding-box
+min corner; the builder centres on the centroid. Same numbers, two
+points.
+
+**The flip.** `_outline_mm` negates the whole sketch on a flipped
+plane (XZ); `write_svg` did not. So on XZ the drawing showed every
+part mirrored about the datum. I had recorded this in the xfail as
+"a part-dependent amount out in z", which sounded like a second
+origin effect and was actually a sign - and because the phrase was
+vague, it stopped me looking.
+
+**The fix is not more arithmetic.** `write_svg` now calls
+`_outline_mm` - the builder's own function - with zero shift and
+zero angle, and uses the shape that comes back. Two conventions
+cannot be kept in step by hand, which is the whole history of this
+bug; now there is one, and the drawing code cannot drift from the
+builder because it has no arithmetic of its own to drift with.
+
+Model z grows up and SVG y grows down, so there is exactly ONE
+negation, applied in one place, to the shape and the position
+together.
+
+**The plane is now recorded in the file** (`data-plane` on each
+group), for the same reason `z-datum` is: the reader cannot recover
+it from geometry. A part 12 mm above the datum and one 12 mm below
+look identical to a reader that does not know which way its plane
+runs. A file without the attribute reads as unflipped, which is what
+every earlier file actually was for YZ and XY.
+
+### The consequence I nearly missed
+
+The stored keel heights were **solved against the broken drawing**.
+Last session I verified "the drawing matches the STL to 0.001 mm" -
+true, but it matched because the drawing's sign error and the solved
+offsets cancelled. Fix the drawing and the same numbers build
+mirrored about the datum.
+
+So they were re-solved against the corrected convention and checked
+against the STL-verified extents:
+
+| part | was | now | built z |
+|---|---|---|---|
+| F1 | 19.989 | **-19.088** | 14.169..24.908 |
+| F2 | 21.741 | **-22.238** | 17.939..26.040 |
+| F3 | -21.335 | **13.753** | -28.663..-6.425 |
+
+They are **not** negations of the old values - each part's centroid
+sits differently, so negating by hand would have been wrong for all
+three. Solved numerically, verified to 0.001 mm.
+
+**The lesson, and it is the same one as last time:** a verification
+that compares two things which share a fault will pass. The STL
+check was circular in a way I did not see because both sides came
+through the same wrong convention. What broke the circle was
+comparing the drawing against the BUILDER'S OWN function rather than
+against another thing I had written.
+
+All four halves of the fix are mutation-tested: the corner origin,
+the missing shape flip, the missing placement flip, and a reader
+that forgets to undo it. The origin mutation fails on the x
+assertion and the flip mutations on the z assertion, so the test
+distinguishes them rather than catching both by luck.

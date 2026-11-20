@@ -194,18 +194,35 @@ def write_svg(project, airframe, path, image_path=None,
                         if getattr(c, "role", "outer") != "hole"), None)
         if contour is None:
             continue
-        # The part in the BUILDER's own frame, with no placement
-        # applied: centred on its centroid, y the way the sheet runs,
-        # and the plane's axis direction taken out. Drawing it any
-        # other way makes a placement mean two different points - it
-        # was drawn from the bounding-box min corner, so a position
-        # read off the drawing built half the part's length away in x
-        # (F3 by 146 mm) and a part-dependent amount out in z.
-        pts = [(x * mpp, y * mpp) for x, y in contour.points]
-        x0 = min(q[0] for q in pts)
-        y0 = min(q[1] for q in pts)
-        # the rib drawn nose-up at the origin, then moved into place
-        local = [(q[0] - x0, q[1] - y0) for q in pts]
+        # The part in the BUILDER's own frame, from the BUILDER's own
+        # function, with no placement applied: zero shift and zero
+        # angle, so what comes back is the bare shape - centred on its
+        # centroid, mirrored if the placement mirrors it, and with the
+        # plane's axis direction already taken out. The group
+        # transform below then supplies the placement.
+        #
+        # Calling _outline_mm rather than repeating its arithmetic is
+        # the whole point. This block used to shift the part to its
+        # bounding-box MIN CORNER and skip the plane flip, so a
+        # placement meant two different points in the two paths: a
+        # position read off the drawing built half the part's length
+        # away in x (F3 by 146 mm), and on a flipped plane (XZ) the
+        # drawing showed the part upside down relative to what was
+        # built - which read as a mysterious z error and was actually
+        # just the missing negation. Two conventions cannot be kept in
+        # step by hand; there is now only one.
+        from .solidcraft import _outline_mm, Y_IS_FLIPPED
+        flip = Y_IS_FLIPPED.get(p["base"], False)
+        model, _holes = _outline_mm(
+            obj, mpp, project.pixel_height,
+            mirrored=p.get("mirrored", False),
+            rotate_deg=0.0, shift_mm=(0.0, 0.0), flip_y=flip)
+        if not model:
+            continue
+        # Model z grows UP and SVG y grows DOWN, so the shape is
+        # negated here - the ONE place the two frames meet. The
+        # translate below carries the same negation for the position.
+        local = [(x, -y) for x, y in model]
         inplane = p.get("in_plane_mm") or [0.0, 0.0]
         rot_deg = p.get("rotate_deg") or 0.0
         if upright:
@@ -213,12 +230,26 @@ def write_svg(project, airframe, path, image_path=None,
             # positioned by its in-plane offset. A rib is a section
             # seen edge-on, so it gets turned a quarter and placed by
             # its span.
-            span, aft = inplane[0], datum_mm - inplane[1]
+            # MEASURED (derive.py): the builder puts the finished
+            # part at local + (sx, +sz) on an unflipped plane and
+            # local + (sx, -sz) on a flipped one. So the placed
+            # height in MODEL z is sz, negated when the plane flips -
+            # and SVG y is datum - (model z), one negation, applied
+            # once here and once to the shape below.
+            z = -inplane[1] if flip else inplane[1]
+            span, aft = inplane[0], datum_mm - z
         else:
             span, aft = abs(p["offset_mm"]), inplane[0]
 
         g = ET.SubElement(layer, "{%s}g" % SVG_NS, {
             "id": "rib-%s" % name,
+            # The plane, recorded for the reader. It decides whether
+            # the height was negated, and the reader cannot infer it
+            # from geometry - the same reason z-datum is written down
+            # rather than assumed. A file without it reads as
+            # unflipped, which is what every file written before this
+            # existed actually was for YZ and XY.
+            "data-plane": p["base"],
             "{%s}label" % INK_NS:
                 "rib %s  (span %.1f mm)" % (name, span),
             # The rib is drawn ROTATED 90: its chord runs along y,
@@ -462,6 +493,15 @@ def placements_from_svg(path, datum_mm=None, upright=False):
         rot = math.degrees(math.atan2(m[1], m[0]))
         if upright:
             ty = m[5] if datum_mm is None else datum_mm - m[5]
+            # Undo the plane's flip, the inverse of what write_svg
+            # applied. The plane comes from the file because it
+            # cannot be recovered from the geometry: a part drawn
+            # 12 mm above the datum and one drawn 12 mm below look
+            # the same to a reader that does not know which way its
+            # plane runs.
+            from .solidcraft import Y_IS_FLIPPED
+            if Y_IS_FLIPPED.get(g.get("data-plane") or "", False):
+                ty = -ty
             # SVG y runs DOWN, so an angle measured in the drawing
             # turns the opposite way to one in the model - the same
             # inversion the height needs, and it was latent for as
