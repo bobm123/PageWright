@@ -181,6 +181,12 @@ def build_actions(w):
         "them to 1/16 in multiples (needs a calibrated scale)")
     w.act_clean_notches.triggered.connect(w.clean_up_notches)
 
+    w.act_clean_notches_all = QAction("Clean Up Notches on &All Parts", w)
+    w.act_clean_notches_all.setToolTip(
+        "Square and stock-snap the notch edges of every traced part, "
+        "as one undo step")
+    w.act_clean_notches_all.triggered.connect(w.clean_up_notches_all)
+
     w.act_clear_measure = QAction("Clear Measurements", w)
     w.act_clear_measure.triggered.connect(
         lambda: w.canvas.clear_measurements())
@@ -314,6 +320,7 @@ def build_menus(w):
     m_tools.addAction(w.act_run_seg)
     m_tools.addAction(w.act_find_parts)
     m_tools.addAction(w.act_clean_notches)
+    m_tools.addAction(w.act_clean_notches_all)
     m_tools.addSeparator()
     m_tools.addAction(w.act_rot_cw)
     m_tools.addAction(w.act_rot_ccw)

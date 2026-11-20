@@ -43,6 +43,25 @@ from .project_controller import ProjectController
 from .tiling_panel import TilingPanel
 
 
+def _notch_summary(reports):
+    """One line describing what snap_notches did to a part.
+
+    Names the stock step from core.notches rather than spelling a
+    size, which went stale once: the message still said 1/16 in
+    after the default became 1/32.
+    """
+    from ..core import notches as nt
+    step = nt.DEFAULT_STEP_MM
+    inches = 25.4 / step
+    name = ("1/%d in" % round(inches)) if abs(inches - round(inches)) < 0.01         else "%.2f mm" % step
+    return ("squared %d, snapped %d to %s, %d left as traced, "
+            "largest move %.2f mm"
+            % (sum(r.squared for r in reports),
+               sum(r.snapped for r in reports), name,
+               sum(r.pinned + r.out_of_tolerance for r in reports),
+               max((r.max_move_mm for r in reports), default=0.0)))
+
+
 class MainWindow(QMainWindow):
     def __init__(self):
         super().__init__()
@@ -1442,10 +1461,79 @@ class MainWindow(QMainWindow):
         skipped = sum(r.out_of_tolerance for r in reports)
         worst = max((r.max_move_mm for r in reports), default=0.0)
         self.statusBar().showMessage(
-            "Squared %d edge(s), snapped %d to 1/16 in (%d left as traced, "
-            "largest move %.2f mm) on '%s'."
-            % (sum(r.squared for r in reports), total_snapped, skipped,
-               worst, layer.name), 9000)
+            "%s on '%s'." % (_notch_summary(reports), layer.name), 9000)
+
+    def clean_up_notches_all(self):
+        """Tools > Clean Up Notches on EVERY part, as one undo step.
+
+        A printwood sheet holds thirty to sixty parts and the action
+        works on the active one, so cleaning a sheet meant thirty
+        rounds of select-then-invoke. One undo step rather than
+        thirty, because the user is deciding about the SHEET: if the
+        result is wrong, it is wrong as a batch.
+
+        The summary is per part, not a total, because a bulk
+        operation that reports only "cleaned 10 parts" hides the one
+        that went wrong.
+        """
+        from PySide6.QtWidgets import QMessageBox
+        from ..core import notches as nt
+        if not self._objects:
+            self.statusBar().showMessage("Nothing to clean up.", 4000)
+            return
+        mpp = self.project.calibration.mm_per_pixel
+        if not mpp:
+            QMessageBox.information(
+                self, "Clean Up Notches",
+                "Calibrate the scale first - snapping to stock sizes "
+                "needs to know how big a pixel is.")
+            return
+
+        jobs = []          # (layer, before, after, reports)
+        for layer in self._objects:
+            before = [list(c.points()) for c in layer.contours]
+            if not before:
+                continue
+            after, reports = [], []
+            for pts in before:
+                new_pts, report = nt.snap_notches(pts, mpp)
+                after.append(new_pts)
+                reports.append(report)
+            if sum(r.axis_edges for r in reports):
+                jobs.append((layer, before, after, reports))
+        if not jobs:
+            self.statusBar().showMessage(
+                "No square notch edges found on any part.", 6000)
+            return
+
+        def _apply(which):
+            for layer, before, after, _r in jobs:
+                self._apply_contour_points(
+                    layer, before if which == "before" else after)
+
+        _apply("after")
+        self.undo_stack.push(undo.FnCommand(
+            "clean up notches on %d parts" % len(jobs),
+            undo=lambda: _apply("before"),
+            redo=lambda: _apply("after")))
+
+        # Per part, not a total: a bulk operation that reports only
+        # "cleaned 10 parts" hides the one that went wrong. Kept off
+        # a modal dialog, which would interrupt after every run and
+        # cannot be read by a test or a script - the lines are left
+        # on the window for whoever wants them, and the status bar
+        # names the biggest mover, which is the one worth looking at.
+        self.last_notch_report = [
+            (layer.name, _notch_summary(reports))
+            for layer, _b, _a, reports in jobs]
+        worst_part, worst_mm = "", 0.0
+        for layer, _b, _a, reports in jobs:
+            m = max((r.max_move_mm for r in reports), default=0.0)
+            if m > worst_mm:
+                worst_part, worst_mm = layer.name, m
+        self.statusBar().showMessage(
+            "Cleaned %d part(s); largest move %.2f mm on '%s'."
+            % (len(jobs), worst_mm, worst_part), 9000)
 
     def _transform_active(self, label, fn):
         """Apply a geometry transform to the active object, undoably.

@@ -563,3 +563,75 @@ def test_five_points_are_not_a_square_run(tmp_path):
     for it in h[:5]:
         it.setSelected(True)
     assert w.editing.selected_run() is None
+
+
+# ----- cleaning every part at once ----------------------------------------
+
+def test_clean_all_parts_cleans_every_one(tmp_path):
+    """A printwood sheet holds thirty to sixty parts and the action
+    works on the active one, so cleaning a sheet meant thirty rounds
+    of select-then-invoke."""
+    w = _window_with_photo(tmp_path)
+    # two parts with off-square notch edges
+    _trace_into(w, [(100.0, 100.0), (160.0, 102.0),
+                    (161.0, 160.0), (100.0, 160.0)])
+    _trace_into(w, [(200.0, 100.0), (260.0, 103.0),
+                    (259.0, 160.0), (200.0, 160.0)])
+    before = [[list(c.points()) for c in o.contours] for o in w._objects]
+    w.clean_up_notches_all()
+    after = [[list(c.points()) for c in o.contours] for o in w._objects]
+    assert before != after
+    for b, a in zip(before, after):
+        assert b != a, "every part should have been cleaned, not just one"
+
+
+def test_clean_all_parts_is_one_undo_step(tmp_path):
+    """The user is deciding about the SHEET: if the result is wrong,
+    it is wrong as a batch."""
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (160.0, 102.0),
+                    (161.0, 160.0), (100.0, 160.0)])
+    _trace_into(w, [(200.0, 100.0), (260.0, 103.0),
+                    (259.0, 160.0), (200.0, 160.0)])
+    before = [[list(c.points()) for c in o.contours] for o in w._objects]
+    n = len(w.undo_stack)
+    w.clean_up_notches_all()
+    assert len(w.undo_stack) == n + 1
+    w.undo_stack.undo()
+    after = [[list(c.points()) for c in o.contours] for o in w._objects]
+    for b, a in zip(before, after):
+        for bc, ac in zip(b, a):
+            assert bc == pytest.approx(ac)
+
+
+def test_clean_all_parts_needs_a_scale(tmp_path):
+    """Snapping to a stock size needs to know how big a pixel is."""
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (160.0, 102.0),
+                    (161.0, 160.0), (100.0, 160.0)])
+    w.project.calibration.mm_per_pixel = None
+    before = [list(c.points()) for c in w._objects[0].contours]
+    from PySide6.QtWidgets import QMessageBox
+    orig = QMessageBox.information
+    QMessageBox.information = staticmethod(lambda *a, **k: None)
+    try:
+        w.clean_up_notches_all()
+    finally:
+        QMessageBox.information = orig
+    after = [list(c.points()) for c in w._objects[0].contours]
+    assert not getattr(w, "last_notch_report", None)
+    assert before == after
+
+
+def test_clean_all_reports_every_part_not_a_total(tmp_path):
+    """A bulk operation that reports only "cleaned 10 parts" hides
+    the one that went wrong."""
+    w = _window_with_photo(tmp_path)
+    _trace_into(w, [(100.0, 100.0), (160.0, 102.0),
+                    (161.0, 160.0), (100.0, 160.0)])
+    _trace_into(w, [(200.0, 100.0), (260.0, 103.0),
+                    (259.0, 160.0), (200.0, 160.0)])
+    w.clean_up_notches_all()
+    assert len(w.last_notch_report) == 2
+    names = [n for n, _line in w.last_notch_report]
+    assert len(set(names)) == 2
