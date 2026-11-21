@@ -288,3 +288,118 @@ def choose_stock(pieces, candidates=None, gap_mm=None, margin_mm=None):
                        sheets, unplaced))
     scored.sort(key=lambda r: (r[0], r[1]))
     return [(w, h, sh, un) for _n, _waste, w, h, sh, un in scored]
+
+
+# Cut lines are hairline black: a cutter reads the geometry, not the
+# stroke, and anything thicker hides which side of the line to cut.
+CUT_STROKE = "#000000"
+CUT_WIDTH_MM = 0.1
+
+# Labels are not cut. They are drawn in a colour a laser setup
+# ignores by convention and are there for the person at the bench
+# matching a cut shape to a part number on the plan.
+LABEL_COLOR = "#0066cc"
+LABEL_MM = 3.0
+
+
+def _d(loop):
+    """One closed path's `d`, in millimetres."""
+    from .svg_export import _num
+    parts = ["M"]
+    for x, y in loop:
+        parts.append("%s,%s" % (_num(x), _num(y)))
+    parts.append("Z")
+    return " ".join(parts)
+
+
+def sheet_svg(sheet, label_parts=True, outline_sheet=True):
+    """One nested sheet as a true-scale, cut-ready SVG document.
+
+    Millimetres throughout, with width/height in mm and a matching
+    viewBox, so it opens at physical size and a cutter needs no
+    scaling step - the same contract as svg_export (PLAN.md sec. 5).
+
+    Each part is ONE compound path, outline plus holes, with
+    fill-rule="evenodd" so a hole cuts as a hole. Parts are not
+    filled: a filled shape tells a cutter to engrave the inside.
+
+    `outline_sheet` draws the stock's own edge. It is useful on
+    screen and harmless to a cutter that reads only the cut layer,
+    but it is a separate layer so it can be switched off for one
+    that does not.
+    """
+    from .svg_export import _num
+
+    out = ['<?xml version="1.0" encoding="UTF-8"?>\n']
+    out.append('<svg xmlns="http://www.w3.org/2000/svg" '
+               'width="%smm" height="%smm" viewBox="0 0 %s %s">\n'
+               % (_num(sheet.width), _num(sheet.height),
+                  _num(sheet.width), _num(sheet.height)))
+
+    if outline_sheet:
+        out.append('  <g id="stock">\n')
+        out.append('    <rect x="0" y="0" width="%s" height="%s" '
+                   'fill="none" stroke="#cccccc" stroke-width="0.2"/>\n'
+                   % (_num(sheet.width), _num(sheet.height)))
+        out.append('  </g>\n')
+
+    out.append('  <g id="cut" fill="none" stroke="%s" stroke-width="%s">\n'
+               % (CUT_STROKE, _num(CUT_WIDTH_MM)))
+    for p in sheet.placements:
+        d = " ".join(_d(loop) for loop in p.loops)
+        out.append('    <path id="%s" d="%s" fill-rule="evenodd"/>\n'
+                   % (_xml_attr(p.label), d))
+    out.append('  </g>\n')
+
+    if label_parts:
+        out.append('  <g id="labels" fill="%s" font-size="%s" '
+                   'font-family="sans-serif">\n'
+                   % (LABEL_COLOR, _num(LABEL_MM)))
+        for p in sheet.placements:
+            # Centred in the part's bounding box: on a former that is
+            # inside the outline, where it cannot be mistaken for a
+            # neighbour's label.
+            out.append('    <text x="%s" y="%s" text-anchor="middle">'
+                       '%s</text>\n'
+                       % (_num(p.dx + p.width / 2.0),
+                          _num(p.dy + p.height / 2.0),
+                          _xml_text(p.label)))
+        out.append('  </g>\n')
+
+    out.append('</svg>\n')
+    return "".join(out)
+
+
+def _xml_text(s):
+    return (str(s).replace("&", "&amp;").replace("<", "&lt;")
+            .replace(">", "&gt;"))
+
+
+def _xml_attr(s):
+    return _xml_text(s).replace('"', "&quot;")
+
+
+def nesting_report(sheets, unplaced=None):
+    """A plain-text account of what went where.
+
+    Exists so a nesting can be CHECKED. A sheet of SVG is hard to
+    audit by eye for a missing part, and the one failure mode that
+    matters here is quiet: a part that was traced, needed twice, and
+    emitted once. The report lists every cut and totals them.
+    """
+    lines = []
+    total = 0
+    for i, sh in enumerate(sheets):
+        lines.append("Sheet %d: %.1f x %.1f mm (%.2f x %.2f in), "
+                     "%d cuts, %.0f%% of area"
+                     % (i + 1, sh.width, sh.height,
+                        sh.width / 25.4, sh.height / 25.4,
+                        len(sh.placements), 100.0 * sh.used_fraction()))
+        for p in sh.placements:
+            lines.append("    %-14s at (%7.1f, %6.1f)  %6.1f x %5.1f mm"
+                         % (p.label, p.dx, p.dy, p.width, p.height))
+            total += 1
+    lines.append("Total: %d cuts on %d sheet(s)" % (total, len(sheets)))
+    for label, why in (unplaced or []):
+        lines.append("NOT PLACED: %s - %s" % (label, why))
+    return "\n".join(lines)

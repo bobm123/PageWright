@@ -318,3 +318,115 @@ def test_choose_stock_nests_along_the_grain():
     assert ranked, "a 500 mm part fits a 36 in sheet lengthwise"
     width, height, _s, _u = ranked[0]
     assert width > height, "the long side must be the nesting direction"
+
+
+# ------------------------------------------------------------ svg output
+
+def _one_sheet():
+    outer = [(0.0, 0.0), (40.0, 0.0), (40.0, 30.0), (0.0, 30.0)]
+    hole = [(10.0, 10.0), (20.0, 10.0), (20.0, 20.0), (10.0, 20.0)]
+    sheets, _u = nst.nest([nst.Piece("A", [outer, hole]),
+                           nst.Piece("B", _rect(20, 20))],
+                          200.0, 100.0)
+    return sheets[0]
+
+
+def test_the_svg_is_true_scale_in_millimetres():
+    """A cutter must need no scaling step: width/height in mm with a
+    matching viewBox, the same contract as svg_export."""
+    svg = nst.sheet_svg(_one_sheet())
+    assert 'width="200mm"' in svg
+    assert 'height="100mm"' in svg
+    assert 'viewBox="0 0 200 100"' in svg
+
+
+def test_each_part_is_one_compound_path_with_evenodd():
+    """Outline and holes in one path, so a hole cuts as a hole."""
+    svg = nst.sheet_svg(_one_sheet())
+    assert svg.count('<path id="A"') == 1
+    path = svg.split('<path id="A"')[1].split("/>")[0]
+    assert 'fill-rule="evenodd"' in path
+    assert path.count("M") == 2, "outline and hole in the same path"
+
+
+def test_cut_paths_are_not_filled():
+    """A filled shape tells a cutter to engrave the inside."""
+    svg = nst.sheet_svg(_one_sheet())
+    cut = svg.split('<g id="cut"')[1].split("</g>")[0]
+    assert 'fill="none"' in svg.split('<g id="cut"')[1][:120]
+    assert "fill=\"#" not in cut, "a cut path must not be filled"
+
+
+def test_labels_are_a_separate_layer_that_can_be_dropped():
+    with_labels = nst.sheet_svg(_one_sheet(), label_parts=True)
+    without = nst.sheet_svg(_one_sheet(), label_parts=False)
+    assert '<g id="labels"' in with_labels
+    assert '<g id="labels"' not in without
+    # Dropping labels must not touch the geometry.
+    assert (with_labels.split('<g id="cut"')[1].split("</g>")[0]
+            == without.split('<g id="cut"')[1].split("</g>")[0])
+
+
+def test_the_stock_outline_can_be_dropped_for_a_bare_cutter():
+    assert '<g id="stock"' in nst.sheet_svg(_one_sheet())
+    assert '<g id="stock"' not in nst.sheet_svg(_one_sheet(),
+                                                outline_sheet=False)
+
+
+def test_a_label_with_xml_special_characters_is_escaped():
+    """A part named off a plan can hold anything; an unescaped & or <
+    makes the file unopenable."""
+    sheets, _u = nst.nest([nst.Piece('R&D <1>', _rect(20, 20))],
+                          100.0, 100.0)
+    svg = nst.sheet_svg(sheets[0])
+    assert "R&amp;D &lt;1&gt;" in svg
+    assert "R&D <1>" not in svg
+
+
+def test_the_svg_geometry_is_where_the_nester_put_it():
+    """Parse the emitted path back and compare to the placement.
+
+    An earlier version of this test matched a formatted coordinate
+    as a SUBSTRING of the document, with an `or` fallback. It caught
+    nothing: a short decimal appears somewhere in a sheet of numbers
+    whatever the geometry is. This reads the path.
+    """
+    sheet = _one_sheet()
+    svg = nst.sheet_svg(sheet)
+    for p in sheet.placements:
+        frag = svg.split('<path id="%s"' % p.label)[1].split("/>")[0]
+        d = frag.split('d="')[1].split('"')[0]
+        loops = []
+        for sub in d.split("M"):
+            sub = sub.strip().rstrip("Z").strip()
+            if not sub:
+                continue
+            loops.append([tuple(float(v) for v in tok.split(","))
+                          for tok in sub.split() if "," in tok])
+        assert len(loops) == len(p.loops), "%s: lost a loop" % p.label
+        for got, want in zip(loops, p.loops):
+            assert len(got) == len(want)
+            for (gx, gy), (wx, wy) in zip(got, want):
+                assert gx == pytest.approx(wx, abs=0.002)
+                assert gy == pytest.approx(wy, abs=0.002)
+
+
+# ---------------------------------------------------------------- report
+
+def test_the_report_accounts_for_every_cut():
+    """The failure that matters is quiet: a part needed twice and
+    emitted once. The report totals them so it cannot pass unseen."""
+    pieces = _pogo_pieces()
+    _w, _h, sheets, unplaced = nst.choose_stock(pieces)[0]
+    text = nst.nesting_report(sheets, unplaced)
+    assert "Total: 24 cuts" in text
+    for piece in pieces:
+        for label, _loops in piece.instances():
+            assert label in text, "%s missing from the report" % label
+
+
+def test_the_report_names_what_did_not_fit():
+    sheets, unplaced = nst.nest([nst.Piece("Huge", _rect(999, 10))],
+                                100.0, 100.0)
+    text = nst.nesting_report(sheets, unplaced)
+    assert "NOT PLACED: Huge" in text
