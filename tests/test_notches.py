@@ -294,3 +294,172 @@ def test_a_pinned_line_keeps_its_position():
     """The point of the pin: the gap is not dragged to a multiple."""
     out, _r = nt.snap_notches(_rect(9.0, 10.0), MMPP)
     assert min(_edge_lengths_mm(out)) == pytest.approx(9.0, abs=0.01)
+
+
+# ----- idempotency on the ten real formers ---------------------------------
+#
+# snap_notches used to move points on every call: applying it to
+# already-cleaned geometry kept squaring and re-snapping, decaying but
+# never settling, and on some parts the set of edges it squared grew
+# between calls so the movement jumped back up. These tests pin the
+# fixed-point property down on real traced outlines.
+
+_FORMERS = os.path.join(os.path.dirname(__file__), "data",
+                        "pogo_formers.json")
+
+
+def _pogo():
+    """The ten Pogo formers and their calibration, from the plan."""
+    import json
+    with open(_FORMERS) as fh:
+        d = json.load(fh)
+    return d["mm_per_pixel"], [(f["name"], [tuple(p) for p in f["points"]])
+                               for f in d["formers"]]
+
+
+def _max_move_mm(a, b, mm_per_pixel):
+    return max(math.hypot(p[0] - q[0], p[1] - q[1])
+               for p, q in zip(a, b)) * mm_per_pixel
+
+
+def _roughen(points, mm_per_pixel, seed):
+    """Undo the cleanup: put trace-like noise back on a former.
+
+    The saved project was written AFTER a notch pass, so its formers
+    are already square and already on the stock grid. A test that only
+    used them would pass against a snap_notches that did nothing at
+    all. Roughening gives the function real work to do, so the second
+    call has something to get wrong.
+    """
+    rng = np.random.default_rng(seed)
+    noise = rng.normal(0.0, 0.35, (len(points), 2))
+    return [(p[0] + d[0], p[1] + d[1]) for p, d in zip(points, noise)]
+
+
+def test_every_real_former_is_idempotent():
+    """The property: snap(snap(p)) == snap(p), to floating point."""
+    mmpp, formers = _pogo()
+    assert len(formers) == 10
+    for name, pts in formers:
+        once, _r1 = nt.snap_notches(pts, mmpp)
+        twice, _r2 = nt.snap_notches(once, mmpp)
+        assert _max_move_mm(once, twice, mmpp) < 1e-9, name
+
+
+def test_every_real_former_is_idempotent_when_rough():
+    """Same, on geometry that still needs the cleanup.
+
+    This is the case that actually exercised the bug: the function has
+    to square and snap on the first call, then leave its own output
+    alone on the second.
+    """
+    mmpp, formers = _pogo()
+    for seed, (name, pts) in enumerate(formers):
+        rough = _roughen(pts, mmpp, seed)
+        once, rep = nt.snap_notches(rough, mmpp)
+        # it really did work, or the test below proves nothing
+        assert rep.squared > 0 or rep.snapped > 0, name
+        twice, _r = nt.snap_notches(once, mmpp)
+        assert _max_move_mm(once, twice, mmpp) < 1e-9, name
+
+
+def test_repeat_application_never_drifts():
+    """Eight passes must be the same as one.
+
+    The original symptom was not just movement but movement that came
+    BACK: on F7 the squared/snapped counts sat at 24/21 for six passes
+    with the movement decaying 0.40 -> 0.13 mm, then jumped to 25/22
+    and 0.36 mm as a new edge was tipped inside the angle tolerance.
+    """
+    mmpp, formers = _pogo()
+    for seed, (name, pts) in enumerate(formers):
+        settled, _r = nt.snap_notches(_roughen(pts, mmpp, seed), mmpp)
+        pts_i = settled
+        for i in range(8):
+            pts_i, _ri = nt.snap_notches(pts_i, mmpp)
+            assert _max_move_mm(settled, pts_i, mmpp) < 1e-9, (name, i)
+
+
+def test_the_grid_angle_is_a_fixed_point():
+    """Why idempotency holds: squaring must not move the grid.
+
+    dominant_angle_deg averages the edges that snap_notches squares, so
+    once they lie on the angle, measuring again returns it. Averaging
+    every near-axis edge instead - curve chords included, which are
+    never squared - moved the angle up to 1.06 deg per call on these
+    formers and never settled.
+    """
+    mmpp, formers = _pogo()
+    for seed, (name, pts) in enumerate(formers):
+        rough = _roughen(pts, mmpp, seed)
+        once, rep = nt.snap_notches(rough, mmpp)
+        assert abs(nt.dominant_angle_deg(once, mmpp)
+                   - rep.grid_deg) < 1e-9, name
+
+
+def test_a_settled_part_reports_no_work_and_one_pass():
+    """Handed its own output, the function should find nothing to do."""
+    mmpp, formers = _pogo()
+    for seed, (name, pts) in enumerate(formers):
+        once, _r = nt.snap_notches(_roughen(pts, mmpp, seed), mmpp)
+        _twice, rep = nt.snap_notches(once, mmpp)
+        assert rep.squared == 0, name
+        assert rep.snapped == 0, name
+        assert rep.passes == 1, name
+        assert rep.max_move_mm < 1e-9, name
+
+
+def test_it_reports_convergence():
+    """The report must not claim a fixed point it did not reach."""
+    mmpp, formers = _pogo()
+    for seed, (name, pts) in enumerate(formers):
+        _once, rep = nt.snap_notches(_roughen(pts, mmpp, seed), mmpp)
+        assert rep.converged, name
+        assert 1 <= rep.passes <= nt.MAX_PASSES, name
+
+
+def test_snap_spacing_is_its_own_fixed_point():
+    """The cluster-spacing snap underneath, on its own.
+
+    Fuzzed rather than hand-picked: the de-drift step that broke
+    idempotency only misbehaves when the tolerance check freezes some
+    lines and not others, which is tedious to construct by hand and
+    easy to hit at random.
+    """
+    import random
+    rng = random.Random(11)
+    step, tol = 37.8, 11.3
+    for _ in range(2000):
+        vals = sorted(rng.uniform(0.0, 10 * step)
+                      for _ in range(rng.randint(2, 14)))
+        once = nt._snap_spacing(vals, step, tol)
+        twice = nt._snap_spacing(once, step, tol)
+        assert max(abs(a - b) for a, b in zip(once, twice)) < 1e-9, vals
+
+
+def test_snap_spacing_lands_on_its_own_grid():
+    """A snapped group must sit ON the stock grid, not near it.
+
+    This is the property the whole spacing snap exists to produce, and
+    it is checked on the residual rather than by re-running the
+    function, so the fixed-point self-check inside _snap_spacing
+    cannot satisfy it by quietly abandoning the snap.
+    """
+    step, tol = 37.8, 11.3
+    # three lines a hair off a 2-step and a 3-step spacing
+    vals = [10.4, 10.4 + 2 * step + 0.9, 10.4 + 5 * step - 1.1]
+    out = nt._snap_spacing(vals, step, tol)
+    assert max(abs(a - b) for a, b in zip(vals, out)) > 1e-9, "no snap"
+    for i in range(len(out)):
+        for j in range(i + 1, len(out)):
+            gap = abs(out[i] - out[j]) / step
+            assert abs(gap - round(gap)) < 1e-9, (i, j, gap)
+
+
+def test_snap_spacing_keeps_the_group_in_place():
+    """The de-drift has to do its job: a notch is defined by its
+    width, not its position, so the group must not translate."""
+    step, tol = 37.8, 11.3
+    vals = [10.4, 10.4 + 2 * step + 0.9, 10.4 + 5 * step - 1.1]
+    out = nt._snap_spacing(vals, step, tol)
+    assert abs(sum(out) / len(out) - sum(vals) / len(vals)) < 1e-9
