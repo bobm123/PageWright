@@ -2496,11 +2496,26 @@ That was attempt six; it should have been attempt two.
 
 Two changes to the notch cleaner, both from the Pogo formers.
 
-**The step is 1/32 in, not 1/16.** A notch is cut to HALF the stock
-where two pieces cross: a former sitting on a 1/16 in keel is
-notched 1/32 in deep so the two halve into each other. So the sizes
-that actually appear on a sheet step in thirty-seconds even when
-every stick is a sixteenth.
+**The step is 1/32 in, not 1/16** - although the stock is 1/16 in
+throughout. The sizes that appear on a sheet step in thirty-seconds
+because a notch is often SHARED between two parts that each carry
+half of its width.
+
+The Pogo formers are the case in point: each drawn "former" is a
+HALF former, a left and a right meeting at the centreline, and each
+carries a 1/32 in notch there so the two together make the 1/16 in
+slot the crutch keel passes through. Measured on the ten of them,
+the short axis edges land overwhelmingly on 2.0 steps (1/16 in, the
+full-width notches) with one or two at 1.0 step, and every one of
+those 1/32 in edges sits at the bounding box extreme - the mating
+centreline, not the middle of the part.
+
+So the step is a WIDTH fact about shared notches. An earlier version
+of this section said it was a DEPTH fact about cross-lapping ("the
+two halve into each other"); the constant is unchanged but the
+reason was wrong. Notch DEPTH was measured separately on the 27 keel
+notches and runs 4-17 px, median 11 px (0.055 in) - about a full
+1/16 in, the thickness of the former passing through.
 
 The cost is real and worth stating: halving the step also halves
 the tolerance clamp, from 0.78 mm to 0.39 mm (3.1 px on a 200 dpi

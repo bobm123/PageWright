@@ -44,10 +44,13 @@ with the rest of core (see PLAN.md sec. 2).
 import numpy as np
 
 # How far an edge must be displaced, in pixels, before a run of
-# columns counts as a notch rather than scan noise. A former notch is
-# cut to half the stock: 1/32 in, which is 6.3 px at 300 DPI, so 4 px
-# sits well below a real notch and well above the 1-2 px wander of a
-# threshold boundary on a scanned line.
+# columns counts as a notch rather than scan noise. Measured on the
+# 27 notches of the six Pogo keel pieces: depths run 4 to 17 px with
+# a median of 11 px (0.055 in at this scan's 0.1266 mm/px), so these
+# are cut about a full 1/16 in deep - the thickness of the former
+# passing through - rather than half of it. 4 px keeps the shallowest
+# real notch while staying clear of the 1-2 px wander of a threshold
+# boundary on a scanned line.
 DEFAULT_MIN_DEPTH_PX = 4.0
 
 # A notch is this many columns wide, at least and at most. The lower

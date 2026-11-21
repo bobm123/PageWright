@@ -35,12 +35,27 @@ import math
 
 import numpy as np
 
-# Default stock step. 1/32 in, not 1/16: a notch is cut to HALF the
-# stock it takes where two pieces cross - a former sitting on a
-# 1/16 in keel is notched 1/32 in deep so the two halve into each
-# other - so the sizes that actually appear on a sheet step in
-# thirty-seconds even when every stick is a sixteenth. A drawing
-# using some other module sets its own.
+# Default stock step. 1/32 in, not 1/16, although the stock IS 1/16
+# throughout: the sizes that appear on the sheet step in
+# thirty-seconds because a notch is often shared between two parts
+# that each carry half of it.
+#
+# The Pogo formers are the case in point. Each drawn "former" is a
+# HALF former: the fuselage is built from a left and a right one
+# meeting at the centreline, and each carries a 1/32 in notch there,
+# so the two together make the 1/16 in slot the crutch keel passes
+# through. Measured on the ten Pogo half formers: the short axis
+# edges land overwhelmingly on 2.0 steps (1/16 in, the full-width
+# notches), with one or two at 1.0 step per part, and every one of
+# those 1/32 in edges sits at the bounding box extreme - x within
+# 0.04 of a side - which is the mating centreline, not somewhere in
+# the middle of the part.
+#
+# So the step is a WIDTH fact about shared notches, not a depth fact
+# about cross-lapping. An earlier version of this comment claimed the
+# latter ("a notch is cut to half the stock where two pieces cross");
+# the constant is the same either way, but the reason was wrong.
+# A drawing using some other module sets its own.
 DEFAULT_STEP_MM = 25.4 / 32.0
 
 # How far an edge may be from a multiple and still be snapped, in mm.

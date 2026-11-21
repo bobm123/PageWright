@@ -228,10 +228,16 @@ def test_the_module_needs_nothing_from_pagewrights_model():
 # ----- the step, and what is too long to snap -----------------------------
 
 def test_the_default_step_is_one_thirtysecond():
-    """A notch is cut to HALF the stock where two pieces cross: a
-    former on a 1/16 in keel is notched 1/32 in deep. So the sizes
-    that appear on a sheet step in thirty-seconds even when every
-    stick is a sixteenth."""
+    """The stock is 1/16 in throughout, but the sizes on the sheet
+    step in thirty-seconds, because a notch is often SHARED between
+    two parts that each carry half its width.
+
+    The Pogo formers are half formers: a left and a right meet at the
+    centreline and each carries a 1/32 in notch there, making the
+    1/16 in slot the crutch keel passes through. Measured on the ten
+    of them, the short axis edges land overwhelmingly on 2.0 steps
+    with one or two at 1.0, and every 1/32 in edge sits at the
+    bounding box extreme - the mating centreline."""
     assert nt.DEFAULT_STEP_MM == pytest.approx(25.4 / 32.0)
 
 
