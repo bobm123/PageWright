@@ -29,7 +29,7 @@ columns crossed four runs. The inside is always the OUTERMOST pair:
 below the topmost stroke, above the bottommost.
 
 INSIDE, NOT OUTSIDE. Edges are reported at the inside of the drawn
-line. A plan's lines here are 8-11 px at 300 DPI (0.04-0.055 in), so
+line. A plan's lines here are 8-11 px at 200 DPI (0.04-0.055 in), so
 inside-versus-outside shifts every measured length by about 0.1 in -
 larger than any plausible laser kerf, and so not a choice that can
 be left implicit. `cv2.findContours` makes the opposite choice for
@@ -46,11 +46,11 @@ import numpy as np
 # How far an edge must be displaced, in pixels, before a run of
 # columns counts as a notch rather than scan noise. Measured on the
 # 27 notches of the six Pogo keel pieces: depths run 4 to 17 px with
-# a median of 11 px (0.055 in at this scan's 0.1266 mm/px), so these
-# are cut about a full 1/16 in deep - the thickness of the former
-# passing through - rather than half of it. 4 px keeps the shallowest
-# real notch while staying clear of the 1-2 px wander of a threshold
-# boundary on a scanned line.
+# a median of 11 px (0.055 in at this scan's 0.1266 mm/px, 200 DPI),
+# so these are cut about a full 1/16 in deep - the thickness of the
+# former passing through - rather than half of it. 4 px keeps the
+# shallowest real notch while staying clear of the 1-2 px wander of a
+# threshold boundary on a scanned line.
 DEFAULT_MIN_DEPTH_PX = 4.0
 
 # A notch is this many columns wide, at least and at most. The lower
@@ -65,7 +65,7 @@ DEFAULT_MAX_WIDTH_PX = 40
 # run" with no notch in it. It must be comfortably wider than the
 # widest notch (above) so a notch cannot dominate its own baseline,
 # and narrower than the length over which the part's own curve
-# changes. 151 px is ~0.5 in at 300 DPI.
+# changes. 151 px is ~0.75 in at the Pogo scan's 200 DPI.
 DEFAULT_TREND_WINDOW_PX = 151
 
 
