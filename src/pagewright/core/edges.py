@@ -184,6 +184,32 @@ def find_notches(y, inward, trend=None, min_depth_px=None,
     A keel normally ends in a tip or a cut face rather than mid-notch
     so it has not mattered, but do not read an empty result near an
     end as proof that nothing is cut there.
+
+    A STEEP RAMP weakens it for the same reason, and that case DOES
+    occur: a scarf-jointed keel carries a notch on the long diagonal
+    running out to its knife tip, so that the two halves share one
+    former slot across the glued joint. Two things are needed to see
+    those, both learned the hard way on the Pogo keels:
+
+      * A SHORTER TREND WINDOW. The default 151 px is wider than the
+        whole taper, so the median follows the diagonal and the notch
+        never departs from its own baseline. About 31 px works: still
+        several times a notch width, but short enough to track the
+        taper's curvature. (The diagonals are not straight, so fitting
+        a line to them instead does not help - that was tried.)
+      * A FINER `min_depth_px`. These are shallow, around 5 px against
+        the 11 px median of a body notch, so the 4 px default rejects
+        them. 2 px finds them. Checked on all six Pogo keel pieces:
+        at 2 px the two rear halves each gain exactly one notch, the
+        scarf one, and no piece gains anything else.
+
+    `inward` IS PER EDGE AND PER REGION, not per piece. It says which
+    way lies OUT of the part, and on a scarf face the part's body is
+    on the opposite side from the body further along the same edge.
+    A keel's bottom edge therefore wants inward=-1 along the body and
+    inward=+1 on the scarf face. Passing one sign for a whole edge
+    silently finds only half the notches, which is exactly how the
+    scarf notches came to be missed.
     """
     if min_depth_px is None:
         min_depth_px = DEFAULT_MIN_DEPTH_PX
@@ -213,3 +239,4 @@ def find_notches(y, inward, trend=None, min_depth_px=None,
                 out.append((run + j) // 2)
             run = -1
     return out
+

@@ -370,14 +370,15 @@ def test_real_keels_give_the_notch_counts_the_drawing_shows():
             "other, got %d and %d" % (name, count, edge, got[0], got[1]))
 
 
-def test_front_and_rear_notches_total_nine_per_keel():
-    """The finding the butt joint rests on, kept where it can fail.
+def test_front_and_rear_body_notches_total_nine_per_keel():
+    """Nine notches on the BODY edges, six front and three rear.
 
-    Ten formers, nine notches: six on the front piece and three on
-    the rear, with no station shared between them. That is why the
-    two halves were butted rather than lapped - there is no overlap
-    to register. If a change to this module ever makes it ten, or
-    makes a station appear twice, the joint needs revisiting.
+    Ten formers, nine body notches. An earlier version of this test
+    read that as proof the halves butt rather than lap, on the
+    grounds that no station is shared. That inference was wrong: the
+    shared station is not on a body edge at all but on the scarf
+    face, where the default settings cannot see it (see the next
+    test). The count itself still holds and is worth guarding.
     """
     masks = _keel_masks()
     for keel in ("BottomKeel", "SideKeel", "TopKeel"):
@@ -389,6 +390,75 @@ def test_front_and_rear_notches_total_nine_per_keel():
             y, inward = (top, +1) if edge == "top" else (bot, -1)
             total += len(ed.find_notches(y, inward=inward))
         assert total == 9, "%s: %d notches for ten formers" % (keel, total)
+
+
+# The scarf notch on each rear half: distance from that piece's knife
+# tip, in columns, measured off the drawing. The front halves carry
+# the matching notch on their OTHER edge, which this fixture's
+# per-piece `inward` does not reach; see the module docstring.
+REAR_SCARF_NOTCH_PX = {
+    "BottomKeel-Rear": 83,
+    "SideKeel-Rear": 97,
+}
+
+
+def test_the_scarf_notch_needs_a_short_window_and_a_fine_threshold():
+    """The notch that carries a former across a scarf joint.
+
+    A split keel's two halves overlap along a long tapered face, and
+    a former slot is cut across that face so the joined keel has a
+    notch there like any other station. It is shallow (about 5 px
+    against a body notch's 11) and it sits on a steep ramp, so the
+    defaults miss it twice over: `edge_trend`'s 151 px window is
+    wider than the whole taper and follows it, and `min_depth_px` of
+    4 rejects it on depth alone.
+
+    Both corrections are needed. This test fails if either default
+    silently starts working, which would mean the documented reason
+    for passing them explicitly no longer holds.
+    """
+    masks = _keel_masks()
+    for name, want_px in REAR_SCARF_NOTCH_PX.items():
+        cols, top, _bot = ed.trace_edge_pair(masks[name])
+        tip = cols.min()
+
+        coarse = ed.find_notches(top, inward=+1)
+        fine = ed.find_notches(top, inward=+1,
+                               trend=ed.edge_trend(top, 31),
+                               min_depth_px=2.0)
+        assert len(fine) == len(coarse) + 1, (
+            "%s: expected exactly one extra notch with the short "
+            "window and fine threshold, got %d then %d"
+            % (name, len(coarse), len(fine)))
+
+        extra = sorted(set(cols[i] for i in fine)
+                       - set(cols[i] for i in coarse))
+        assert len(extra) == 1, "%s: %d extra notches" % (name, len(extra))
+        got = extra[0] - tip
+        assert abs(got - want_px) <= 12, (
+            "%s: scarf notch at %d px from the tip, expected about %d"
+            % (name, got, want_px))
+
+
+def test_the_fine_threshold_adds_nothing_to_the_front_halves():
+    """The extra notch is a real feature, not threshold noise.
+
+    If dropping to 2 px merely let scan noise through, every piece
+    would gain notches. Only the two scarfed rear halves do.
+    """
+    masks = _keel_masks()
+    for name in ("BottomKeel-Front", "SideKeel-Front", "TopKeel-Front",
+                 "TopKeel-Rear"):
+        edge, _n = KEEL_NOTCHES[name]
+        _cols, top, bot = ed.trace_edge_pair(masks[name])
+        y, inward = (top, +1) if edge == "top" else (bot, -1)
+        coarse = ed.find_notches(y, inward=inward)
+        fine = ed.find_notches(y, inward=inward,
+                               trend=ed.edge_trend(y, 31),
+                               min_depth_px=2.0)
+        assert len(fine) == len(coarse), (
+            "%s: the fine threshold changed the count on a body edge, "
+            "%d -> %d" % (name, len(coarse), len(fine)))
 
 
 def test_a_merged_knife_tip_really_occurs_in_the_real_data():
