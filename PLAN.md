@@ -2555,3 +2555,55 @@ every rectangle came out backwards.)
 
 Mutations covered: the step reverted to 1/16, the gap rule
 disabled, and the gap rule inverted.
+
+## 16.47  A plan-tracing project is a KiCad project (2026-11-22)
+
+Robert's framing, and it reorganises what the plan-view work is for.
+
+A KiCad project holds two views of one component - a schematic
+symbol and a PCB footprint - and joins them by a **reference
+designator**, R1 or C3, never by geometry. The netlist is the
+contract between the views.
+
+A model plan is the same shape of thing. The **printwood** is the
+flat outline to cut; the **assembly view** is the same part pinned
+where it belongs. The join is the part number, and a plan's own
+numbering already is a refdes scheme: `R<n>` ribs, `F<n>` formers,
+`S<n>` stabiliser ribs, `V<n>`/`H<n>` tail surfaces - class letter
+plus instance number, the same convention.
+
+### Why this matters now
+
+`core/crosscheck.py` was built to compare two drawings of one part,
+and its fallback is to match them by size and shape. That fallback
+cannot work here, for a reason measured rather than guessed: an
+assembly view **does not decompose into parts at all**. `find_parts`
+looks for enclosed regions, and in a wing view the enclosed regions
+are the BAYS BETWEEN the ribs. The ribs themselves are lines. Run on
+p16 it returns wing bays and fuselage bays, so there is frequently no
+plan-view outline to compare a printwood outline against, and better
+shape matching will not conjure one.
+
+### The annotation layer (pinned, not built)
+
+What is needed is a layer over the plan carrying a refdes per
+feature, each with its **provenance**:
+
+  * read by OCR,
+  * an OCR read corrected by the user,
+  * asserted by the user outright.
+
+Provenance has to be stored, not just the string. A refdes the user
+typed should outrank one a recogniser guessed, and OCR is not
+dependable on these sheets - whole-page OCR found R1-R4 on the
+printwood and nothing on the plans, while the same pages tiled and
+upscaled found F8/H2/V3 and lost the R's. A layer that cannot say
+where a label came from cannot be trusted to resolve that.
+
+That layer is the netlist equivalent: the thing that asserts *this
+outline on the printwood and that member in the wing view are one
+part*. Once it exists, `compare` has something to compare, and the
+station geometry already extractable without labels (formers show as
+pairs of lines 1.52-1.65 mm apart, the 1/16 in stock seen edge-on,
+measured five times independently) becomes a check on the parts it
+names rather than an anonymous row of numbers.

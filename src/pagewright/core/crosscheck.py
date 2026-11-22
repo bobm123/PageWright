@@ -43,6 +43,32 @@ found F8/H2/V3 on the plans and lost the R's. So a label is taken as
 a HINT that can be absent, never as a precondition, and the geometric
 comparison below works without one.
 
+THE SHAPE THIS WANTS TO GROW INTO (not built yet). A plan-tracing
+project is a KiCad project. A schematic symbol and a PCB footprint
+are two views of one component, joined by a REFERENCE DESIGNATOR -
+R1, C3 - and not by geometry; the netlist is the contract between
+them. An assembly view and a printwood sheet stand in exactly that
+relation, and a plan's own numbering already IS a refdes scheme:
+R<n> ribs, F<n> formers, S<n> stabiliser ribs, V<n>/H<n> tail
+surfaces, a class letter and an instance number.
+
+That is the right join, and matching by shape - which is what the
+`compare` below falls back on - is the wrong one. Measured: an
+assembly view does not even decompose into parts. `find_parts` looks
+for enclosed regions, and in a wing view the enclosed regions are the
+BAYS BETWEEN the ribs, not the ribs, which are lines. So there is
+often no plan-view outline to compare a printwood outline against,
+and no amount of better shape matching will produce one.
+
+What is needed instead is an ANNOTATION LAYER over the plan, holding
+a refdes per feature with its PROVENANCE: read by OCR, an OCR read
+corrected by the user, or asserted by the user outright. Provenance
+has to be carried because a refdes the user typed should outrank one
+a recogniser guessed, and because OCR is not dependable on these
+sheets (see the warning under MATCHING BY LABEL). That layer is the
+netlist equivalent - the thing that says this outline and that member
+are one part - and once it exists, `compare` has something to compare.
+
 cv2/NumPy only: ports with the rest of core.
 """
 
