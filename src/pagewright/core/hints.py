@@ -39,11 +39,33 @@ frame. That frame can come from the local edge direction, from a
 feature's bisector, or from the caller. This module supplies the
 frame; `notches` supplies the squaring.
 
-MEASURED, NOT ASSUMED. The bird's mouth default of 90 degrees is not
-a guess: on the Pogo wing ribs the two faces of R1's mouth fit to
-+45.0 and -45.0 degrees against its own bisector, an included angle
-of 90.0. That is square stock turned on edge, exactly as the builder
-would cut it.
+MEASURED, NOT ASSUMED - AND ONLY ONCE SO FAR. On the Pogo wing ribs,
+R1's mouth traced at a fine tolerance measures 91.85 degrees about a
+bisector of 359.1, and squaring it to 90 moves no vertex more than
+0.045 mm, leaving it 0.034 mm from the ink. That is the right size
+for correcting a hand-drawn line to its intent.
+
+Be careful how much that one number is made to carry. The other four
+ribs could not be measured to the same standard: the mouth is about
+1.4 mm deep and drawn with a 0.3 mm pencil line, and at this scan's
+0.127 mm/px that is barely a dozen pixels. Seven different methods
+tried on them gave seven different answers (included angles from 2 to
+109 degrees), which is a statement about the methods, not the plan.
+What went wrong each time is worth knowing:
+
+  * The SHIPPED outlines cannot be measured at all. Simplified at
+    0.35 mm - coarser than the whole feature - they carry 3 vertices
+    at the nose where a fine trace gives 13 to 26. Every angle read
+    off them is a measurement of the simplifier.
+  * A CROP TAKEN FROM THE TRACED BOUNDING BOX clips the mouth, which
+    extends past it, and the trace then runs down the crop edge and
+    reports a tidy 90.0/0.0 that is pure artifact.
+  * A FLOOD FILL leaks through any gap in the drawn line and returns
+    the crop rectangle, which looks like a 4-point part.
+
+So `find_vees` asks for the included angle rather than discovering
+it. A caller that knows the construction can assert 90; this module
+is not in a position to argue.
 
 cv2/NumPy only, plain loops: ports with the rest of core.
 """
