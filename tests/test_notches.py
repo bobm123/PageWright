@@ -469,3 +469,62 @@ def test_snap_spacing_keeps_the_group_in_place():
     vals = [10.4, 10.4 + 2 * step + 0.9, 10.4 + 5 * step - 1.1]
     out = nt._snap_spacing(vals, step, tol)
     assert abs(sum(out) / len(out) - sum(vals) / len(vals)) < 1e-9
+
+
+def _swept_keel(notch_mm=2.54, sag_mm=15.0, length_mm=300.0):
+    """A long part whose profile sweeps, with square notches cut into it.
+
+    This is the shape of a model-aircraft keel: 300 mm long, a 15 mm
+    sagitta over that length, and a row of square slots cut into the
+    top edge. Deliberately NOT a blob - the point is that no single
+    axis describes it.
+    """
+    xs = np.linspace(0.0, length_mm, 400)
+    # a parabolic sweep, the fuselage profile
+    top = sag_mm * (xs / length_mm) ** 2
+    upper = []
+    for x, y in zip(xs, top):
+        upper.append((x, y))
+    # cut four square notches into the upper edge
+    out = []
+    notches_at = [60.0, 120.0, 180.0, 240.0]
+    for x, y in upper:
+        hit = None
+        for nx in notches_at:
+            if nx <= x < nx + notch_mm:
+                hit = nx
+                break
+        out.append((x, y + 4.0) if hit is not None else (x, y))
+    lower = [(x, y + 18.0) for x, y in reversed(upper)]
+    pts = out + lower
+    return [(x / MMPP, y / MMPP) for x, y in pts]
+
+
+def test_a_swept_part_has_no_single_grid_angle():
+    """The precondition snap_notches needs, and a keel does not meet.
+
+    `snap_notches` squares every near-axis edge to ONE part-wide
+    angle. That is right for a compact part, whose edges really do
+    share a grid. A long swept part has no such axis: its edge
+    direction changes continuously along its length, so the angle
+    measured from the first third disagrees with the last third.
+
+    Measured on the real Pogo keels, the two halves of one keel
+    reported grid angles 9 degrees apart (+88.63 and +7.94, modulo
+    90), which is what splayed their notch walls open when they were
+    snapped. This reproduces that disagreement on a synthetic sweep so
+    the precondition is checked without the scan.
+    """
+    pts = np.array(_swept_keel(), dtype=float)
+    n = len(pts) // 2
+    # the swept upper edge, in thirds
+    upper = pts[:n]
+    k = len(upper) // 3
+    angs = []
+    for part in (upper[:k], upper[k:2 * k], upper[2 * k:]):
+        a, b = part[0], part[-1]
+        angs.append(math.degrees(math.atan2(b[1] - a[1], b[0] - a[0])))
+    spread = max(angs) - min(angs)
+    assert spread > 3.0, (
+        "a swept part should have no single edge direction; "
+        "thirds gave %r (spread %.2f deg)" % (angs, spread))

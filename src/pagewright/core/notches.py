@@ -27,6 +27,39 @@ the obvious implementation keeps moving points every time it is
 called, because squaring the edges changes the very angles the part's
 grid is measured from. See `snap_notches` for what had to be fixed.
 
+WHAT THIS IS FOR, AND WHAT IT IS NOT FOR. A COMPACT part - a former,
+a bulkhead, a rib - has a real dominant axis, and squaring to it is
+what makes the notches come out square. A LONG CURVED part does not.
+Measured on the Pogo keels, whose profile sweeps about 15 mm over a
+300 mm length: the grid angle comes out +86.47 deg on one half of the
+bottom keel and +84.55 on the other, and the two halves of the top
+keel disagree by 9 deg (+88.63 against +7.94, modulo 90). There is no
+single axis to find, so the notch walls get squared to an angle that
+does not match the local edge direction and splay open; rendered, a
+clean rectangular slot turns into a tilted V. Snapping the keels also
+moved the outline AWAY from the scanned ink in every case (mean error
+0.055 -> 0.10-0.21 mm, max 0.15 -> 0.97 mm) and dropped two notches
+outright.
+
+So: use this on parts whose edges really do share one grid. For a long
+curved part, square each notch to the LOCAL direction of the edge it
+is cut into, not to a part-wide axis - which this module does not do.
+
+A NOTE ON THE STEP for anyone picking one. The step is a property of
+the drawing, not of the stock, and it is worth measuring rather than
+assuming. On the Pogo keels the 31 notch widths cluster hard on
+0.100 in (mean residual 0.231 mm against 0.635 for random data,
+p < 0.0001 by permutation) and NOT on 1/16 in, which fits those widths
+WORSE than random (0.528 against 0.397, p = 1.0). The slots are drawn
+at a round 0.100 in to take 1/16 in stock (1.587 mm) with clearance.
+Beware of testing too fine a step: 0.5 mm scores a low residual on the
+same data but p = 0.10, because a fine enough grid fits anything.
+
+Notch DEPTHS do not quantize. A notch is cut until it meets the part
+crossing it, so its depth follows the airframe: the same 31 notches
+give 0.310 mm residual against 1/16 in, barely better than the 0.397
+of random data. Snap widths; leave depths as measured.
+
 Needs a calibrated project: without mm per pixel there is no 1/16 inch
 to snap to. GUI-free, numpy only.
 """
