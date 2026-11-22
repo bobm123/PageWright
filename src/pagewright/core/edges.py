@@ -85,6 +85,20 @@ def trace_edge_pair(mask):
 
     Uses the OUTERMOST pair of ink runs, not the first gap; see the
     module docstring for why that distinction decides correctness.
+
+    NOT SIMPLIFIED, and deliberately so: the notch search needs every
+    column, because a notch is a run of adjacent columns and dropping
+    some would shorten or hide it. That makes the result unsuitable as
+    a PART OUTLINE without further work. A polygon built straight from
+    these points carries one vertex per scanned column, and on a real
+    scan most of them are threshold wander on the drawn line rather
+    than shape - measured on the Pogo keels, 93% of 459 vertices sat
+    within 1.5 px of the line through their neighbours, and a cutter
+    follows every one of those wobbles. Anything that writes these
+    points out as geometry should run `contours.extract_contours`, or
+    `approxPolyDP` at `contours.tolerance_mm_to_px` of a REAL-WORLD
+    tolerance, first; `find_parts` already does this for the outlines
+    it traces.
     """
     m = np.asarray(mask) != 0
     if m.ndim != 2 or m.size == 0:
