@@ -2607,3 +2607,57 @@ station geometry already extractable without labels (formers show as
 pairs of lines 1.52-1.65 mm apart, the 1/16 in stock seen edge-on,
 measured five times independently) becomes a check on the parts it
 names rather than an anonymous row of numbers.
+
+## 16.48  The printwood is an OUTPUT, not an input (2026-11-22)
+
+Robert's correction, and it inverts the pipeline. Continuing the
+KiCad analogy of 16.47: I had been treating the printwood as the
+schematic - the authoritative source every other view is checked
+against - and the plan as a second opinion. That is backwards.
+
+**The printwood is the PCB layout.** It is a *generated* artifact:
+a nesting, chosen for material efficiency, regenerable whenever the
+design changes. 16.27 already says as much ("a parts sheet is a
+nesting, not an assembly drawing") but the pipeline did not act on
+it. The **plan is the schematic** - the design the parts come from.
+
+And many plans ship with no printwood at all. The user then has only
+outlines of ribs, formers and tail parts on the plan, traces those,
+and **generates** a printwood. `core/nesting.py` already does the
+generating; what is missing is tracing parts out of a plan.
+
+### What a plan view actually carries, measured on p16
+
+Recoverable from the wing plan view alone:
+
+  * **Rib stations.** Three bays measured 34.06, 34.29 and 34.06 mm -
+    agreeing to 0.23 mm, so this is solid. (1.341-1.350 in, i.e.
+    1-3/8 in nominal.)
+  * **Chord** at each station, and the planform including the swept
+    tip.
+  * **Spar position** - the long member crossing every rib - and the
+    leading and trailing edges.
+  * **Stock sizes, in words:** "Leading Edge: 1/16in square hard
+    balsa", "Spar: 1/16in square balsa".
+  * **Assembly facts in words:** "leave stubs on LE and TE to plug in
+    to fuselage", "to set proper dihedral (7 deg) root rib needs to
+    be slanted IN".
+
+NOT recoverable: **the airfoil section**. A plan view is a projection
+from above, so the rib's camber, thickness and flat bottom are simply
+not in it, and this plan draws no section anywhere - checked on both
+wing panels. The section has to come from a drawn section, a named
+airfoil, or the printwood.
+
+### What this means for the pipeline
+
+The dependency runs plan -> parts -> nesting -> printwood, and the
+part outlines are the scarce thing. Where a plan gives an outline
+(formers in a side view are often drawn full-size), trace it. Where
+it gives only a station and a chord, the SECTION must be supplied -
+inferred from a drawn airfoil, taken from a named one, or asked for.
+
+That is also why the annotation layer of 16.47 earns its keep twice
+over: with no printwood there is no second drawing to match against,
+so a refdes cannot be recovered by comparing shapes at all. It has to
+be read, or corrected, or asserted.
