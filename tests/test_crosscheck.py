@@ -122,15 +122,21 @@ def test_a_coarse_polygon_against_a_fine_one_is_flagged():
     """The circle case: 16 vertices where the other drawing has 180.
     Not proof of error on its own, which is why it is reported as
     'detail' rather than a dimension, but worth a look."""
+    # Opt-in: the count depends on each trace's own tolerance, so
+    # this is only meaningful when both were traced the same way.
     ms = X.compare("WheelDisc", _circle(22.0, 16), MMPP,
-                   _circle(22.0, 180), MMPP)
+                   _circle(22.0, 180), MMPP, vertex_ratio=2.5)
     assert "detail" in [m.kind for m in ms], ms
+    # ...and silent unless asked for.
+    assert "detail" not in [m.kind for m in X.compare(
+        "WheelDisc", _circle(22.0, 16), MMPP, _circle(22.0, 180), MMPP)]
 
 
 def test_similar_vertex_counts_are_not_flagged():
     """Two honest traces of the same part differ in vertex count all
     the time. Only a LARGE disparity means a feature went missing."""
-    ms = X.compare("R1", _circle(22.0, 30), MMPP, _circle(22.0, 40), MMPP)
+    ms = X.compare("R1", _circle(22.0, 30), MMPP, _circle(22.0, 40), MMPP,
+                   vertex_ratio=2.5)
     assert ms == []
 
 

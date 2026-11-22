@@ -75,7 +75,15 @@ DEFAULT_AREA_TOLERANCE = 0.03
 # separately, and a part seen edge-on in a plan view shows fewer
 # features than the same part flat. Only a LARGE disparity means
 # something was lost, and this is the ratio that counts as large.
-DEFAULT_VERTEX_RATIO = 2.5
+#
+# OFF BY DEFAULT, and that is the important part. The count depends
+# almost entirely on the simplification tolerance each trace was given,
+# so comparing a 0.35 mm trace with a 0.08 mm one flags EVERY part - a
+# fine trace is supposed to have more vertices. Measured: 31 of 31
+# parts flagged on `detail` alone, which is a check that tells you
+# nothing. Pass `vertex_ratio` explicitly, and only when the two
+# drawings really were traced the same way.
+DEFAULT_VERTEX_RATIO = None
 
 
 class Mismatch(object):
@@ -158,7 +166,7 @@ def compare(name, a_points, a_mm_per_pixel, b_points, b_mm_per_pixel,
     if length_floor_mm is None:
         length_floor_mm = DEFAULT_LENGTH_FLOOR_MM
     if vertex_ratio is None:
-        vertex_ratio = DEFAULT_VERTEX_RATIO
+        vertex_ratio = DEFAULT_VERTEX_RATIO     # None = do not check
     if area_tolerance is None:
         area_tolerance = DEFAULT_AREA_TOLERANCE
 
@@ -193,7 +201,7 @@ def compare(name, a_points, a_mm_per_pixel, b_points, b_mm_per_pixel,
                 "larger one" % (aa, ab, 100.0 * rel), abs(aa - ab)))
 
     na, nb = len(a_points), len(b_points)
-    if na and nb:
+    if vertex_ratio and na and nb:
         r = max(na, nb) / float(min(na, nb))
         if r > float(vertex_ratio):
             out.append(Mismatch(
