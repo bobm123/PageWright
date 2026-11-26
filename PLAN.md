@@ -9,11 +9,11 @@ A desktop GUI tool for tracing the outlines of objects in photographs and export
 > on 2026-07-22 to serve as the unified studio shell (see section 13).
 > **Status (2026-11-26):** Phases 0-7 complete (carried over from
 > TraceImage); studio hub (Trace / Flatten / Scale / OCR, multi-page
-> jobs, PDF import) and the headless CLI (section 16.1, nine
+> jobs, PDF import) and the headless CLI (section 16.1, ten
 > subcommands) are built. Current work is the plan-to-parts pipeline
 > (sections 16.6 onward): notches, nesting, edge tracing, hints,
-> cross-checks, arcs, and PlaneCraft placement. 701 tests pass. Open
-> request: page stitching (`REQUEST-PageStitching.md`, not started).
+> cross-checks, arcs, and PlaneCraft placement. Page stitching is
+> built (section 16.49). 732 tests pass.
 
 ---
 
@@ -2674,3 +2674,58 @@ That is also why the annotation layer of 16.47 earns its keep twice
 over: with no printwood there is no second drawing to match against,
 so a refdes cannot be recovered by comparing shapes at all. It has to
 be read, or corrected, or asserted.
+
+## 16.49  Page stitching: placed by hand, checked across the seam (2026-11-26)
+
+Built from `REQUEST-PageStitching.md`. Two page images become one
+sheet: page B is placed in page A's frame by an optional quarter turn
+on either page, a small rotation of B and an offset, and the joined
+image is written with a `.stitch.json` beside it.
+
+**The placement is given, never searched for.** The Pogo notes
+(`OwlRacer/3DModels/PLAN_NOTES.md`) settle this. Eight automatic
+attempts converged on dx = 1329, the best pixel match and a whole
+former bay out. What found the right answer, dx = 1624, was the 5.00 in
+scale bar that crosses the seam. So the brief's option 1 (drag it by
+hand) is the tool, and a **seam check** is the test: one end of a known
+length on each page, measured through the placement. In the dialog the
+measurement follows B as it moves; on the command line it is
+`--check`, and a check more than 0.5% out exits 1 (the image is still
+written so it can be looked at). On the Pogo pages the bar reads
+127.00 mm at 1624; the two earlier wrong answers read -14.4% (1480) and
+fail at 1329.
+
+**Overlap: keep the darker pixel.** Ink survives from both pages and
+the white margins vanish. Measured, not assumed: on p16 + p17 it
+reproduces the hand-made `p16-17-spread.png` pixel for pixel (from the
+greyscale pages, which is how that spread was made). The trim (ink is
+darker than 200, plus a margin, clamped to the canvas) reproduces its
+3308 x 2316 and p16's origin at (-16, -45). `test_stitch.py` holds this
+as a regression when the scans are on the machine.
+
+**Scale is never adjusted.** Pages that disagree show up as a seam
+check that will not come right, which is the brief's "say so rather
+than silently resampling".
+
+**Output: image + sidecar.** ModelCraft consumes an image and a scale
+and does not care how it was made. The sidecar records the two pages
+(relative paths), the placement, the trim, the scale and the checks,
+plus each page's matrix from file pixels into the output, so a
+consumer can map a point back to an original without knowing the
+turns. `stitch --from FILE` re-runs it, re-measuring the recorded
+checks; the dialog's Open Stitch File corrects it.
+
+**Conventions, because this project has paid for sign errors
+(16.38, 16.41):** points are in each page's FILE pixels with pixel
+centres on integers (cv2's convention); the offset is in page A's
+frame after A's turn; turns and the small angle are both positive
+clockwise on screen, which is also Qt's `setRotation`. Qt puts pixel
+corners on integers, so the dialog converts by exactly half a pixel,
+and `test_ui_stitch.py` checks that the view and the core place B's
+pixels identically under a turn and an angle.
+
+Code: `core/stitch.py` (Qt-free), `jobs.stitch`, the `stitch`
+subcommand, `ui/stitch_dialog.py` (Tools > Stitch Pages).
+
+Not done, as the brief asked: more than two pages, top-to-bottom
+joins, and the virtual-spread option.

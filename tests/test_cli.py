@@ -498,3 +498,86 @@ def test_detail_controls_how_many_points_a_curve_costs(tmp_path):
         hole = doc["objects"][0]["contours"][1]
         counts[detail] = len(hole["points"])
     assert counts["0.05"] > counts["0.5"]
+
+
+# ----- stitch ---------------------------------------------------------------
+
+def _two_pages(tmp_path):
+    """Two 100 x 80 pages of one drawing: a 60 px bar that starts on A
+    at x=70 and, with B at dx=90, ends on B at x=40."""
+    np = pytest.importorskip("numpy")
+    cv2 = pytest.importorskip("cv2")
+    a = np.full((80, 100, 3), 255, np.uint8)
+    b = np.full((80, 100, 3), 255, np.uint8)
+    a[40:43, 70:100] = 0
+    b[40:43, 0:41] = 0
+    pa, pb = str(tmp_path / "a.png"), str(tmp_path / "b.png")
+    cv2.imwrite(pa, a)
+    cv2.imwrite(pb, b)
+    return pa, pb
+
+
+def test_stitch_writes_the_image_and_a_stitch_file(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    out = str(tmp_path / "spread.png")
+    code, stdout, _ = _run(["stitch", pa, pb, "--offset", "90", "0",
+                            "-o", out])
+    assert code == cli.EXIT_OK
+    assert "(190 x 80 px)" in stdout
+    assert os.path.isfile(out)
+    with open(str(tmp_path / "spread.stitch.json"), encoding="utf-8") as fh:
+        doc = json.load(fh)
+    assert doc["page_b"] == "b.png"
+    assert doc["placement"]["dx"] == 90.0
+
+
+def test_a_seam_check_that_holds_passes(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    code, stdout, _ = _run(["stitch", pa, pb, "--offset", "90", "0",
+                            "--check", "70", "41", "40", "41", "60mm",
+                            "--mm-per-px", "1", "-o",
+                            str(tmp_path / "s.png")])
+    assert code == cli.EXIT_OK
+    assert "60.00 mm measured" in stdout and "ok" in stdout
+
+
+def test_a_seam_check_that_fails_exits_non_zero_but_still_writes(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    out = str(tmp_path / "s.png")
+    code, stdout, stderr = _run(["stitch", pa, pb, "--offset", "80", "0",
+                                 "--check", "70", "41", "40", "41", "60",
+                                 "--mm-per-px", "1", "-o", out])
+    assert code == cli.EXIT_ERROR
+    assert "OUT" in stdout and "beyond" in stderr
+    assert os.path.isfile(out)
+
+
+def test_a_seam_check_needs_a_scale(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    code, _, stderr = _run(["stitch", pa, pb, "--check", "1", "1", "1",
+                            "1", "5in", "-o", str(tmp_path / "s.png")])
+    assert code == cli.EXIT_ERROR
+    assert "--dpi or --mm-per-px" in stderr
+
+
+def test_stitch_from_a_stitch_file_reruns_and_rechecks(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    out = str(tmp_path / "s.png")
+    assert _run(["stitch", pa, pb, "--offset", "90", "0", "--check",
+                 "70", "41", "40", "41", "60", "--mm-per-px", "1",
+                 "-o", out, "-q"])[0] == cli.EXIT_OK
+    side = str(tmp_path / "s.stitch.json")
+    # the recorded check is re-measured at a corrected-wrong offset
+    code, stdout, _ = _run(["stitch", "--from", side, "--offset", "85",
+                            "0", "-o", str(tmp_path / "t.png")])
+    assert code == cli.EXIT_ERROR
+    assert "55.00 mm measured" in stdout
+    # and with nothing overridden it writes back where it came from
+    assert _run(["stitch", "--from", side, "-q"])[0] == cli.EXIT_OK
+
+
+def test_stitch_will_not_overwrite_a_source_page(tmp_path):
+    pa, pb = _two_pages(tmp_path)
+    code, _, stderr = _run(["stitch", pa, pb, "-o", pa])
+    assert code == cli.EXIT_ERROR
+    assert "overwrite" in stderr

@@ -984,3 +984,118 @@ def import_dxf(path, out_path=None, name=None, px_per_mm=10.0,
     return DxfResult(path, out_path, len(loops),
                      sum(len(c.points) for c in obj.contours),
                      size_mm, info)
+
+
+# ----- stitch -------------------------------------------------------------
+
+class StitchJobResult(object):
+    """What `stitch` wrote. `checks` holds one dict per seam check
+    (a, b, expected_mm, measured_mm, error); `failed_checks` are those
+    beyond the tolerance."""
+
+    def __init__(self, out_path, sidecar_path, size, placement, a_origin,
+                 checks, tolerance):
+        self.out_path = out_path
+        self.sidecar_path = sidecar_path
+        self.size = size
+        self.placement = placement
+        self.a_origin = a_origin
+        self.checks = checks
+        self.tolerance = tolerance
+
+    @property
+    def failed_checks(self):
+        return [c for c in self.checks
+                if abs(c["error"]) > self.tolerance]
+
+
+def stitch(path_a, path_b, out_path, placement=None, trim=None,
+           checks=None, mm_per_px=None, dpi=None, tolerance=0.005,
+           write_sidecar=True, progress=None):
+    """Join page B onto page A and write the result.
+
+    `placement` is a `stitch.Placement` (B in A's displayed frame); it
+    is given, never searched for - see core/stitch.py for why.
+
+    `checks` are seam checks: (a_point, b_point, length), one end of a
+    known length on each page in that page's file pixels, the length
+    with a unit (a bare number is mm). They need the pages' scale, as
+    `mm_per_px` or `dpi`. A check further out than `tolerance` (a
+    fraction) is reported in the result, not raised: the image is
+    still written, so the join can be looked at.
+
+    Writes the image, and beside it a `.stitch.json` sidecar naming the
+    pages and the placement so the join can be re-run or corrected.
+    """
+    import cv2
+    from . import stitch as st
+    placement = placement or st.Placement()
+    for p in (path_a, path_b):
+        if not p or not os.path.isfile(p):
+            raise JobError("file not found: %s" % (p,))
+    if not out_path:
+        raise JobError("no output file given")
+    out_abs = os.path.normcase(os.path.abspath(out_path))
+    if out_abs in (os.path.normcase(os.path.abspath(path_a)),
+                   os.path.normcase(os.path.abspath(path_b))):
+        raise JobError("the output would overwrite a source page: %s"
+                       % out_path)
+    if not out_path.lower().endswith(IMAGE_EXTS):
+        raise JobError("the output must be an image (%s): %s"
+                       % (", ".join(IMAGE_EXTS), out_path))
+    if dpi:
+        if dpi <= 0:
+            raise JobError("a DPI must be positive")
+        mm_per_px = 25.4 / float(dpi)
+    if checks and not mm_per_px:
+        raise JobError("the seam check needs the pages' scale (their DPI "
+                       "or mm per pixel); supply one")
+    if trim is not None and trim < 0:
+        raise JobError("the trim margin cannot be negative")
+
+    try:
+        a = image_io.load_image(path_a).data
+        b = image_io.load_image(path_b).data
+    except IOError as exc:
+        raise JobError(str(exc))
+    if progress:
+        progress("joining %s and %s" % (os.path.basename(path_a),
+                                        os.path.basename(path_b)))
+    result = st.stitch(a, b, placement, trim=trim)
+
+    a_size = (a.shape[1], a.shape[0])
+    b_size = (b.shape[1], b.shape[0])
+    done = []
+    for a_pt, b_pt, length in (checks or ()):
+        expected = _as_mm(length, "seam check length")
+        if not expected or expected <= 0:
+            raise JobError("a seam check length must be positive")
+        px = st.measure_across(placement, a_size, b_size, a_pt, b_pt)
+        measured = px * mm_per_px
+        done.append({"a": [float(v) for v in a_pt],
+                     "b": [float(v) for v in b_pt],
+                     "expected_mm": expected, "measured_mm": measured,
+                     "error": measured / expected - 1.0})
+
+    parent = os.path.dirname(out_path)
+    try:
+        if parent and not os.path.isdir(parent):
+            os.makedirs(parent)
+        if not cv2.imwrite(out_path, result.image):
+            raise IOError("the image encoder refused it")
+    except (IOError, OSError) as exc:
+        raise JobError("cannot write %s: %s" % (out_path, exc))
+    side = None
+    if write_sidecar:
+        side = st.sidecar_path(out_path)
+        d = st.sidecar_dict(result, placement, path_a, path_b, out_path,
+                            trim=trim, mm_per_px=mm_per_px, checks=done)
+        try:
+            st.write_sidecar(side, d)
+        except (IOError, OSError) as exc:
+            raise JobError("cannot write %s: %s" % (side, exc))
+    if progress:
+        progress("wrote %s" % os.path.basename(out_path))
+    return StitchJobResult(out_path, side, result.size, placement,
+                           result.a_origin, done, tolerance)
+

@@ -17,6 +17,7 @@ drift.
     pagewright find-parts plan.png --dpi 300 --trace
     pagewright export-recipe parts.tiproj.json --thickness 1/16in
     pagewright import-dxf former.dxf -o former.tiproj.json
+    pagewright stitch p16.png p17.png --offset 1624 147 -o spread.png
 
 Qt is never imported here. `main.py` dispatches to this module BEFORE it
 touches PySide6, so these commands run on a machine with no display.
@@ -39,7 +40,7 @@ EXIT_ERROR = 1
 # decide between CLI and GUI, so a new command only needs adding here.
 COMMANDS = ("info", "tile", "export-svg", "import-svg",
             "flatten", "ocr", "find-parts", "export-recipe",
-            "import-dxf")
+            "import-dxf", "stitch")
 
 
 def _add_scale_flags(parser):
@@ -311,6 +312,50 @@ def build_parser():
                        help="internal pixel resolution (default 10)")
     p_dxf.add_argument("-q", "--quiet", action="store_true",
                        help="only report errors")
+
+    p_st = subs.add_parser(
+        "stitch", help="join two page images side by side",
+        description="Join page B onto page A at a given placement and "
+                    "write one image, plus a .stitch.json beside it "
+                    "recording the pages and the placement. The "
+                    "placement is given, not searched for: measure a "
+                    "known length across the seam (--check) to test "
+                    "it. Where both pages are inked the darker pixel "
+                    "is kept. Scale is never adjusted.")
+    p_st.add_argument("pages", metavar="PAGE", nargs="*",
+                      help="page A then page B (omit with --from)")
+    p_st.add_argument("-o", "--out", metavar="FILE",
+                      help="the joined image (default with --from: the "
+                           "image the stitch file names)")
+    p_st.add_argument("--from", dest="from_file", metavar="FILE",
+                      help="start from a .stitch.json; other flags "
+                           "override what it records")
+    p_st.add_argument("--offset", nargs=2, type=float, metavar=("DX", "DY"),
+                      help="page B's top-left in page A's pixels, after "
+                           "any turn")
+    p_st.add_argument("--angle", type=float, metavar="DEG",
+                      help="rotate B by DEG about its centre, clockwise "
+                           "positive")
+    p_st.add_argument("--turn-a", type=int, choices=(0, 90, 180, 270),
+                      metavar="DEG", help="quarter-turn A clockwise first")
+    p_st.add_argument("--turn-b", type=int, choices=(0, 90, 180, 270),
+                      metavar="DEG", help="quarter-turn B clockwise first")
+    p_st.add_argument("--trim", type=int, metavar="PX",
+                      help="crop to the ink plus PX pixels of margin "
+                           "(default: keep both pages whole)")
+    p_st.add_argument("--check", nargs=5, action="append",
+                      metavar=("AX", "AY", "BX", "BY", "LEN"),
+                      help="a known length across the seam: one end on "
+                           "A, the other on B, in each page's own "
+                           "pixels; repeatable. Needs --dpi or "
+                           "--mm-per-px")
+    scale = p_st.add_mutually_exclusive_group()
+    scale.add_argument("--dpi", type=float, metavar="N",
+                       help="both pages were scanned at N DPI")
+    scale.add_argument("--mm-per-px", type=float, metavar="MM",
+                       help="both pages' scale, directly")
+    p_st.add_argument("-q", "--quiet", action="store_true",
+                      help="only report errors")
     return parser
 
 
@@ -576,12 +621,85 @@ def _cmd_import_dxf(args, out, err):
     return EXIT_OK
 
 
+def _cmd_stitch(args, out, err):
+    from .core import stitch as st
+    rec = {}
+    if args.from_file:
+        try:
+            rec = st.read_sidecar(args.from_file)
+        except (IOError, OSError, ValueError) as exc:
+            raise jobs.JobError("cannot read %s: %s" % (args.from_file, exc))
+    if args.pages:
+        if len(args.pages) != 2:
+            raise jobs.JobError("give two pages, A then B")
+        path_a, path_b = args.pages
+    elif rec:
+        path_a, path_b = rec["page_a"], rec["page_b"]
+    else:
+        raise jobs.JobError("give two pages, A then B, or a stitch file")
+    p = rec.get("placement") or st.Placement()
+    if args.offset:
+        p.dx, p.dy = args.offset
+    if args.angle is not None:
+        p.angle_deg = args.angle
+    if args.turn_a is not None:
+        p.turn_a = args.turn_a
+    if args.turn_b is not None:
+        p.turn_b = args.turn_b
+    out_path = args.out
+    if not out_path and rec:
+        out_path = os.path.join(os.path.dirname(
+            os.path.abspath(args.from_file)), rec["output"]["path"])
+    trim = args.trim if args.trim is not None else rec.get("trim_px")
+    mpp = args.mm_per_px
+    if mpp is None and args.dpi is None:
+        mpp = rec.get("mm_per_px")
+    if args.check:
+        checks = []
+        for ax, ay, bx, by, length in args.check:
+            try:
+                pts = [float(v) for v in (ax, ay, bx, by)]
+            except ValueError:
+                raise jobs.JobError("--check: the four points must be "
+                                    "numbers")
+            checks.append(((pts[0], pts[1]), (pts[2], pts[3]), length))
+    else:                            # re-check what the file recorded
+        checks = [(c["a"], c["b"], c["expected_mm"])
+                  for c in rec.get("checks", [])]
+    result = jobs.stitch(path_a, path_b, out_path, placement=p, trim=trim,
+                         checks=checks, mm_per_px=mpp, dpi=args.dpi,
+                         progress=_progress_to(err, args.quiet))
+    if not args.quiet:
+        w, h = result.size
+        out.write("%s + %s -> %s  (%d x %d px)\n"
+                  % (os.path.basename(path_a), os.path.basename(path_b),
+                     result.out_path, w, h))
+        out.write("  page B at (%g, %g), %g deg, turns A %d / B %d\n"
+                  % (p.dx, p.dy, p.angle_deg, p.turn_a, p.turn_b))
+        out.write("  page A's origin in the output: (%g, %g)\n"
+                  % result.a_origin)
+        for c in result.checks:
+            bad = abs(c["error"]) > result.tolerance
+            out.write("  seam check: %.2f mm measured, %.2f mm expected "
+                      "(%+.2f%%)%s\n"
+                      % (c["measured_mm"], c["expected_mm"],
+                         100.0 * c["error"], "  OUT" if bad else "  ok"))
+        if result.sidecar_path:
+            out.write("  stitch file: %s\n" % result.sidecar_path)
+    if result.failed_checks:
+        err.write("pagewright stitch: %d seam check(s) beyond %.1f%%: the "
+                  "offset, the angle or the pages' scale is wrong\n"
+                  % (len(result.failed_checks), 100.0 * result.tolerance))
+        return EXIT_ERROR
+    return EXIT_OK
+
+
 _HANDLERS = {"info": _cmd_info, "tile": _cmd_tile,
              "export-svg": _cmd_export_svg, "import-svg": _cmd_import_svg,
              "flatten": _cmd_flatten, "ocr": _cmd_ocr,
              "find-parts": _cmd_find_parts,
              "export-recipe": _cmd_export_recipe,
-             "import-dxf": _cmd_import_dxf}
+             "import-dxf": _cmd_import_dxf, "stitch": _cmd_stitch}
 
 
 def _hint(exc):
@@ -594,6 +712,8 @@ def _hint(exc):
     text = str(exc)
     if "calibrate it, or supply one" in text:
         text += " [--dpi, --mm-per-px, --width or --height]"
+    elif "seam check needs" in text:
+        text += " [--dpi or --mm-per-px]"
     return text
 
 

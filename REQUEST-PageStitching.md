@@ -3,7 +3,11 @@
 **Raised:** 2026-11-26, by Robert, while tracing the Pogo plan in
 ModelCraft.
 
-**Status:** not started. This is a brief, not a design.
+**Status:** first slice built 2026-11-26 — see PLAN §16.49.
+Hand placement (option 1) with a seam check, output as image +
+`.stitch.json`; `core/stitch.py`, `pagewright stitch`, Tools → Stitch
+Pages. Reproduces the hand-made Pogo spread pixel for pixel. The
+brief below is kept as written.
 
 ## What is being asked for
 

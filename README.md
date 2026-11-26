@@ -73,7 +73,7 @@ $env:PYTHONPATH="src"; python -m pagewright.main
 
 ## Command line (headless)
 
-Nine subcommands run without a display — they never import Qt, so they work
+Ten subcommands run without a display — they never import Qt, so they work
 over SSH, in a container, or in a shell loop. The GUI calls the same job
 layer for the same work, so there is one implementation behind both:
 
@@ -121,7 +121,26 @@ pagewright flatten scans/*.jpg --out ./flat
 pagewright ocr page.png --out page.txt
 pagewright export-recipe parts.tiproj.json --thickness 1/16in
 pagewright import-dxf former.dxf -o former.tiproj.json
+pagewright stitch p16.png p17.png --offset 1624 147 --trim 12 -o spread.png
 ```
+
+`stitch` joins two scans of one drawing side by side, with page B
+placed in page A's pixels (`--turn-a`/`--turn-b` for a quarter turn,
+`--angle` for a small rotation). The placement is yours to give — an
+automatic match picks the best-looking seam, which on a real plan was a
+whole bay out — so check it with a known length that crosses the seam:
+
+```bash
+pagewright stitch p16.png p17.png --offset 1624 147 --mm-per-px 0.1266 \
+    --check 1275.5 2242 654.5 2095 5in -o spread.png
+```
+
+One end on each page, in that page's own pixels. More than 0.5% out
+exits 1. A `spread.stitch.json` written beside the image records the
+pages and the placement; `pagewright stitch --from spread.stitch.json`
+re-runs it. In the GUI it is **Tools → Stitch Pages…**: drag page B
+over page A (arrow keys nudge, `[` `]` rotate), and the seam
+measurement updates as you go.
 
 `export-recipe` writes the traced parts as a MyArchive `recipe.json`:
 one sketch and one extrude per part, placed by the plane, station and
@@ -275,7 +294,7 @@ Most tests cover the GUI-free core (calibration, geometry, SVG import and
 export, tiling, undo, project I/O, the CLI and jobs, and the parts tools);
 `test_ui_*` drive the Qt UI and need PySide6. Segmentation/contour tests use
 NumPy + OpenCV and are skipped if those aren't installed. As of 2026-11-26:
-701 passed, 1 skipped.
+732 passed, 1 skipped.
 
 ```bash
 python -m pytest tests/
@@ -292,7 +311,7 @@ python -m pytest tests/
 - **Phase 6 — Polish (in progress):** ✅ save/load project as JSON (File → Save/Open Project; calibration, margin, units, traced polygons, source-image reference); ✅ undo/redo command stack for vertex edits (move/add/delete) and object delete; ✅ marquee (rubber-band) multi-vertex selection in Edit Vertices mode with **Delete** to group-delete (one undo step); if a delete would leave a contour with fewer than 3 vertices the whole contour is removed (and restored on undo), since a sub-3 contour is not a polygon. Ctrl+Z/Y dispatch by context — while seeding they undo/redo seed strokes, otherwise the edit command stack. Still to come: folding object-create/trace into the undo history. (Bézier smoothing deprioritized in favor of the Inkscape export flavor.)
 - **Phase 7 — Port readiness:** ✅ audited the core for Python-only idioms (none — only library bindings need C++ equivalents) and sketched the C++/Qt structure in [`PORTING.md`](PORTING.md).
 - **Studio hub:** ✅ Trace / Flatten / Scale / OCR tools, multi-page jobs, PDF import, and the headless CLI above.
-- **Plan-to-parts (in progress):** ✅ find-parts, recipe export, DXF import, rotate/flip/duplicate, notch squaring and snapping, nesting onto stock sheets with cut-ready SVG, edge-pair tracing for long parts, geometric hints, cross-checks against a second drawing, circle recognition. Placement lives in `planecraft/`, which is local only (untracked since 2026-11-26). Next request: page stitching ([`REQUEST-PageStitching.md`](REQUEST-PageStitching.md)). Details in PLAN §16.
+- **Plan-to-parts (in progress):** ✅ find-parts, recipe export, DXF import, rotate/flip/duplicate, notch squaring and snapping, nesting onto stock sheets with cut-ready SVG, edge-pair tracing for long parts, geometric hints, cross-checks against a second drawing, circle recognition. Placement lives in `planecraft/`, which is local only (untracked since 2026-11-26). Page stitching (Tools → Stitch Pages, `pagewright stitch`; PLAN §16.49). Details in PLAN §16.
 
 Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** import photo, **Ctrl+E** export SVG, **Ctrl+Z/Ctrl+Y** undo/redo (seed strokes while seeding; vertex/object edits otherwise).
 
@@ -306,12 +325,12 @@ src/pagewright/
   core/            image_io, calibration, segmentation, contours,
                    geometry, svg_export, svg_import, tiling,
                    project_io, undo, dewarp, ocr, pdf_import,
-                   dxf_import, jobs, batch, find_parts,
+                   dxf_import, jobs, batch, find_parts, stitch,
                    recipe_export, naming, transform, notches,
                    nesting, edges, hints, crosscheck, arcs
   ui/              main_window, canvas, the stages (dewarp, scale,
                    ocr), panels (objects, pages, tiling),
-                   controllers, dialogs
+                   controllers, dialogs, stitch_dialog
 tests/             unit tests for the core, plus UI smoke tests
 samples/           sample photos
 projects/          saved .tiproj.json projects

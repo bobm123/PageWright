@@ -126,6 +126,13 @@ def build_actions(w):
         "right-click to finish.")
     w.act_measure.triggered.connect(w.start_measure)
 
+    w.act_stitch = QAction("&Stitch Pages…", w)
+    w.act_stitch.setToolTip(
+        "Join two page images side by side - a drawing split across "
+        "two scans - and check the join against a known length that "
+        "crosses the seam.")
+    w.act_stitch.triggered.connect(w.stitch_pages)
+
     w.act_find_parts = QAction("&Find Parts", w)
     w.act_find_parts.setToolTip(
         "Trace every closed outline on the sheet at once, with no "
@@ -307,6 +314,7 @@ def build_menus(w):
     m_tools.addAction(w.act_tool_ocr)
     m_tools.addSeparator()
     m_tools.addAction(w.act_dewarp)
+    m_tools.addAction(w.act_stitch)
     m_tools.addAction(w.act_calibrate)
     m_tools.addAction(w.act_measure)
     m_tools.addSeparator()

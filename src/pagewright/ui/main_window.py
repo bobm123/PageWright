@@ -1748,6 +1748,25 @@ class MainWindow(QMainWindow):
             seen.add(key)
         return dupes
 
+    def stitch_pages(self):
+        """Tools > Stitch Pages: join two scans of one drawing.
+
+        The current image, if there is one, is offered as page A, and
+        the project's scale (if calibrated) as the pages' scale for the
+        seam check. Saving opens the joined image on request."""
+        import os
+        from ..core.jobs import IMAGE_EXTS
+        from .stitch_dialog import StitchDialog
+        path_a = self.project.source_image_path
+        if not (path_a and os.path.isfile(path_a)
+                and path_a.lower().endswith(IMAGE_EXTS)):
+            path_a = None
+        dlg = StitchDialog(self, path_a=path_a,
+                           mm_per_px=self.project.calibration.mm_per_pixel)
+        dlg.exec()
+        if dlg.opened_path:
+            self.open_path(dlg.opened_path)
+
     def edit_naming_scheme(self):
         """Tools > Part Numbering: what this plan's numbers mean.
 
