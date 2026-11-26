@@ -7,8 +7,13 @@ A desktop GUI tool for tracing the outlines of objects in photographs and export
 > **Python package:** `pagewright`
 > **Origin:** began as `TraceImage`; copied and rebranded into this repo
 > on 2026-07-22 to serve as the unified studio shell (see section 13).
-> **Status:** Phases 0-7 complete (trace/calibrate/SVG/tiling/projects/undo,
-> carried over from TraceImage). Studio work starts at P3 in section 13.
+> **Status (2026-11-26):** Phases 0-7 complete (carried over from
+> TraceImage); studio hub (Trace / Flatten / Scale / OCR, multi-page
+> jobs, PDF import) and the headless CLI (section 16.1, nine
+> subcommands) are built. Current work is the plan-to-parts pipeline
+> (sections 16.6 onward): notches, nesting, edge tracing, hints,
+> cross-checks, arcs, and PlaneCraft placement. 701 tests pass. Open
+> request: page stitching (`REQUEST-PageStitching.md`, not started).
 
 ---
 

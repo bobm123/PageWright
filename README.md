@@ -271,9 +271,11 @@ sites, re-downloading the runtime on next visit.
 
 ## Tests
 
-Pure-Python tests cover the GUI-free core: calibration, geometry, SVG export,
-tiling, the undo stack, and project save/load. Segmentation/contour tests use
-NumPy + OpenCV and are skipped if those aren't installed.
+Most tests cover the GUI-free core (calibration, geometry, SVG import and
+export, tiling, undo, project I/O, the CLI and jobs, and the parts tools);
+`test_ui_*` drive the Qt UI and need PySide6. Segmentation/contour tests use
+NumPy + OpenCV and are skipped if those aren't installed. As of 2026-11-26:
+701 passed, 1 skipped.
 
 ```bash
 python -m pytest tests/
@@ -289,6 +291,8 @@ python -m pytest tests/
 - **Phase 5 — Tiled printing:** ✅ split the drawing across Letter/A4/Legal/A3 pages (portrait/landscape) at true 1:1, with per-tile live-area rectangle, R#-C# label, and diamond registration marks that coincide across overlapping sheets; photo on/off.
 - **Phase 6 — Polish (in progress):** ✅ save/load project as JSON (File → Save/Open Project; calibration, margin, units, traced polygons, source-image reference); ✅ undo/redo command stack for vertex edits (move/add/delete) and object delete; ✅ marquee (rubber-band) multi-vertex selection in Edit Vertices mode with **Delete** to group-delete (one undo step); if a delete would leave a contour with fewer than 3 vertices the whole contour is removed (and restored on undo), since a sub-3 contour is not a polygon. Ctrl+Z/Y dispatch by context — while seeding they undo/redo seed strokes, otherwise the edit command stack. Still to come: folding object-create/trace into the undo history. (Bézier smoothing deprioritized in favor of the Inkscape export flavor.)
 - **Phase 7 — Port readiness:** ✅ audited the core for Python-only idioms (none — only library bindings need C++ equivalents) and sketched the C++/Qt structure in [`PORTING.md`](PORTING.md).
+- **Studio hub:** ✅ Trace / Flatten / Scale / OCR tools, multi-page jobs, PDF import, and the headless CLI above.
+- **Plan-to-parts (in progress):** ✅ find-parts, recipe export, DXF import, rotate/flip/duplicate, notch squaring and snapping, nesting onto stock sheets with cut-ready SVG, edge-pair tracing for long parts, geometric hints, cross-checks against a second drawing, circle recognition. Placement lives in [`planecraft/`](planecraft/README.md). Next request: page stitching ([`REQUEST-PageStitching.md`](REQUEST-PageStitching.md)). Details in PLAN §16.
 
 Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** import photo, **Ctrl+E** export SVG, **Ctrl+Z/Ctrl+Y** undo/redo (seed strokes while seeding; vertex/object edits otherwise).
 
@@ -298,10 +302,19 @@ Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** imp
 src/pagewright/
   main.py          entry point
   model.py         Project / TracedObject / Contour
+  cli.py           headless subcommands (no Qt import)
   core/            image_io, calibration, segmentation, contours,
-                   geometry, svg_export, tiling, project_io, undo
-  ui/              main_window, canvas, objects, editable, dialogs
-tests/             unit tests for the GUI-free core
+                   geometry, svg_export, svg_import, tiling,
+                   project_io, undo, dewarp, ocr, pdf_import,
+                   dxf_import, jobs, batch, find_parts,
+                   recipe_export, naming, transform, notches,
+                   nesting, edges, hints, crosscheck, arcs
+  ui/              main_window, canvas, the stages (dewarp, scale,
+                   ocr), panels (objects, pages, tiling),
+                   controllers, dialogs
+tests/             unit tests for the core, plus UI smoke tests
 samples/           sample photos
+projects/          saved .tiproj.json projects
+planecraft/        PlaneCraft: part placement (Rust core + Python)
 output/            generated SVGs (git-ignored)
 ```

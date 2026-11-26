@@ -1,5 +1,10 @@
 # PageWright - Implementation Handoff
 
+> **Superseded (2026-11-26).** The priorities below are done or have been
+> replaced. For current state read [`HANDOFF-PlaneCraft.md`](HANDOFF-PlaneCraft.md)
+> and the status line at the top of [`PLAN.md`](PLAN.md). The working
+> practices further down still apply.
+
 Written 2026-08-06 for the next working session (any model). Read this
 plus PLAN.md sections 13-15 before coding. PLAN.md holds the designs;
 this file holds state, priorities, and the working practices that kept

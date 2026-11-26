@@ -148,3 +148,27 @@ Recorded in PLAN so the next decision is made knowing where it leads:
   re-nest for grain and stock. Not designed, because there is no
   modified model yet — but nothing is keyed on list order, so
   re-nesting cannot break a reference.
+
+## Since this handoff (2026-11-14 to 2026-11-26)
+
+Added 2026-11-26 from the git log; PLAN §16.30–16.48 has the reasoning.
+
+* **F-86D placement finished by hand-edited SVG round trips:** wing
+  (29 parts, §16.32–16.34), formers (five orientations corrected,
+  §16.35, convention checked §16.39) and keels (§16.36–16.43). Three
+  sign errors that mirrored XZ parts are fixed (§16.38, §16.41).
+* **New PageWright core modules:** `transform` (rotate/flip/duplicate),
+  `notches` (square and snap, 1/32 in step; keels exempt), `nesting`
+  (stock sheets, mirrored twins, cut-ready SVG), `edges` (two-edge
+  trace of long parts, scarf notches), `hints`, `crosscheck` (same
+  part measured twice, vertex check opt-in), `arcs` (circle
+  recognition).
+* **Vertex-edit menu** with V / H / S / Q, and a right-click that no
+  longer clears the selection.
+* **Pogo plan (ModelCraft sample)** is now the second test case: a
+  200 DPI scan, with pages 16–17 stitched by hand. §16.47 records
+  that a plan-tracing project is a KiCad project; §16.48 records that
+  the printwood is an output, not an input.
+* **Open:** page stitching (`REQUEST-PageStitching.md`, brief only).
+* Suite: 701 passed, 1 skipped. `main` is 12 commits ahead of
+  `origin` (Robert pushes manually).
