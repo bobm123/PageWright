@@ -466,6 +466,14 @@ per-page post-processing (some OCR, some tracing).
   tiling.tile_crop_rects, Flatten Checked, Add as Pages; outline
   persistence + quad-seed batch + thumbnails deferred).
 - **M4** Searchable-PDF output (P5 complete).
+- **M5** **Stitch two pages side by side**, rotating either to bring
+  them into line. Requested 2026-11-26 from ModelCraft, where the
+  Pogo fuselage plan spans magazine pages 16-17 and the two scans
+  had to be joined BY HAND before tracing could start. A part traced
+  across the seam is one part, and a bad join puts a kink in a
+  fuselage side that nothing downstream can distinguish from one the
+  draughtsman drew. Brief, with what the hand-stitch reveals about
+  the alignment problem: `REQUEST-PageStitching.md`.
 
 ---
 
