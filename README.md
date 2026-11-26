@@ -292,7 +292,7 @@ python -m pytest tests/
 - **Phase 6 — Polish (in progress):** ✅ save/load project as JSON (File → Save/Open Project; calibration, margin, units, traced polygons, source-image reference); ✅ undo/redo command stack for vertex edits (move/add/delete) and object delete; ✅ marquee (rubber-band) multi-vertex selection in Edit Vertices mode with **Delete** to group-delete (one undo step); if a delete would leave a contour with fewer than 3 vertices the whole contour is removed (and restored on undo), since a sub-3 contour is not a polygon. Ctrl+Z/Y dispatch by context — while seeding they undo/redo seed strokes, otherwise the edit command stack. Still to come: folding object-create/trace into the undo history. (Bézier smoothing deprioritized in favor of the Inkscape export flavor.)
 - **Phase 7 — Port readiness:** ✅ audited the core for Python-only idioms (none — only library bindings need C++ equivalents) and sketched the C++/Qt structure in [`PORTING.md`](PORTING.md).
 - **Studio hub:** ✅ Trace / Flatten / Scale / OCR tools, multi-page jobs, PDF import, and the headless CLI above.
-- **Plan-to-parts (in progress):** ✅ find-parts, recipe export, DXF import, rotate/flip/duplicate, notch squaring and snapping, nesting onto stock sheets with cut-ready SVG, edge-pair tracing for long parts, geometric hints, cross-checks against a second drawing, circle recognition. Placement lives in [`planecraft/`](planecraft/README.md). Next request: page stitching ([`REQUEST-PageStitching.md`](REQUEST-PageStitching.md)). Details in PLAN §16.
+- **Plan-to-parts (in progress):** ✅ find-parts, recipe export, DXF import, rotate/flip/duplicate, notch squaring and snapping, nesting onto stock sheets with cut-ready SVG, edge-pair tracing for long parts, geometric hints, cross-checks against a second drawing, circle recognition. Placement lives in `planecraft/`, which is local only (untracked since 2026-11-26). Next request: page stitching ([`REQUEST-PageStitching.md`](REQUEST-PageStitching.md)). Details in PLAN §16.
 
 Keyboard: **Ctrl+O** open project, **Ctrl+S** save project, **Ctrl+Shift+O** import photo, **Ctrl+E** export SVG, **Ctrl+Z/Ctrl+Y** undo/redo (seed strokes while seeding; vertex/object edits otherwise).
 
@@ -315,6 +315,6 @@ src/pagewright/
 tests/             unit tests for the core, plus UI smoke tests
 samples/           sample photos
 projects/          saved .tiproj.json projects
-planecraft/        PlaneCraft: part placement (Rust core + Python)
+planecraft/        PlaneCraft: part placement (local only, git-ignored)
 output/            generated SVGs (git-ignored)
 ```

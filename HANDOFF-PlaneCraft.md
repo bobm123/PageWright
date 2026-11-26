@@ -172,3 +172,21 @@ Added 2026-11-26 from the git log; PLAN §16.30–16.48 has the reasoning.
 * **Open:** page stitching (`REQUEST-PageStitching.md`, brief only).
 * Suite: 701 passed, 1 skipped. `main` is 12 commits ahead of
   `origin` (Robert pushes manually).
+
+## `planecraft/` is no longer tracked (2026-11-26)
+
+Robert's call: no more PlaneCraft work goes to GitHub until ModelCraft
+has a remote of its own. The folder stays on disk and is git-ignored.
+Everything up to `82178d8` is still in git history (and already on
+`origin` and `nas`). New edits under `planecraft/` are not version
+controlled, so back them up by hand.
+
+ModelCraft has ported PageWright's geometry but **not** PlaneCraft's
+placement: frames, stations, the SolidCraft generator, the wing/keel
+SVG round trips and the F-86D airframe data exist only here.
+
+Careful: checking out a commit from before the untrack and then
+coming back to `main` makes git **delete** the working copy of
+`planecraft/`. Restore it with `git checkout 82178d8 -- planecraft`
+followed by `git rm -r --cached planecraft`, or keep a copy outside the
+repo.

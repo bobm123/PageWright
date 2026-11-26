@@ -28,3 +28,8 @@ Thumbs.db
 
 # Rust build output (PlaneCraft core)
 target/
+
+# PlaneCraft: kept on disk but no longer tracked (2026-11-26), so no
+# further PlaneCraft work goes to the remotes until ModelCraft has one.
+# Its history up to 82178d8 is still in git.
+planecraft/
